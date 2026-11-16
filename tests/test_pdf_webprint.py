@@ -22,13 +22,14 @@ BODY = [
 ]
 
 
-def print_page(n: int, total: int, *, counter: str | None = None, stamp: bool = True, header_title: bool = True, menu=MENU, long_menu: bool = False) -> PdfPage:
+def print_page(n: int, total: int, *, counter: str | None = None, stamp: bool = True, header_title: bool = True, menu=MENU, long_menu: bool = False, url: bool = True, time: bool = True) -> PdfPage:
     lines = []
     if header_title:
         lines.append(TextLine(TITLE, 430, 822, 8))
     if stamp:
-        lines.append(TextLine("10:23 ,16.11.2026", 30, 822, 8, rtl=False))
-        lines.append(TextLine("https://www.example.gov.il/he/pages/dec1", 30, 14, 8, rtl=False))
+        lines.append(TextLine("10:23 ,16.11.2026" if time else "16.11.2026", 30, 822, 8, rtl=False))
+        if url:
+            lines.append(TextLine("https://www.example.gov.il/he/pages/dec1", 30, 14, 8, rtl=False))
     lines.append(TextLine(counter if counter is not None else f"{n}/{total}", 560, 14, 8, rtl=False))
     if n == 1:
         y = 780
@@ -97,6 +98,21 @@ class WebPrintTest(unittest.TestCase):
                 doc = extract(pages)
                 self.assertNotIn("browser_print", doc.flags)
                 self.assertEqual(nav(doc), [])
+
+    def test_a_date_and_time_without_a_url_is_evidence(self) -> None:
+        doc = extract([print_page(n, 3, url=False) for n in range(1, 4)])
+        self.assertIn("browser_print", doc.flags)
+        self.assertTrue(nav(doc))
+
+    def test_a_word_letterhead_with_a_counter_and_a_date_only_stays_in_the_body(self) -> None:
+        letterhead = [[("משרד הרווחה והביטחון החברתי", 545)], [("רחוב הדוגמה 10 ירושלים", 545)], [("לכבוד", 545)], [("המציעים במכרז", 545)]]
+        pages = [print_page(n, 3, url=False, time=False, header_title=False, menu=letterhead) for n in range(1, 4)]
+        doc = extract(pages)
+        self.assertNotIn("browser_print", doc.flags)
+        self.assertEqual(nav(doc), [])
+        body = "\n".join(b.text for b in doc.blocks if b.role == "body" and b.page == 0)
+        for (text, _), in letterhead:
+            self.assertIn(text, body)
 
     def test_a_long_line_above_the_title_keeps_the_page_as_it_is(self) -> None:
         doc = extract([print_page(n, 3, long_menu=True) for n in range(1, 4)])

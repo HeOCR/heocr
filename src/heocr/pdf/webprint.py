@@ -5,7 +5,9 @@ the ``header`` and ``footer`` roles:
 
 - a **page counter** "n/m" in the furniture, whose n is the page's own number and whose m is
   the document's page count, on at least two pages;
-- and a **URL** (``http://`` or ``https://``) or a **date** in the furniture.
+- and a **URL** (``http://`` or ``https://``) in the furniture, or a **date with a time** in one
+  furniture line, as browsers print them ("16/11/2026, 18:41"). A date alone is not enough:
+  Word documents, tenders among them, print "1/12" in the footer and a date in the header.
 
 On such a document, the page's content starts with its title, the first line on the first page
 that is either:
@@ -53,14 +55,15 @@ def _furniture_lines(doc: Document):
 
 
 def browser_print(doc: Document) -> bool:
-    """A running page counter n/m on at least two pages, with a URL or a date in the furniture."""
+    """A running page counter n/m on at least two pages, with a URL, or a date and a time, in the furniture."""
     total = doc.page_count or len(doc.pages)
     counted, stamped = set(), False
     for _, page, text in _furniture_lines(doc):
         match = _COUNTER.fullmatch(text)
         if match and int(match.group(1)) == page + 1 and int(match.group(2)) == total:
             counted.add(page)
-        elif _URL.search(text) or _DATE.search(text):
+        elif _URL.search(text) or (_DATE.search(text) and _TIME.search(text)):
+            # A date alone is not enough: Word documents print "n/m" with a date in the header.
             stamped = True
     return len(counted) >= MIN_COUNTER_PAGES and stamped
 
