@@ -35,9 +35,23 @@ class PageClassTest(unittest.TestCase):
         self.assertEqual(record.signals["hebrew_share"], 1.0)
         self.assertEqual(doc.unread, [])
 
-    def test_t2_visual_order_stream(self) -> None:
-        doc, record = self.assertClass(PdfPage(lines=lines_block(HEBREW), stream_order="visual"), "T2", "visual_order_layer")
+    def test_t2_visual_order_stream_is_read(self) -> None:
+        doc, record = self.assertClass(PdfPage(lines=lines_block(HEBREW), stream_order="visual"), "T2", "text_layer_visual_order")
         self.assertGreaterEqual(record.signals["stream_final_start_rate"], 0.15)
+        self.assertEqual(record.signals["final_start_rate"], 0.0)
+        self.assertEqual(record.route, "text_layer")
+        self.assertEqual(record.coverage["status"], "read")
+        self.assertEqual([l.text for b in doc.blocks for l in b.lines], HEBREW)
+        self.assertEqual(doc.unread, [])
+
+    def test_t2_without_spaces_is_read(self) -> None:
+        doc, _ = self.assertClass(PdfPage(lines=lines_block(HEBREW), stream_order="visual", real_spaces=False), "T2")
+        self.assertEqual([l.text for b in doc.blocks for l in b.lines], HEBREW)
+
+    def test_words_drawn_reversed_are_t2_and_not_read(self) -> None:
+        reversed_lines = [" ".join(word[::-1] for word in line.split()) for line in HEBREW]
+        doc, record = self.assertClass(PdfPage(lines=lines_block(reversed_lines)), "T2", "reversed_after_line_building")
+        self.assertGreaterEqual(record.signals["final_start_rate"], 0.15)
         self.assertEqual(doc.blocks, [])
         self.assertEqual(doc.unread[0].reason, "class_T2_no_route")
         self.assertEqual(record.coverage["status"], "unread")

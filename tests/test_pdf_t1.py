@@ -43,7 +43,7 @@ class T1ReadingTest(unittest.TestCase):
                 self.assertTrue(doc.pages[0].coverage["selection_safe"])
 
     def test_geometry_reads_a_visual_order_layer_exactly(self) -> None:
-        # Such pages are T2 and unread in D1; the line building that D2 will use already reads them.
+        # Such pages are T2; since D2a they are read through this same line building.
         import pypdfium2 as pdfium
 
         from heocr.pdf.lines import build_lines

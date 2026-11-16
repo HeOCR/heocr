@@ -230,7 +230,7 @@ def _read_page(doc: Document, index: int, page) -> None:
             Page(index, width, height, "empty", "none", signals, {"chars_total": 0, "chars_read": 0, "status": "nothing_to_read"}, flags)
         )
         return
-    if page_class not in READ_CLASSES:
+    if page_class not in READ_CLASSES or "reversed_after_line_building" in flags:
         doc.pages.append(
             Page(
                 index,
@@ -275,11 +275,12 @@ def _read_page(doc: Document, index: int, page) -> None:
     )
 
 
-# Classes read through the text layer in D1. T6 also reports its image regions as unread.
-READ_CLASSES = ("T1", "T6")
+# Classes read through the text layer. T2 (a visual-order stream) is read by the same geometric
+# line building, since D2a. T6 also reports its image regions as unread.
+READ_CLASSES = ("T1", "T2", "T6")
 
 _NO_ROUTE = {
-    "T2": "text layer in visual order; reordering route arrives in D2",
+    "T2": "words drawn reversed on the page itself; geometry cannot restore them (OCR route, D2e)",
     "T3": "broken font mapping; repairs arrive in D2",
     "T4": "foreign OCR text layer; OCR route arrives in D2",
     "T5": "image-only page; OCR route arrives in D2",

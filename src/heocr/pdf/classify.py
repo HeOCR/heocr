@@ -203,8 +203,13 @@ def classify(signals: dict) -> tuple[str, list[str]]:
     stream_reversed = (
         signals["stream_hebrew_words"] >= MIN_HEBREW_WORDS and signals["stream_final_start_rate"] >= FINAL_START_RATE
     )
-    if reversed_words or stream_reversed:
-        return "T2", flags + ["visual_order_layer"]
+    if reversed_words:
+        # Words read backwards even after our line building: the page itself draws them reversed.
+        # Geometry cannot fix that, so the page is classified T2 but not read (D2a).
+        return "T2", flags + ["text_layer_visual_order", "reversed_after_line_building"]
+    if stream_reversed:
+        # The content stream is in visual order; the geometric line building reads it in logical order.
+        return "T2", flags + ["text_layer_visual_order"]
     if not ocr_layer and coverage >= FIGURE_IMAGE:
         return "T6", flags + ["images_may_hold_text"]
     return "T1", flags
