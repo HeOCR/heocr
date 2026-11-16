@@ -10,7 +10,7 @@ With repairs off (``extract(..., repairs=False)``, ``heocr --no-repairs``), no r
 output is the extracted text, byte for byte.
 
 Rules are added here, with a reason, an example and the formats they apply to, and nowhere
-else. The heocr-py plan ``planning/milestones/d2-routes.md`` lists the planned ones.
+else. The plan ``planning/milestones/d2-routes.md`` lists the planned ones.
 """
 
 from __future__ import annotations

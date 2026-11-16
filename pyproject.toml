@@ -29,7 +29,7 @@ dependencies = [
 heocr = "heocr.cli:main"
 
 [project.urls]
-Source = "https://github.com/HeOCR/heocr-py"
+Source = "https://github.com/HeOCR/heocr"
 
 [tool.setuptools.packages.find]
 where = ["src"]

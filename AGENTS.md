@@ -18,7 +18,7 @@
 
 ## Pull requests
 - Open non-draft PRs with tests and an explanation of what changed, why, the impact, and the validation performed.
-- Agent-authored PR bodies and comments begin with `Agent: <role>[<tool>#<host>] | Thread: <thread> @ heocr-py`.
+- Agent-authored PR bodies and comments begin with `Agent: <role>[<tool>#<host>] | Thread: <thread> @ heocr`.
 - Planned work uses the notation in `planning/README.md`. The PR title is `<notation>: <sentence-case summary>`, and the body has a top-level `## Planning notation` section naming the notation, its milestone and the plan document. If no notation exists yet, define it in `planning/` first.
 - Label every PR (`kind:*`, `area:*`, `roadmap:*`) and assign it to its GitHub milestone.
 - Do not merge your own PR. Every PR waits for green CI and review by the lead or the maintainer (heocr-engine decision 0001). Merges are squash merges.
