@@ -311,6 +311,14 @@ class ImageTest(unittest.TestCase):
         broken = read('<img src="data:image/png;base64,@@@">')
         self.assertEqual([u.reason for u in broken.unread], ["image_not_read"])
 
+    def test_a_data_uri_above_the_limit_is_too_large(self) -> None:
+        src = "data:image/png;base64," + base64.b64encode(self.png()).decode()
+        with mock.patch.object(htmlread, "MAX_DATA_URI_BYTES", 100):
+            doc = read(f'<img src="{src}">')
+        self.assertEqual([u.reason for u in doc.unread], ["image_too_large"])
+        self.assertIn("the limit is 100", doc.unread[0].detail)
+        self.assertEqual(doc.blocks[0].flags, ["image_too_large"])
+
 
 class LimitsTest(unittest.TestCase):
     def test_deep_nesting_is_flattened_not_fatal(self) -> None:
@@ -318,6 +326,32 @@ class LimitsTest(unittest.TestCase):
             doc = read("<div>" * 60 + "<p>עמוק</p>" + "</div>" * 60)
         self.assertEqual(texts(doc), ["עמוק"])
         self.assertIn("html_nesting_flattened", doc.flags)
+
+    def test_nesting_far_beyond_the_cap_keeps_every_text_and_never_crashes(self) -> None:
+        cases = {
+            "divs": "<div>" * 5000 + "<p>טקסט עמוק</p>" + "</div>" * 5000,
+            "closed tables": "<table><tr><td>" * 5000 + "טקסט עמוק" + "</td></tr></table>" * 5000,
+            "open tables": "<table><tr><td>" * 300 + "טקסט עמוק",
+            "mixed": "<div><table><tr><td><ul><li><span>" * 1000 + "טקסט עמוק",
+        }
+        for name, body in cases.items():
+            with self.subTest(name):
+                doc = read(body + "<p>אחרי</p>")
+                self.assertIn("טקסט עמוק", doc.text)
+                self.assertIn("אחרי", doc.text)
+                self.assertIn("html_nesting_flattened", doc.flags)
+        for depth in (htmlread.MAX_DEPTH - 10, htmlread.MAX_DEPTH + 10, 3 * htmlread.MAX_DEPTH):
+            with self.subTest(depth=depth):
+                doc = read("<table><tr><td>" * depth + "תא פנימי" + "</td></tr></table>" * depth + "<p>אחרי</p>")
+                self.assertEqual(doc.text.count("תא פנימי"), 1)
+                self.assertTrue(doc.text.rstrip().endswith("אחרי"))
+
+    def test_text_outside_table_cells_is_read_before_the_table(self) -> None:
+        doc = read("<table><td>א</td><td>ב</td>טקסט חופשי<tr><td>ג</td><td>ה</td><table><tr><td>ד</td></tr></table></tr></table>")
+        self.assertEqual([b.text for b in doc.blocks if b.kind != "table"], ["טקסט חופשי", "ד"])
+        self.assertTrue(all("outside_table_cells" in b.flags for b in doc.blocks if b.kind != "table"))
+        table = next(b for b in doc.blocks if b.kind == "table")
+        self.assertEqual([[c.text for c in row] for row in table.cells], [["א", "ב"], ["ג", "ה"]])  # stray cells make a row
 
     def test_too_many_elements_is_truncated_and_says_so(self) -> None:
         with mock.patch.object(htmlread, "MAX_ELEMENTS", 50):

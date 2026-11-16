@@ -47,7 +47,9 @@ from heocr.docx.numformat import hebrew_numeral, latin_letter, roman
 TOOL = "heocr.html"
 MAX_HTML_CHARS = 64 * 1024**2  # decoded characters; real legislation pages are far smaller
 MAX_ELEMENTS = 2_000_000
-MAX_DEPTH = 512
+# Nesting kept as structure. Deeper elements are flattened into the deepest one kept, with all
+# their text: the walk is recursive, and must stay well inside Python's recursion limit.
+MAX_DEPTH = 100
 MAX_SPAN = 1000
 MAX_DATA_URI_BYTES = 32 * 1024**2
 SCRIPT_MIN_LETTERS = 100  # fewer letters than this in the body, with scripts: the page is drawn by script
@@ -162,6 +164,7 @@ class _Builder(HTMLParser):
         self.stack = [self.root]
         self.count = 0
         self.deep = False
+        self.excess = 0  # start tags beyond MAX_DEPTH still open: their end tags close nothing
 
     def handle_starttag(self, tag, attrs) -> None:
         self._start(tag, attrs, tag in VOID)
@@ -174,14 +177,20 @@ class _Builder(HTMLParser):
         self.count += 1
         if self.count > MAX_ELEMENTS:
             raise _Truncated
+        if len(self.stack) >= MAX_DEPTH:
+            # Too deep: the element is not kept, and its content stays in the deepest element kept
+            # (void ones, such as <br> and <img>, are kept there). Nothing is closed implicitly.
+            self.deep = True
+            if void:
+                self.stack[-1].children.append(_El(tag, {k.lower(): (v if v is not None else "") for k, v in attrs}, self.stack[-1]))
+            else:
+                self.excess += 1
+            return
         self._implicit_close(tag)
         parent = self.stack[-1]
         element = _El(tag, {k.lower(): (v if v is not None else "") for k, v in attrs}, parent)
         parent.children.append(element)
         if not void:
-            if len(self.stack) >= MAX_DEPTH:
-                self.deep = True  # deeper elements keep their content in their parent
-                return
             self.stack.append(element)
 
     def _close_to(self, names, stops) -> None:
@@ -214,6 +223,9 @@ class _Builder(HTMLParser):
     def handle_endtag(self, tag) -> None:
         if tag == "br":
             self._start("br", [], True)
+            return
+        if self.excess:
+            self.excess -= 1  # the end of an element that was flattened
             return
         for i in range(len(self.stack) - 1, 0, -1):
             current = self.stack[i].tag
@@ -522,10 +534,15 @@ class _Walker:
         if not src.lower().startswith("data:"):
             self.r.external_images += 1
             return
-        data = _data_uri(src)
         self.flush()
+        size = _data_uri_size(src)
+        if size > MAX_DATA_URI_BYTES:
+            self.r.doc.unread.append(Unread(scope="block", reason="image_too_large", detail=f"a data: URI image of about {size} bytes; the limit is {MAX_DATA_URI_BYTES}"))
+            self.blocks.append(Block(kind="figure", role=ctx.role, source="html", tool=TOOL, flags=["image_too_large"]))
+            return
+        data = _data_uri(src)
         if data is None:
-            self.r.doc.unread.append(Unread(scope="block", reason="image_not_read", detail="a data: URI that does not decode, or is above the size limit"))
+            self.r.doc.unread.append(Unread(scope="block", reason="image_not_read", detail="a data: URI that does not decode"))
             self.blocks.append(Block(kind="figure", role=ctx.role, source="html", tool=TOOL, flags=["image_not_read"]))
             return
         from heocr.docx.reader import image_blocks
@@ -567,10 +584,16 @@ def _list_label(value: int, style: str) -> str | None:
     return f"{text}." if text else None
 
 
+def _data_uri_size(src: str) -> int:
+    """The decoded size of a data: URI, estimated from its length without decoding it."""
+    head, _, payload = src.partition(",")
+    if head.lower().endswith(";base64"):
+        return len(payload) * 3 // 4
+    return len(payload) - 2 * payload.count("%")
+
+
 def _data_uri(src: str) -> bytes | None:
     head, _, payload = src.partition(",")
-    if len(payload) > MAX_DATA_URI_BYTES * 4 // 3 + 4:
-        return None
     try:
         if head.lower().endswith(";base64"):
             return base64.b64decode(re.sub(r"\s+", "", payload), validate=True)
@@ -588,19 +611,47 @@ class _Table:
         self.ctx = ctx
         self.caption: _El | None = None
         self.rows: list[list[_El]] = []
-        for child in element.children:
-            if not isinstance(child, _El) or _hidden(child):
-                continue
-            if child.tag == "tr":
-                self.rows.append(self._cells(child))
-            elif child.tag in ("thead", "tbody", "tfoot"):
-                self.rows += [self._cells(tr) for tr in child.children if isinstance(tr, _El) and tr.tag == "tr" and not _hidden(tr)]
-            elif child.tag == "caption" and self.caption is None:
-                self.caption = child
+        # Content outside any cell (misnested, or flattened beyond MAX_DEPTH): read before the
+        # table, as browsers place it ("foster parenting"), never dropped.
+        self.outside = _El("div", {}, element)
+        self._rows(element, top=True)
 
-    @staticmethod
-    def _cells(tr: _El) -> list[_El]:
-        return [c for c in tr.children if isinstance(c, _El) and c.tag in ("td", "th") and not _hidden(c)]
+    def _rows(self, group: _El, top: bool) -> None:
+        stray: list[_El] = []  # cells outside any row: one implicit row, as browsers make
+        for child in group.children:
+            if isinstance(child, _El) and child.tag in ("td", "th"):
+                if not _hidden(child):
+                    stray.append(child)
+                continue
+            if stray:
+                self.rows.append(stray)
+                stray = []
+            if isinstance(child, str) or child.tag not in TABLE_TAGS:
+                self.outside.children.append(child)
+            elif _hidden(child):
+                continue
+            elif child.tag == "tr":
+                self.rows.append(self._cells(child))
+            elif top and child.tag in ("thead", "tbody", "tfoot"):
+                self._rows(child, top=False)
+            elif top and child.tag == "caption" and self.caption is None:
+                self.caption = child
+            elif child.tag in ("table", "caption", "thead", "tbody", "tfoot"):
+                self.outside.children.append(child)  # misnested: read as flow, not dropped
+        if stray:
+            self.rows.append(stray)
+
+    def _cells(self, tr: _El) -> list[_El]:
+        cells = []
+        for child in tr.children:
+            if isinstance(child, str) or child.tag not in TABLE_TAGS:
+                self.outside.children.append(child)
+            elif child.tag in ("td", "th"):
+                if not _hidden(child):
+                    cells.append(child)
+            elif child.tag not in ("col", "colgroup"):
+                self.outside.children.append(child)  # misnested (a table inside a row): read as flow
+        return cells
 
     def flow(self, element: _El, ctx: _Ctx | None = None) -> list[Block]:
         ctx = ctx or self.ctx
@@ -611,6 +662,10 @@ class _Table:
         out = self.flow(self.caption) if self.caption is not None else []
         for block in out:
             block.flags.append("table_caption")
+        outside = self.flow(self.outside) if self.outside.children else []
+        for block in outside:
+            block.flags.append("outside_table_cells")
+        out += outside
         if not self.rows:
             return out
         texts = [[_raw_text(c) for c in row] for row in self.rows]
