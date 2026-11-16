@@ -12,6 +12,8 @@ PDF page: ruled tables cell by cell (D3e), ink accounting, the number model for 
   ``image_downscaled``; a hostile size cannot allocate unbounded memory, and Pillow's own
   decompression-bomb limit stays on.
 - **Colour:** transparency is flattened onto white, and the frame is read in grey levels.
+- **Pages:** at most ``max_pages`` frames are read (``contract.MAX_PAGES``, 2,000 by default);
+  the rest are one ``unread`` entry (``page_limit``), and the document is flagged.
 - **Nothing silent:** a frame without ink is an ``empty`` page; a file Pillow cannot decode, or
   a frame that fails to load, goes to ``unread`` with the reason.
 """
@@ -20,7 +22,7 @@ from __future__ import annotations
 
 import io
 
-from heocr.contract import Document, Page, Unread
+from heocr.contract import Document, Page, Unread, page_limit
 from heocr.ocr.regions import MAX_RENDER_PIXELS, RENDER_DPI, has_ink
 
 MIN_DPI = 50  # a smaller declared resolution is a placeholder (JFIF's 1:1 aspect, 72 by default in some tools)
@@ -70,10 +72,11 @@ def read_image(body: bytes, doc: Document) -> None:
         doc.flags.append("not_read")
         return
     total = getattr(image, "n_frames", 1)
-    pages = total if (image.format or "").upper() in ("TIFF", "MPO") else 1
-    if total > pages:
+    frames = total if (image.format or "").upper() in ("TIFF", "MPO") else 1
+    if total > frames:
         doc.flags.append("image_frames_skipped")
-    doc.page_count = pages
+    doc.page_count = frames
+    pages = page_limit(doc, frames)
     for index in range(pages):
         try:
             image.seek(index)

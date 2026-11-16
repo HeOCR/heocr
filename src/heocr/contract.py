@@ -139,6 +139,22 @@ class Page:
         }
 
 
+# Pages (PDF pages, image frames) read at most per document. Every page may cost an OCR run of
+# seconds, so a document of tens of thousands of pages, hostile or merely huge, would run for
+# hours. The rest are recorded as unread, in one entry, never dropped silently.
+MAX_PAGES = 2000
+
+
+def page_limit(doc: "Document", total: int) -> int:
+    """The number of pages to read; records the rest as one unread entry and flags the document."""
+    limit = doc._max_pages
+    if total <= limit:
+        return total
+    doc.unread.append(Unread(scope="document", reason="page_limit", detail=f"pages {limit + 1}-{total} of {total} not read (max_pages={limit})"))
+    doc.flags.append("page_limit_reached")
+    return limit
+
+
 @dataclass
 class Unread:
     """Something the pipeline saw but did not read, and why. Never dropped silently."""
@@ -178,6 +194,7 @@ class Document:
     _ocr_engine: Any = field(default=None, repr=False, compare=False)
     _ocr_error: str | None = field(default=None, repr=False, compare=False)
     _convert_settings: dict[str, Any] | None = field(default=None, repr=False, compare=False)  # LibreOffice: cmd, timeout
+    _max_pages: int = field(default=MAX_PAGES, repr=False, compare=False)  # pages read at most
     _number_engine: Any = field(default=None, repr=False, compare=False)  # the second reading of numbers (eng)
     _number_error: str | None = field(default=None, repr=False, compare=False)
     _font_codes: dict = field(default_factory=dict, repr=False, compare=False)  # (font, letter) -> code
@@ -301,6 +318,8 @@ def validate(payload: Any) -> list[str]:
         errors.append("options must be an object, with a boolean repairs")
     elif "ocr" in options and not (options["ocr"] is False or isinstance(options["ocr"], dict)):
         errors.append("options.ocr must be false or an object")
+    elif "max_pages" in options and not (isinstance(options["max_pages"], int) and not isinstance(options["max_pages"], bool) and options["max_pages"] > 0):
+        errors.append("options.max_pages must be a positive integer")
     elif "convert" in options and not (options["convert"] is False or isinstance(options["convert"], dict)):
         errors.append("options.convert must be false or an object")
     elif options.get("check_numbers", False) not in (False, "suspect", "tables", "all"):

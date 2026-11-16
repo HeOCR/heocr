@@ -135,5 +135,63 @@ class ImageInputTest(unittest.TestCase):
         self.assertEqual(doc.pages[0].route, "none")
 
 
+class PageLimitTest(unittest.TestCase):
+    """At most max_pages pages or frames are read; the rest are one unread entry, never silent."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        tessdata = Path(self.tmp.name) / "tessdata"
+        tessdata.mkdir()
+        (tessdata / "heb.traineddata").write_bytes(b"fake heb model")
+        patcher = mock.patch.dict(os.environ, {"FAKE_TESSDATA": str(tessdata)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        os.environ.pop("TESSDATA_PREFIX", None)
+
+    def check(self, doc, total: int, limit: int) -> None:
+        self.assertEqual(doc.page_count, total)
+        self.assertEqual(len(doc.pages), limit)
+        limits = [u for u in doc.unread if u.reason == "page_limit"]
+        self.assertEqual(len(limits), 1)  # one entry for the whole range
+        self.assertEqual(limits[0].detail, f"pages {limit + 1}-{total} of {total} not read (max_pages={limit})")
+        self.assertIn("page_limit_reached", doc.flags)
+        self.assertEqual(doc.options["max_pages"], limit)
+        self.assertEqual(heocr.validate(doc.to_dict()), [])
+
+    def test_tiff_frames_beyond_the_limit(self) -> None:
+        frames = [page_image(size=(300, 400)) for _ in range(6)]
+        body = encoded(frames[0], "TIFF", save_all=True, append_images=frames[1:], dpi=(150, 150))
+        log = Path(self.tmp.name) / "calls.jsonl"
+        with mock.patch.dict(os.environ, {"FAKE_LOG": str(log)}):
+            doc = heocr.extract(body, tesseract=FAKE, max_pages=2)
+        self.check(doc, 6, 2)
+        ocr_calls = [line for line in log.read_text(encoding="utf-8").splitlines() if "--psm" in line]
+        self.assertEqual(len(ocr_calls), 2)  # no OCR beyond the limit
+
+    def test_pdf_pages_beyond_the_limit(self) -> None:
+        from tests.synth.pdf import PdfPage, lines_block, make_pdf
+
+        pages = [PdfPage(lines=lines_block([f"עמוד {n}"])) for n in range(1, 6)]
+        doc = heocr.extract(make_pdf(pages), ocr=False, max_pages=3)
+        self.check(doc, 5, 3)
+        self.assertNotIn("עמוד 4", doc.text)
+
+    def test_within_the_limit_nothing_is_flagged(self) -> None:
+        doc = heocr.extract(encoded(page_image(), "PNG", dpi=(150, 150)), tesseract=FAKE, max_pages=1)
+        self.assertNotIn("page_limit_reached", doc.flags)
+        self.assertEqual(doc.options["max_pages"], 1)
+
+    def test_the_default_and_bad_values(self) -> None:
+        from heocr.contract import MAX_PAGES
+
+        self.assertEqual(MAX_PAGES, 2000)
+        doc = heocr.extract(encoded(page_image(), "PNG", dpi=(150, 150)), ocr=False)
+        self.assertEqual(doc.options["max_pages"], 2000)
+        for bad in (0, -1, True, 2.5):
+            with self.assertRaises(ValueError):
+                heocr.extract(b"%PDF-1.4", max_pages=bad)
+
+
 if __name__ == "__main__":
     unittest.main()
