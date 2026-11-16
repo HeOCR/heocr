@@ -21,6 +21,7 @@ classifiers = [
 # The core stays permissive (decision 0020): no copyleft dependency in the default install.
 dependencies = [
   "defusedxml>=0.7",
+  "pypdfium2>=4.30",
 ]
 
 [project.scripts]

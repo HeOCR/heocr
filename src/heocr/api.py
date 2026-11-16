@@ -19,8 +19,9 @@ Reader = Callable[[bytes, Document], None]
 def _readers() -> dict[str, Reader]:
     """Formats with a route, mapped to the reader that fills a Document in place."""
     from heocr.docx.reader import read_docx
+    from heocr.pdf.reader import read_pdf
 
-    return {"docx": read_docx}
+    return {"docx": read_docx, "pdf": read_pdf}
 
 
 def extract(source: str | os.PathLike[str] | bytes) -> Document:
