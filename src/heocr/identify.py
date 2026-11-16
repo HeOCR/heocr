@@ -43,7 +43,7 @@ _IMAGES = (
     (b"BM", "bmp"),
     (b"\x00\x00\x00\x0cjP  \r\n\x87\n", "jp2"),
 )
-_HTML = re.compile(rb"\A(?:\xef\xbb\xbf)?\s*(?:<!--.*?-->\s*)*<(?:!doctype\s+html|html[\s>]|head[\s>]|body[\s>])", re.I | re.S)
+_HTML = re.compile(rb"\A(?:\xef\xbb\xbf)?\s*(?:<\?xml[^>]{0,200}\?>\s*)?(?:<!--.*?-->\s*)*<(?:!doctype\s+html|html[\s>]|head[\s>]|body[\s>])", re.I | re.S)
 
 
 def identify(body: bytes) -> FileKind:

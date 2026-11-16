@@ -42,8 +42,8 @@ DIRECTION_MARKS = Rule(
     rule_id="direction_marks",
     reason="Word inserts invisible RLM, LRM and ALM marks around numbers and Latin runs; they split tokens such as a section number from its word.",
     example=("בסעיף \u200f2.2", "בסעיף 2.2"),
-    formats=("docx",),
-    evidence="U+200E, U+200F or U+061C in office XML text",
+    formats=("docx", "html"),
+    evidence="U+200E, U+200F or U+061C in office XML or HTML text",
 )
 
 LATIN1_ETH_NUN = Rule(

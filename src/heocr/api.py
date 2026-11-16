@@ -23,10 +23,11 @@ def _readers() -> dict[str, Reader]:
     """Formats with a route, mapped to the reader that fills a Document in place."""
     from heocr.convert import TO_DOCX, read_converted
     from heocr.docx.reader import read_docx
+    from heocr.htmlread import read_html
     from heocr.images import read_image
     from heocr.pdf.reader import read_pdf
 
-    return {"docx": read_docx, "pdf": read_pdf, **{fmt: read_converted for fmt in TO_DOCX}, **{fmt: read_image for fmt in IMAGE_FORMATS}}
+    return {"docx": read_docx, "pdf": read_pdf, "html": read_html, **{fmt: read_converted for fmt in TO_DOCX}, **{fmt: read_image for fmt in IMAGE_FORMATS}}
 
 
 def extract(
