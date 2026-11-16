@@ -242,6 +242,14 @@ class DocxRobustnessTest(unittest.TestCase):
         doc = heocr.extract(d.build())
         self.assertEqual([b.label for b in doc.blocks], ["1.", "1.1."])
 
+    def test_fixture_tables_have_a_grid_and_a_closing_paragraph(self) -> None:
+        body = Docx(body=[table([["א", ("ב", {"span": 2})]])]).build()
+        with zipfile.ZipFile(io.BytesIO(body)) as archive:
+            xml = archive.read("word/document.xml").decode()
+        self.assertEqual(xml.count("<w:gridCol "), 3)
+        self.assertTrue(xml.rstrip().endswith("</w:tbl><w:p><w:pPr><w:bidi/></w:pPr></w:p><w:sectPr></w:sectPr></w:body></w:document>"))
+        self.assertEqual(heocr.extract(body).blocks[0].kind, "table")
+
     def test_white_text_on_a_shaded_paragraph_is_kept(self) -> None:
         shaded = para(WHITE).replace("<w:pPr>", '<w:pPr><w:shd w:val="clear" w:fill="1F3864"/>', 1)
         doc = heocr.extract(Docx(body=[shaded]).build())
