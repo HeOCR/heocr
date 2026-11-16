@@ -16,6 +16,18 @@ from dataclasses import dataclass, field
 from heocr import repairs
 from heocr.contract import Block, Document, Line, Page, Unread
 from heocr.ocr import OcrUnavailable, block_ocr, engine_for, unavailable_reason
+from heocr.ocr.regions import (  # noqa: F401  (re-exported for callers of the PDF route)
+    INK_LEVEL,
+    MAX_RENDER_PIXELS,
+    MIN_REGION_PX,
+    REGION_MIN_CONFIDENCE,
+    REGION_MIN_PAGE_SHARE,
+    RENDER_DPI,
+    has_ink,
+    ink_outside,
+    mask_layer_text,
+    short_for_ink,
+)
 from heocr.pdf.classify import FIGURE_IMAGE, classify, object_stats, stream_signals, text_signals
 from heocr.pdf.lines import Atom, PageLines, build_lines, paragraphs
 from heocr.textflags import text_flags
@@ -353,27 +365,6 @@ def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = froz
     )
 
 
-def ink_outside(image, boxes_px, pad: int = 2) -> tuple[int, int]:
-    """Dark pixels in a grey image, in total and outside the given boxes (OCR line boxes)."""
-    from PIL import ImageDraw
-
-    total = sum(image.histogram()[:INK_LEVEL])
-    if not total:
-        return 0, 0
-    rest = image.copy()
-    draw = ImageDraw.Draw(rest)
-    for x0, y0, x1, y1 in boxes_px:
-        draw.rectangle([x0 - pad, y0 - pad, x1 + pad, y1 + pad], fill=255)
-    return total, sum(rest.histogram()[:INK_LEVEL])
-
-
-def short_for_ink(image, result) -> tuple[bool, float]:
-    """Whether OCR left much of an image's ink outside every line it read (region accounting)."""
-    total, outside = ink_outside(image, [line.bbox for line in result.lines])
-    share = outside / total if total else 0.0
-    return outside >= SHORT_INK_MIN_PX and share >= SHORT_INK_SHARE, round(share, 4)
-
-
 def _render(page) -> tuple[object, float]:
     """The page as a PIL image at RENDER_DPI, or lower when that would pass MAX_RENDER_PIXELS.
 
@@ -387,8 +378,13 @@ def _render(page) -> tuple[object, float]:
     return page.render(scale=scale).to_pil(), scale
 
 
-def _ocr_blocks(doc: Document, index: int, engine, result, render_scale: float, *, offset=(0.0, 0.0), flags=()) -> int:
-    """OCR lines into blocks, one per Tesseract paragraph, with boxes in page points. Returns characters."""
+def _ocr_blocks(
+    doc: Document, index: int, engine, result, render_scale: float, *, offset=(0.0, 0.0), flags=(), min_confidence: float | None = None
+) -> int:
+    """OCR lines into blocks, one per Tesseract paragraph, with boxes in page points. Returns characters.
+
+    With ``min_confidence``, paragraphs below it are left out; the caller records them as unread.
+    """
     scale = 1 / render_scale
     dpi = round(render_scale * 72, 1)
     groups: list[list] = []
@@ -398,6 +394,8 @@ def _ocr_blocks(doc: Document, index: int, engine, result, render_scale: float, 
         else:
             groups.append([line])
     read = 0
+    if min_confidence is not None:
+        groups = [g for g in groups if (block_ocr(engine, g)["mean_confidence"] or 0) >= min_confidence]
     for group in groups:
         lines = [
             Line(line.text, [offset[0] + v * scale if i % 2 == 0 else offset[1] + v * scale for i, v in enumerate(line.bbox)])
@@ -464,35 +462,6 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
     )
 
 
-def mask_layer_text(crop, origin: tuple[float, float], scale: float, boxes) -> tuple[object, int]:
-    """Paint the text layer's character boxes white inside an image crop.
-
-    ``origin`` is the crop's top-left corner in page points; ``boxes`` are character boxes in
-    points. Returns the masked image and the number of characters masked.
-    """
-    from PIL import ImageDraw
-
-    image = crop.convert("L")
-    draw = ImageDraw.Draw(image)
-    width, height = image.size
-    masked = 0
-    for x0, y0, x1, y1 in boxes:
-        left, top = (x0 - origin[0]) * scale - 1, (y0 - origin[1]) * scale - 1
-        right, bottom = (x1 - origin[0]) * scale + 1, (y1 - origin[1]) * scale + 1
-        if right <= 0 or bottom <= 0 or left >= width or top >= height:
-            continue
-        draw.rectangle([left, top, right, bottom], fill=255)
-        masked += 1
-    return image, masked
-
-
-def has_ink(image) -> bool:
-    """Whether a grey image holds anything darker than paper, beyond a few stray pixels."""
-    histogram = image.histogram()
-    dark = sum(histogram[:INK_LEVEL])
-    return dark >= max(MIN_INK_PIXELS, MIN_INK_SHARE * image.size[0] * image.size[1])
-
-
 def _ocr_regions(
     doc: Document, index: int, page, width: float, height: float, boxes: list[list[float]], drawn_boxes, ocr_wanted: bool = True
 ) -> dict:
@@ -553,9 +522,17 @@ def _ocr_regions(
             # In a region, ink beyond the text is often the drawing itself: flagged on the block, for review.
             flags += ("ocr_short_for_ink",)
         first = len(doc.blocks)
-        counts["chars_ocr"] += _ocr_blocks(doc, index, engine, result, scale, offset=(crop[0] / scale, crop[1] / scale), flags=flags)
+        counts["chars_ocr"] += _ocr_blocks(
+            doc, index, engine, result, scale, offset=(crop[0] / scale, crop[1] / scale), flags=flags, min_confidence=REGION_MIN_CONFIDENCE
+        )
         for block in doc.blocks[first:]:
             block.ocr["ink_outside_share"] = share
+        paragraphs = len({line.paragraph for line in result.lines})
+        if len(doc.blocks) - first < paragraphs:
+            doc.unread.append(
+                Unread(scope="page", reason="image_region_ocr_low_confidence", page=index, bbox=box,
+                       detail=f"{paragraphs - (len(doc.blocks) - first)} of {paragraphs} paragraphs below confidence {REGION_MIN_CONFIDENCE:g}")
+            )
         counts["image_regions_ocr"] += 1
     return counts
 
@@ -566,26 +543,6 @@ READ_CLASSES = ("T1", "T2", "T6")
 # Classes read by OCR: a foreign OCR layer (ignored) and image-only pages. T2 pages whose words
 # are drawn reversed join them.
 OCR_CLASSES = ("T4", "T5")
-RENDER_DPI = 300
-# Rendering is capped at this many pixels (heocr-engine uses 40 M); the dpi drops to fit.
-MAX_RENDER_PIXELS = 40_000_000
-# After masking the layer's characters, a region needs this much ink (grey level below INK_LEVEL)
-# to be worth OCR: at least MIN_INK_PIXELS, and MIN_INK_SHARE of its area.
-INK_LEVEL = 160
-MIN_INK_PIXELS = 50
-MIN_INK_SHARE = 0.0005
-# Within a page sent to region OCR, regions under this share of the page are counted, not recognized.
-REGION_MIN_PAGE_SHARE = 0.01
-# OCR is "short for its ink" when at least this many dark pixels, and this share of all dark
-# pixels, lie outside every line it read (provisional; tuned on D-bench and dev only).
-SHORT_INK_MIN_PX = 5000
-SHORT_INK_SHARE = 0.5
-# Image regions smaller than this (in rendered pixels, either side) are icons, not text.
-MIN_REGION_PX = 24
-# Region OCR below this mean word confidence is stray marks from logos and drawings (dev split:
-# below 50 the results were single characters and punctuation; from 80 up, real labels).
-REGION_MIN_CONFIDENCE = 50.0
-
 _NO_ROUTE = {
     "T3": "broken font mapping; repairs and the T3 route arrive in D2c and D2d",
 }

@@ -23,6 +23,8 @@ from defusedxml import ElementTree
 from heocr import repairs
 from heocr.contract import Block, Cell, Document, Unread
 from heocr.docx.numbering import W, Numbering
+from heocr.ocr import OcrUnavailable, block_ocr, engine_for, unavailable_reason
+from heocr.ocr.regions import MAX_RENDER_PIXELS, MIN_REGION_PX, REGION_MIN_CONFIDENCE, RENDER_DPI, has_ink, short_for_ink
 from heocr.docx.styles import Styles, toggle
 
 TOOL = "heocr.docx"
@@ -38,15 +40,38 @@ MAX_PART_BYTES = 256 * 1024**2
 MAX_EXPANDED_BYTES = 1024**3
 
 _LETTER = re.compile(r"[^\W\d_]")
-_IMAGE_TAGS = {
-    "{http://schemas.openxmlformats.org/drawingml/2006/main}blip",
-    "{urn:schemas-microsoft-com:vml}imagedata",
-}
+_BLIP = "{http://schemas.openxmlformats.org/drawingml/2006/main}blip"
+_IMAGEDATA = "{urn:schemas-microsoft-com:vml}imagedata"
 _TEXTBOX = W + "txbxContent"
 
 
 class DocxError(ValueError):
     pass
+
+
+def _open_image(data: bytes):
+    """(grey image on white, dpi, problem): the image Pillow can open, flattened and capped in size."""
+    from PIL import Image, UnidentifiedImageError
+
+    try:
+        image = Image.open(io.BytesIO(data))
+        image.load()
+    except (UnidentifiedImageError, OSError, ValueError) as exc:
+        return None, 0, f"{type(exc).__name__}: not a raster format Pillow reads (EMF and WMF are not)"
+    dpi = image.info.get("dpi", (RENDER_DPI, RENDER_DPI))[0] or RENDER_DPI
+    dpi = round(min(max(float(dpi), 70.0), 600.0))  # PNG stores pixels per metre: 200 dpi reads as 199.9
+    if image.mode in ("RGBA", "LA", "P"):
+        rgba = image.convert("RGBA")
+        flat = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
+        flat.alpha_composite(rgba)
+        image = flat
+    image = image.convert("L")
+    pixels = image.size[0] * image.size[1]
+    if pixels > MAX_RENDER_PIXELS:
+        factor = (MAX_RENDER_PIXELS / pixels) ** 0.5
+        image = image.resize((max(1, int(image.size[0] * factor)), max(1, int(image.size[1] * factor))))
+        dpi = max(1, round(dpi * factor))
+    return image, dpi, None
 
 
 class _Package:
@@ -91,7 +116,7 @@ class _Paragraph:
     visible_chars: int = 0
     hidden_chars: int = 0
     white_chars: int = 0
-    figures: int = 0
+    figures: list = field(default_factory=list)  # relationship ids of embedded images (None if absent)
     textboxes: list = field(default_factory=list)
 
 
@@ -102,6 +127,8 @@ class _Reader:
         main = next((t for _, typ, t in pkg.rels("") if typ.endswith("/officeDocument")), "word/document.xml")
         self.main = main
         self.rels = pkg.rels(main)
+        # Relationship ids of the part being read: images resolve through them.
+        self.part_rels = {rid: target for rid, _, target in self.rels}
         self.styles = Styles.parse(self._part("styles"))
         self.numbering = Numbering.parse(self._part("numbering"))
 
@@ -225,8 +252,12 @@ class _Reader:
         boxes = [e for e in element.iter(_TEXTBOX)]
         if boxes:
             para.textboxes.extend(boxes)
-        elif any(e.tag in _IMAGE_TAGS for e in element.iter()):
-            para.figures += 1
+        else:
+            for e in element.iter():
+                if e.tag == _BLIP:
+                    para.figures.append(e.get(R + "embed") or e.get(R + "link"))
+                elif e.tag == _IMAGEDATA:
+                    para.figures.append(e.get(R + "id"))
 
     def _label(self, ppr, pstyle: str | None):
         """The paragraph's list label. ``numId`` and ``ilvl`` resolve field by field:
@@ -332,10 +363,75 @@ class _Reader:
             for block in self.blocks(box, "textbox" if role == "body" else role, note_id):
                 block.flags.append("from_text_box")
                 out.append(block)
-        for _ in range(para.figures):
-            out.append(Block(kind="figure", role=role, source="office_xml", tool=TOOL, note_id=note_id, flags=["image_not_read"]))
-            self.doc.unread.append(Unread(scope="block", reason="image_not_read", detail="embedded image; OCR route arrives in D2"))
+        for rel_id in para.figures:
+            out.extend(self.image(rel_id, role, note_id))
         return out
+
+    # -- embedded images --------------------------------------------------------
+    def image(self, rel_id: str | None, role: str, note_id: str | None) -> list[Block]:
+        """An embedded image read by OCR, as text blocks; or a figure block recorded as unread."""
+
+        def unread(reason: str, detail: str | None = None) -> list[Block]:
+            self.doc.unread.append(Unread(scope="block", reason=reason, detail=detail))
+            return [Block(kind="figure", role=role, source="office_xml", tool=TOOL, note_id=note_id, flags=[reason])]
+
+        target = self.part_rels.get(rel_id or "")
+        data = self.pkg.read(target) if target else None
+        if data is None:
+            return unread("image_not_read", "embedded image without a readable part (linked or missing)")
+        engine = engine_for(self.doc)
+        if engine is None:
+            return unread("image_not_read", unavailable_reason(self.doc))
+        image, dpi, problem = _open_image(data)
+        if image is None:
+            return unread("image_format_not_supported", problem)
+        if image.size[0] < MIN_REGION_PX or image.size[1] < MIN_REGION_PX:
+            return unread("image_too_small")
+        if not has_ink(image):
+            return unread("image_blank")
+        try:
+            result = engine.recognize(image, dpi=dpi)
+        except OcrUnavailable as exc:
+            return unread("ocr_failed", str(exc))
+        if not result.lines:
+            return unread("image_no_text_found")
+        if result.mean_confidence is not None and result.mean_confidence < REGION_MIN_CONFIDENCE:
+            return unread("image_ocr_low_confidence", f"mean confidence {result.mean_confidence}")
+        short, share = short_for_ink(image, result)
+        groups: list[list] = []
+        for line in result.lines:
+            if groups and groups[-1][-1].paragraph == line.paragraph:
+                groups[-1].append(line)
+            else:
+                groups.append([line])
+        blocks = []
+        dropped = 0
+        for group in groups:
+            confidence = block_ocr(engine, group)["mean_confidence"]
+            if confidence is not None and confidence < REGION_MIN_CONFIDENCE:
+                dropped += 1
+                continue
+            text = "\n".join(line.text for line in group)
+            blocks.append(
+                Block(
+                    kind="text",
+                    text=text,
+                    role=role,
+                    source="ocr",
+                    tool=engine.version,
+                    note_id=note_id,
+                    direction="rtl",
+                    ocr={**block_ocr(engine, group), "dpi": dpi, "ink_outside_share": share},
+                    flags=["ocr_unverified", "from_embedded_image"] + (["ocr_short_for_ink"] if short else []),
+                )
+            )
+        if dropped:
+            self.doc.unread.append(
+                Unread(scope="block", reason="image_ocr_low_confidence", detail=f"{dropped} of {len(groups)} paragraphs below confidence {REGION_MIN_CONFIDENCE:g}")
+            )
+        if not blocks:
+            return [Block(kind="figure", role=role, source="office_xml", tool=TOOL, note_id=note_id, flags=["image_ocr_low_confidence"])]
+        return blocks
 
     # -- tables ---------------------------------------------------------------
     def _cell_text(self, tc, table_repairs: Counter) -> tuple[str, list[str]]:
@@ -422,6 +518,7 @@ class _Reader:
 
     # -- stories --------------------------------------------------------------
     def body(self) -> list[Block]:
+        self._use_part(self.main)
         xml = self.pkg.read(self.main)
         if xml is None:
             raise DocxError("no main document part")
@@ -429,10 +526,14 @@ class _Reader:
         body = root.find(W + "body")
         return self.blocks(body, "body") if body is not None else []
 
+    def _use_part(self, part: str | None) -> None:
+        self.part_rels = {rid: target for rid, _, target in self.pkg.rels(part)} if part else {}
+
     def notes(self, rel_type: str, tag: str, role: str) -> list[Block]:
         xml = self._part(rel_type)
         if not xml:
             return []
+        self._use_part(next((t for _, typ, t in self.rels if typ == REL_TYPE + rel_type), None))
         out: list[Block] = []
         for note in ElementTree.fromstring(xml).findall(W + tag):
             if note.get(W + "type") in ("separator", "continuationSeparator", "continuationNotice"):
@@ -449,6 +550,7 @@ class _Reader:
                     continue
                 seen.add(target)
                 xml = self.pkg.read(target)
+                self._use_part(target)
                 if xml:
                     out.extend(self.blocks(ElementTree.fromstring(xml), kind))
         return out
