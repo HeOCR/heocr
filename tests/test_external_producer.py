@@ -1,7 +1,8 @@
-"""Opt-in check against a real PDF producer: LibreOffice renders a synthetic DOCX with real fonts.
+"""Opt-in checks against real external programs: LibreOffice and Tesseract.
 
-CI does not run it (no external programs in CI). Run it locally with
-``HEOCR_TEST_SOFFICE=1 python -m unittest tests.test_external_producer``.
+LibreOffice renders a synthetic DOCX with real fonts. Its PDF must read back exactly, and so must a
+scan of that PDF through Tesseract. CI does not run these (no external programs in CI). Run them
+locally with ``HEOCR_TEST_SOFFICE=1 HEOCR_TEST_TESSERACT=1 python -m unittest tests.test_external_producer``.
 """
 
 import os
@@ -33,6 +34,29 @@ class LibreOfficePdfTest(unittest.TestCase):
             doc = heocr.extract(Path(tmp) / "synth.pdf")
         self.assertEqual(doc.pages[0].page_class, "T1", doc.pages[0].signals)
         self.assertEqual([line.text for b in doc.blocks for line in b.lines], LINES)
+
+
+@unittest.skipUnless(
+    os.environ.get("HEOCR_TEST_TESSERACT") and shutil.which("tesseract") and shutil.which("soffice"),
+    "opt-in; needs Tesseract with heb, and LibreOffice",
+)
+class TesseractScanTest(unittest.TestCase):
+    def test_scan_of_a_libreoffice_pdf_is_t5_and_read_by_ocr(self) -> None:
+        import pypdfium2 as pdfium
+
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "synth.docx"
+            source.write_bytes(Docx(body=[para(t) for t in LINES]).build())
+            subprocess.run(["soffice", "--headless", "--convert-to", "pdf", "--outdir", tmp, str(source)], check=True, capture_output=True, timeout=180)
+            pdf = pdfium.PdfDocument(str(Path(tmp) / "synth.pdf"))
+            scan = Path(tmp) / "scan.pdf"
+            pdf[0].render(scale=300 / 72).to_pil().convert("L").save(scan, resolution=300)
+            pdf.close()
+            doc = heocr.extract(scan)
+        self.assertEqual(doc.pages[0].page_class, "T5")
+        self.assertEqual(doc.pages[0].route, "ocr")
+        self.assertEqual([line.text for b in doc.blocks for line in b.lines], LINES)
+        self.assertTrue(doc.components["tesseract:heb.traineddata"].startswith("sha256:"))
 
 
 if __name__ == "__main__":

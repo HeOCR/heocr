@@ -15,7 +15,8 @@ FULL_PAGE = [(0, 0, 595, 842)]
 
 
 def page_of(page: PdfPage):
-    doc = heocr.extract(make_pdf([page]))
+    # OCR off: these tests are about classes and must not depend on a locally installed Tesseract.
+    doc = heocr.extract(make_pdf([page]), ocr=False)
     return doc, doc.pages[0]
 
 
@@ -53,7 +54,7 @@ class PageClassTest(unittest.TestCase):
         doc, record = self.assertClass(PdfPage(lines=lines_block(reversed_lines)), "T2", "reversed_after_line_building")
         self.assertGreaterEqual(record.signals["final_start_rate"], 0.15)
         self.assertEqual(doc.blocks, [])
-        self.assertEqual(doc.unread[0].reason, "class_T2_no_route")
+        self.assertEqual(doc.unread[0].reason, "ocr_route_unavailable")
         self.assertEqual(record.coverage["status"], "unread")
 
     def test_t3_private_use_font_codes(self) -> None:
@@ -80,7 +81,7 @@ class PageClassTest(unittest.TestCase):
     def test_t5_image_only(self) -> None:
         doc, record = self.assertClass(PdfPage(images=FULL_PAGE), "T5")
         self.assertEqual(record.signals["image_coverage"], 1.0)
-        self.assertEqual(doc.unread[0].reason, "class_T5_no_route")
+        self.assertEqual(doc.unread[0].reason, "ocr_route_unavailable")
 
     def test_t5_vector_text(self) -> None:
         self.assertClass(PdfPage(paths=150), "T5", "text_may_be_vector_paths")
@@ -129,10 +130,10 @@ class PageClassTest(unittest.TestCase):
 
     def test_mixed_document_reads_only_text_layer_classes(self) -> None:
         pdf = make_pdf([PdfPage(lines=lines_block(HEBREW)), PdfPage(images=FULL_PAGE), PdfPage(lines=lines_block(HEBREW[:1]))])
-        doc = heocr.extract(pdf)
+        doc = heocr.extract(pdf, ocr=False)
         self.assertEqual([p.page_class for p in doc.pages], ["T1", "T5", "T1"])
         self.assertEqual([u.page for u in doc.unread], [1])
-        self.assertIn("unread page 2 (class_T5_no_route)", doc.markdown)
+        self.assertIn("unread page 2 (ocr_route_unavailable): class T5; ocr turned off", doc.markdown)
 
 
 class TextFlagsTest(unittest.TestCase):

@@ -75,6 +75,7 @@ class Block:
     direction: str | None = None
     cells: list[list[Cell]] | None = None
     lines: list[Line] | None = None
+    ocr: dict[str, Any] | None = None  # for source "ocr": engine, settings, status "unverified", confidence
     repairs: list[dict[str, Any]] = field(default_factory=list)
     flags: list[str] = field(default_factory=list)
 
@@ -92,6 +93,8 @@ class Block:
             out["bbox"] = _round_box(self.bbox)
         if self.lines is not None:
             out["lines"] = [line.to_dict() for line in self.lines]
+        if self.ocr is not None:
+            out["ocr"] = dict(self.ocr)
         out["source"] = self.source
         out["tool"] = self.tool
         out["repairs"] = list(self.repairs)
@@ -157,6 +160,10 @@ class Document:
     flags: list[str] = field(default_factory=list)
     components: dict[str, str] = field(default_factory=dict)
     options: dict[str, Any] = field(default_factory=lambda: {"repairs": True})
+    # Run-time only, never serialized: OCR settings and the engine found for this document.
+    _ocr_settings: dict[str, Any] | None = field(default=None, repr=False, compare=False)
+    _ocr_engine: Any = field(default=None, repr=False, compare=False)
+    _ocr_error: str | None = field(default=None, repr=False, compare=False)
 
     # -- views -------------------------------------------------------------
     @property
@@ -270,6 +277,8 @@ def validate(payload: Any) -> list[str]:
     options = payload.get("options", {})
     if not isinstance(options, dict) or not isinstance(options.get("repairs", True), bool):
         errors.append("options must be an object, with a boolean repairs")
+    elif "ocr" in options and not (options["ocr"] is False or isinstance(options["ocr"], dict)):
+        errors.append("options.ocr must be false or an object")
 
     pages = payload.get("pages")
     if not isinstance(pages, list):
@@ -330,6 +339,8 @@ def validate(payload: Any) -> list[str]:
             if not (isinstance(line, dict) and isinstance(line.get("text"), str) and _is_box(line.get("bbox"))):
                 errors.append(f"{where}.lines must have text and bbox")
                 break
+        if block.get("source") == "ocr" and not (isinstance(block.get("ocr"), dict) and block["ocr"].get("status") == "unverified"):
+            errors.append(f"{where}.ocr must be an object with status 'unverified' for OCR text")
         if not isinstance(block.get("repairs"), list):
             errors.append(f"{where}.repairs must be a list")
         if not _strings(block.get("flags")):

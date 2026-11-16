@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 
 from heocr import repairs
 from heocr.contract import Block, Document, Line, Page, Unread
+from heocr.ocr import OcrUnavailable, block_ocr, engine_for, unavailable_reason
 from heocr.pdf.classify import classify, object_stats, stream_signals, text_signals
 from heocr.pdf.lines import Atom, PageLines, build_lines, paragraphs
 from heocr.textflags import text_flags
@@ -231,7 +232,11 @@ def _read_page(doc: Document, index: int, page) -> None:
             Page(index, width, height, "empty", "none", signals, {"chars_total": 0, "chars_read": 0, "status": "nothing_to_read"}, flags)
         )
         return
-    if page_class not in READ_CLASSES or "reversed_after_line_building" in flags:
+    needs_ocr = page_class in OCR_CLASSES or (page_class == "T2" and "reversed_after_line_building" in flags)
+    if needs_ocr:
+        _ocr_page(doc, index, page, width, height, page_class, signals, text, flags)
+        return
+    if page_class not in READ_CLASSES:
         doc.pages.append(
             Page(
                 index,
@@ -241,29 +246,27 @@ def _read_page(doc: Document, index: int, page) -> None:
                 "none",
                 signals,
                 {"chars_total": text.chars_total, "chars_read": 0, "status": "unread"},
-                flags + ["route_unavailable_d1"],
+                flags + ["route_unavailable"],
             )
         )
-        doc.unread.append(
-            Unread(scope="page", reason=f"class_{page_class}_no_route", page=index, detail=_NO_ROUTE[page_class])
-        )
+        doc.unread.append(Unread(scope="page", reason=f"class_{page_class}_no_route", page=index, detail=_NO_ROUTE[page_class]))
         return
     read = read_t1(doc, index, built)
     status = "read" if read >= text.chars_total else "partial"
+    route = "text_layer"
     if page_class == "T6":
-        # The text layer is read; the image regions, which may hold text, wait for region OCR (D2).
-        status = "partial"
-        for box in stats.image_boxes:
-            doc.unread.append(
-                Unread(scope="page", reason="image_region_not_read", page=index, bbox=box, detail="region OCR arrives in D2")
-            )
+        # The text layer is read; each image region, which may hold text, goes to region OCR.
+        ocr_regions = _ocr_regions(doc, index, page, stats.image_boxes)
+        status = "partial" if ocr_regions < len(stats.image_boxes) else status
+        if ocr_regions:
+            route = "text_layer+ocr_regions"
     doc.pages.append(
         Page(
             index,
             width,
             height,
             page_class,
-            "text_layer",
+            route,
             signals,
             {
                 "chars_total": text.chars_total,
@@ -276,14 +279,127 @@ def _read_page(doc: Document, index: int, page) -> None:
     )
 
 
+def _render(page):
+    return page.render(scale=RENDER_DPI / 72).to_pil()
+
+
+def _ocr_blocks(doc: Document, index: int, engine, result, *, offset=(0.0, 0.0), flags=()) -> int:
+    """OCR lines into blocks, one per Tesseract paragraph, with boxes in page points. Returns characters."""
+    scale = 72 / RENDER_DPI
+    groups: list[list] = []
+    for line in result.lines:
+        if groups and groups[-1][-1].paragraph == line.paragraph:
+            groups[-1].append(line)
+        else:
+            groups.append([line])
+    read = 0
+    for group in groups:
+        lines = [
+            Line(line.text, [offset[0] + v * scale if i % 2 == 0 else offset[1] + v * scale for i, v in enumerate(line.bbox)])
+            for line in group
+        ]
+        text = "\n".join(line.text for line in lines)
+        read += sum(1 for ch in text if not ch.isspace())
+        doc.blocks.append(
+            Block(
+                kind="text",
+                text=text,
+                page=index,
+                bbox=[min(l.bbox[0] for l in lines), min(l.bbox[1] for l in lines), max(l.bbox[2] for l in lines), max(l.bbox[3] for l in lines)],
+                source="ocr",
+                tool=engine.version,
+                direction="rtl",
+                lines=lines,
+                ocr=block_ocr(engine, group),
+                flags=["ocr_unverified", *flags] + text_flags(text),
+            )
+        )
+    return read
+
+
+def _ocr_page(doc: Document, index: int, page, width, height, page_class, signals, text: PageText, flags) -> None:
+    engine = engine_for(doc)
+    if engine is None:
+        reason = unavailable_reason(doc)
+        doc.pages.append(
+            Page(index, width, height, page_class, "none", signals,
+                 {"chars_total": text.chars_total, "chars_read": 0, "status": "unread"}, flags + ["route_unavailable"])
+        )
+        doc.unread.append(Unread(scope="page", reason="ocr_route_unavailable", page=index, detail=f"class {page_class}; {reason}"))
+        return
+    try:
+        result = engine.recognize(_render(page))
+    except OcrUnavailable as exc:
+        doc.pages.append(
+            Page(index, width, height, page_class, "none", signals,
+                 {"chars_total": text.chars_total, "chars_read": 0, "status": "unread"}, flags + ["ocr_failed"])
+        )
+        doc.unread.append(Unread(scope="page", reason="ocr_failed", page=index, detail=str(exc)))
+        return
+    read = _ocr_blocks(doc, index, engine, result)
+    if page_class == "T4":
+        flags = flags + ["text_layer_ignored"]
+    if not result.lines:
+        doc.unread.append(Unread(scope="page", reason="ocr_found_no_text", page=index, detail=f"class {page_class}"))
+    doc.pages.append(
+        Page(index, width, height, page_class, "ocr", signals,
+             {"chars_total": text.chars_total, "chars_read": 0, "chars_ocr": read,
+              "status": "ocr" if result.lines else "unread"}, flags)
+    )
+
+
+def _ocr_regions(doc: Document, index: int, page, boxes: list[list[float]]) -> int:
+    """Region OCR for image regions of a page read from its text layer. Returns regions recognized."""
+    if not boxes:
+        return 0
+    engine = engine_for(doc)
+    if engine is None:
+        reason = unavailable_reason(doc)
+        for box in boxes:
+            doc.unread.append(Unread(scope="page", reason="image_region_not_read", page=index, bbox=box, detail=reason))
+        return 0
+    image = _render(page)
+    scale = RENDER_DPI / 72
+    done = 0
+    for box in boxes:
+        crop = [int(box[0] * scale), int(box[1] * scale), int(box[2] * scale + 0.999), int(box[3] * scale + 0.999)]
+        if crop[2] - crop[0] < MIN_REGION_PX or crop[3] - crop[1] < MIN_REGION_PX:
+            doc.unread.append(Unread(scope="page", reason="image_region_too_small", page=index, bbox=box))
+            continue
+        try:
+            result = engine.recognize(image.crop(crop))
+        except OcrUnavailable as exc:
+            doc.unread.append(Unread(scope="page", reason="ocr_failed", page=index, bbox=box, detail=str(exc)))
+            continue
+        if not result.lines:
+            doc.unread.append(Unread(scope="page", reason="image_region_no_text_found", page=index, bbox=box))
+            continue
+        confidence = result.mean_confidence
+        if confidence is not None and confidence < REGION_MIN_CONFIDENCE:
+            # Logos and drawings yield stray marks at low confidence; they are reported, not emitted.
+            doc.unread.append(
+                Unread(scope="page", reason="image_region_ocr_low_confidence", page=index, bbox=box, detail=f"mean confidence {confidence}")
+            )
+            continue
+        # Region text follows the page's text-layer blocks; its place in the reading order is not resolved.
+        _ocr_blocks(doc, index, engine, result, offset=(box[0], box[1]), flags=("from_image_region", "reading_order_region_appended"))
+        done += 1
+    return done
+
+
 # Classes read through the text layer. T2 (a visual-order stream) is read by the same geometric
-# line building, since D2a. T6 also reports its image regions as unread.
+# line building, since D2a. T6 image regions go to region OCR.
 READ_CLASSES = ("T1", "T2", "T6")
+# Classes read by OCR: a foreign OCR layer (ignored) and image-only pages. T2 pages whose words
+# are drawn reversed join them.
+OCR_CLASSES = ("T4", "T5")
+RENDER_DPI = 300
+# Image regions smaller than this (in rendered pixels, either side) are icons, not text.
+MIN_REGION_PX = 24
+# Region OCR below this mean word confidence is stray marks from logos and drawings (dev split:
+# below 50 the results were single characters and punctuation; from 80 up, real labels).
+REGION_MIN_CONFIDENCE = 50.0
 
 _NO_ROUTE = {
-    "T2": "words drawn reversed on the page itself; geometry cannot restore them (OCR route, D2e)",
-    "T3": "broken font mapping; repairs arrive in D2",
-    "T4": "foreign OCR text layer; OCR route arrives in D2",
-    "T5": "image-only page; OCR route arrives in D2",
-    "T6": "text layer plus images that may hold text; region OCR arrives in D2",
+    "T3": "broken font mapping; repairs and the T3 route arrive in D2c and D2d",
 }
