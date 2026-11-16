@@ -19,7 +19,9 @@ classifiers = [
   "Topic :: Text Processing",
 ]
 # The core stays permissive (decision 0020): no copyleft dependency in the default install.
-dependencies = []
+dependencies = [
+  "defusedxml>=0.7",
+]
 
 [project.scripts]
 heocr = "heocr.cli:main"
