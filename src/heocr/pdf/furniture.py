@@ -119,8 +119,8 @@ def _ordered(blocks: list[Block]) -> list[Block]:
     return sorted(blocks, key=lambda b: (b.page if b.page is not None else -1, rank.get(b.role, 1), order[id(b)]))
 
 
-def _clear_furniture_columns(doc: Document) -> None:
-    """Drop the side-by-side flags where only furniture stood side by side."""
+def _clear_furniture_columns(doc: Document, reason: str = "columns_were_page_furniture") -> None:
+    """Drop the side-by-side flags where only furniture (or a site menu, D4g) stood side by side."""
     side_flags = ("reading_order_unresolved_columns", "reading_order_row_major_unverified")
     body_lines = defaultdict(list)
     for block in doc.blocks:
@@ -136,6 +136,6 @@ def _clear_furniture_columns(doc: Document) -> None:
             for b in lines[n + 1 :]
         )
         if not side_by_side:
-            page.flags = [f for f in page.flags if f not in side_flags] + ["columns_were_page_furniture"]
+            page.flags = [f for f in page.flags if f not in side_flags] + [reason]
             if "reading_order_invalid_geometry" not in page.flags:
                 page.coverage["selection_safe"] = True
