@@ -45,6 +45,49 @@ class LibreOfficePdfTest(unittest.TestCase):
         self.assertEqual([line.text for b in doc.blocks for line in b.lines], LINES)
 
 
+@unittest.skipUnless(os.environ.get("HEOCR_TEST_SOFFICE") and shutil.which("soffice"), "opt-in; needs LibreOffice")
+class ConverterTest(unittest.TestCase):
+    """D4a against the real LibreOffice: DOC, RTF and ODT made from a synthetic DOCX, read back."""
+
+    FOOT = '<w:r><w:rPr><w:rStyle w:val="FootnoteReference"/></w:rPr><w:footnoteReference w:id="1"/></w:r>'
+
+    def made_as(self, docx: bytes, fmt: str, tmp: str) -> bytes:
+        source = Path(tmp) / "source.docx"
+        source.write_bytes(docx)
+        subprocess.run(["soffice", "--headless", "--convert-to", fmt, "--outdir", tmp, str(source)], check=True, capture_output=True, timeout=180)
+        return (Path(tmp) / f"source.{fmt}").read_bytes()
+
+    def test_doc_keeps_its_footnotes(self) -> None:
+        # Eval: LibreOffice's text export drops footnotes. Through DOCX they survive.
+        docx = Docx(body=[para("ראו את ההערה", self.FOOT, " בסוף")], footnotes={1: "הערת שוליים"}).build()
+        with tempfile.TemporaryDirectory() as tmp:
+            doc = heocr.extract(self.made_as(docx, "doc", tmp))
+        self.assertEqual(doc.format, "doc")
+        body = [b for b in doc.blocks if b.role == "body"]
+        self.assertEqual(body[0].text, "ראו את ההערה בסוף")
+        self.assertEqual(body[0].note_refs[0]["kind"], "footnote")
+        self.assertIn("הערת שוליים", [b.text.strip() for b in doc.blocks if b.role == "footnote"])
+        self.assertTrue(doc.components["libreoffice"].startswith("LibreOffice"))
+
+    def test_a_body_ending_with_a_table_does_not_hang(self) -> None:
+        # Eval: the text export hangs on this. The DOCX conversion must finish.
+        docx = Docx(body=[para("לפני הטבלה"), table([["שם", "סכום"], ["ספק א", "100"]], borders=True)]).build()
+        with tempfile.TemporaryDirectory() as tmp:
+            body = self.made_as(docx, "doc", tmp)
+        doc = heocr.extract(body, convert_timeout=120)
+        self.assertEqual(doc.unread, [])
+        (found,) = [b for b in doc.blocks if b.kind == "table"]
+        self.assertEqual([[c.text for c in row] for row in found.cells], [["שם", "סכום"], ["ספק א", "100"]])
+
+    def test_rtf_and_odt(self) -> None:
+        docx = Docx(body=[para(t) for t in LINES]).build()
+        for fmt in ("rtf", "odt"):
+            with self.subTest(fmt), tempfile.TemporaryDirectory() as tmp:
+                doc = heocr.extract(self.made_as(docx, fmt, tmp))
+                self.assertEqual(doc.format, fmt)
+                self.assertEqual([b.text for b in doc.blocks if b.role == "body"], LINES)
+
+
 @unittest.skipUnless(
     os.environ.get("HEOCR_TEST_TESSERACT") and shutil.which("tesseract") and shutil.which("soffice"),
     "opt-in; needs Tesseract with heb, and LibreOffice",

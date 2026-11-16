@@ -16,7 +16,7 @@ SCHEMA_ID = "heocr_document.v1"
 
 BLOCK_KINDS = ("text", "heading", "list_item", "table", "figure")
 ROLES = ("body", "header", "footer", "footnote", "endnote", "comment", "textbox")
-SOURCES = ("text_layer", "office_xml", "ocr", "none")
+SOURCES = ("text_layer", "office_xml", "converted_docx", "ocr", "none")
 PAGE_CLASSES = ("T1", "T2", "T3", "T4", "T5", "T6", "empty")
 DIRECTIONS = ("rtl", "ltr")
 UNREAD_SCOPES = ("document", "page", "block")
@@ -176,6 +176,7 @@ class Document:
     _ocr_settings: dict[str, Any] | None = field(default=None, repr=False, compare=False)
     _ocr_engine: Any = field(default=None, repr=False, compare=False)
     _ocr_error: str | None = field(default=None, repr=False, compare=False)
+    _convert_settings: dict[str, Any] | None = field(default=None, repr=False, compare=False)  # LibreOffice: cmd, timeout
     _number_engine: Any = field(default=None, repr=False, compare=False)  # the second reading of numbers (eng)
     _number_error: str | None = field(default=None, repr=False, compare=False)
     _font_codes: dict = field(default_factory=dict, repr=False, compare=False)  # (font, letter) -> code
@@ -299,6 +300,8 @@ def validate(payload: Any) -> list[str]:
         errors.append("options must be an object, with a boolean repairs")
     elif "ocr" in options and not (options["ocr"] is False or isinstance(options["ocr"], dict)):
         errors.append("options.ocr must be false or an object")
+    elif "convert" in options and not (options["convert"] is False or isinstance(options["convert"], dict)):
+        errors.append("options.convert must be false or an object")
     elif options.get("check_numbers", False) not in (False, "suspect", "tables", "all"):
         errors.append("options.check_numbers must be 'suspect', 'tables', 'all' or false")
 

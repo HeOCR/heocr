@@ -8,6 +8,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from heocr.contract import Document, Unread
+from heocr.convert import CONVERT_TIMEOUT, TO_DOCX
 from heocr.identify import identify
 from heocr.ocr.tesseract import DEFAULT_LANG, DEFAULT_PSM, check_settings
 
@@ -19,10 +20,11 @@ Reader = Callable[[bytes, Document], None]
 
 def _readers() -> dict[str, Reader]:
     """Formats with a route, mapped to the reader that fills a Document in place."""
+    from heocr.convert import TO_DOCX, read_converted
     from heocr.docx.reader import read_docx
     from heocr.pdf.reader import read_pdf
 
-    return {"docx": read_docx, "pdf": read_pdf}
+    return {"docx": read_docx, "pdf": read_pdf, **{fmt: read_converted for fmt in TO_DOCX}}
 
 
 def extract(
@@ -35,6 +37,9 @@ def extract(
     tesseract: str | Sequence[str] | None = None,
     ocr_model: str | None = None,
     check_numbers: str | bool = "suspect",
+    convert: bool = True,
+    soffice: str | Sequence[str] | None = None,
+    convert_timeout: float | None = None,
 ) -> Document:
     """Read a document and return its ``heocr_document.v1`` record.
 
@@ -57,6 +62,12 @@ def extract(
     also reads every table cell with amounts, percentages or dates. ``"all"`` reads every line
     and cell with them, and flags trustworthy disagreements. ``False`` turns the check off,
     including the second reading of numbers in OCR'd table cells.
+
+    ``convert`` reads DOC, RTF and ODT by converting them to DOCX with LibreOffice
+    (``heocr.convert``), when it is installed; ``soffice`` names the program when it is not on
+    the PATH, and ``convert_timeout`` bounds each conversion (180 s by default). The conversion
+    runs with a throwaway profile, and its processes are stopped on timeout. Without LibreOffice,
+    or with ``convert=False``, those files are recorded as unread.
     """
     if check_numbers not in (False, "suspect", "tables", "all"):
         raise ValueError("check_numbers must be 'suspect', 'tables', 'all' or False")
@@ -88,6 +99,9 @@ def extract(
         },
     )
     doc._ocr_settings = {"cmd": tesseract, "lang": ocr_lang, "psm": ocr_psm, "model": ocr_model} if ocr else None
+    if kind.format in TO_DOCX:
+        doc.options["convert"] = {"engine": "libreoffice", "to": "docx"} if convert else False
+        doc._convert_settings = {"cmd": soffice, "timeout": convert_timeout or CONVERT_TIMEOUT} if convert else None
     reader = _readers().get(kind.format)
     if reader is None:
         doc.unread.append(
