@@ -236,11 +236,8 @@ class Numbering:
             return text
 
         if level.fmt == "bullet":
+            # The bullet as written; symbol-font codes are mapped by the reader's repairs (heocr.repairs).
             text = level.text
-            if any(0xE000 <= ord(ch) <= 0xF8FF for ch in text):
-                # Symbol-font bullets (U+F0B7 and the like) have no meaning outside the font.
-                text = "•"
-                flags.append("bullet_symbol_mapped")
         else:
             text = _PLACEHOLDER.sub(render, level.text)
         return Label(text=text, suffix=level.suffix, fmt=level.fmt, flags=tuple(dict.fromkeys(flags)))
