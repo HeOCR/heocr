@@ -8,7 +8,8 @@ to $FAKE_LOG when it is set; $FAKE_FAIL=1 makes recognition fail.
 A table-cell call (--psm 6 or 7) with $FAKE_CELLS set (a JSON file mapping grey levels to
 text) "reads" the image: the most common grey level darker than paper (0 excluded, being the
 rulings) is looked up, within 4 levels, and its text is the answer. A level not in the map is
-ink that could not be read: the answer is empty.
+ink that could not be read: the answer is empty. A call in ``eng`` (the number model) uses
+$FAKE_CELLS_ENG instead, when it is set.
 """
 
 import json
@@ -47,6 +48,9 @@ def main(argv: list[str]) -> int:
     base = argv[1]
     psm = argv[argv.index("--psm") + 1] if "--psm" in argv else "3"
     cells = os.environ.get("FAKE_CELLS")
+    lang = argv[argv.index("-l") + 1] if "-l" in argv else "heb"
+    if lang == "eng" and os.environ.get("FAKE_CELLS_ENG"):
+        cells = os.environ["FAKE_CELLS_ENG"]
     if psm in ("6", "7") and cells:
         from PIL import Image
 

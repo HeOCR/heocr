@@ -77,7 +77,8 @@ class CellRepairs:
     eth: int = 0
     pua: Counter = field(default_factory=Counter)  # (font, letter)
 
-    def text(self, atoms: list[Atom], rtl: bool) -> str:
+    def text(self, atoms: list[Atom], rtl: bool, lines: list | None = None) -> str:
+        """The cell's text; with ``lines``, each line's [text, bbox] is appended to it (number checks)."""
         texts = []
         for line in build_lines(atoms, rtl=rtl).lines:
             text = line.text
@@ -85,6 +86,8 @@ class CellRepairs:
                 text, changes = repairs.symbol_font_bullet(text)
                 self.bullets.update(changes)
             texts.append(text)
+            if lines is not None:
+                lines.append([text, list(line.bbox)])
         for atom in atoms:
             if atom.repaired == repairs.LATIN1_ETH_NUN.rule_id:
                 self.eth += 1
@@ -340,14 +343,15 @@ def table_blocks(page_index: int, atoms: list[Atom], tables: list[Table], rtl: b
                     continue
                 mine = [a for a in inside if id(a) not in taken and _within(a, cell["box"], INSIDE)]
                 taken.update(id(a) for a in mine)
-                text = ledger.text(mine, rtl)
+                cell_lines: list = []
+                text = ledger.text(mine, rtl, cell_lines)
                 placed += sum(1 for a in mine if not a.is_space)
                 narrow = cell["box"][2] - cell["box"][0] < NARROW_CELL and cell["rowspan"] == 1 and not mine
                 if narrow and out_row and "merged_above" not in out_row[-1].flags:
                     # An empty sliver between doubled borders: folded into its neighbour's span.
                     out_row[-1].colspan += cell["colspan"]
                     continue
-                out_row.append(Cell(text, colspan=cell["colspan"], rowspan=cell["rowspan"], flags=["narrow"] if narrow else []))
+                out_row.append(Cell(text, colspan=cell["colspan"], rowspan=cell["rowspan"], flags=["narrow"] if narrow else [], _lines=cell_lines))
             # A leading sliver joins the cell after it.
             while len(out_row) > 1 and "narrow" in out_row[0].flags:
                 sliver = out_row.pop(0)

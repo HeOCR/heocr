@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 
 from heocr import repairs
 from heocr.contract import Block, Cell, Document, Line, Page, Unread
-from heocr.ocr import OcrUnavailable, block_ocr, engine_for, unavailable_reason
+from heocr.ocr import OcrUnavailable, block_ocr, engine_for, number_engine_for, unavailable_reason
 from heocr.ocr.regions import (  # noqa: F401  (re-exported for callers of the PDF route)
     INK_LEVEL,
     MAX_RENDER_PIXELS,
@@ -412,21 +412,34 @@ def _learn_font_maps(doc: Document, pdf) -> dict[str, dict[str, str]]:
 
 
 def _check_numbers(doc: Document, pdf, scope: str = "suspect") -> None:
-    """Numbers in text-layer lines against OCR of each line's own image (``heocr.pdf.numbers``)."""
+    """Numbers in text-layer lines and table cells against OCR of each line's own image (``heocr.pdf.numbers``).
+
+    The second reading is in ``eng`` (``number_engine_for``): stock ``heb`` misreads digits too
+    often to be a check. A table logs its cells' checks and repairs, as a paragraph logs its own.
+    """
     from heocr.pdf.numbers import LINE_PSM, PAD_PT, compare, wanted
 
-    candidates: dict[int, list[tuple[Block, Line]]] = {}
+    # A target is (block, cell or None, line): a Line of a paragraph, or a cell's [text, bbox].
+    candidates: dict[int, list[tuple]] = {}
     for block in doc.blocks:
-        if block.source == "text_layer" and block.page is not None and block.lines:
+        if block.source != "text_layer" or block.page is None:
+            continue
+        if block.lines:
             for line in block.lines:
                 if wanted(line.text, scope):
-                    candidates.setdefault(block.page, []).append((block, line))
+                    candidates.setdefault(block.page, []).append((block, None, line))
+        for row in block.cells or []:
+            for cell in row:
+                for line in cell._lines or []:
+                    if wanted(line[0], scope):
+                        candidates.setdefault(block.page, []).append((block, cell, line))
     if not candidates:
         return
-    engine = engine_for(doc)
+    engine = number_engine_for(doc)
     if engine is None:
         doc.flags.append("numbers_not_checked")
         return
+    repairs_on = doc.options.get("repairs", True)
     totals: dict[int, list[int]] = {}
     touched: dict[int, Block] = {}
     for index, items in sorted(candidates.items()):
@@ -435,8 +448,8 @@ def _check_numbers(doc: Document, pdf, scope: str = "suspect") -> None:
             image, scale = _render(page)
         finally:
             page.close()
-        for block, line in items:
-            box = line.bbox
+        for block, cell, line in items:
+            text, box = (line[0], line[1]) if cell is not None else (line.text, line.bbox)
             crop = (
                 max(0, int((box[0] - PAD_PT) * scale)),
                 max(0, int((box[1] - PAD_PT) * scale)),
@@ -449,10 +462,10 @@ def _check_numbers(doc: Document, pdf, scope: str = "suspect") -> None:
                 result = engine.recognize(image.crop(crop), dpi=round(scale * 72), psm=LINE_PSM)
             except OcrUnavailable:
                 continue
-            checked, agreed, disagreed, confirmed = compare(line.text, " ".join(l.text for l in result.lines), result.mean_confidence)
+            checked, agreed, disagreed, confirmed = compare(text, " ".join(l.text for l in result.lines), result.mean_confidence)
             if not checked:
                 continue
-            if not doc.options.get("repairs", True):
+            if not repairs_on:
                 # Not repaired, the reversed token stays wrong in the output: a disagreement.
                 disagreed += len(confirmed)
                 confirmed = []
@@ -466,14 +479,22 @@ def _check_numbers(doc: Document, pdf, scope: str = "suspect") -> None:
             checks["disagreed"] += disagreed
             block.checks = checks
             touched[id(block)] = block
-            if doc.options.get("repairs", True):
-                for token, reading in confirmed:
-                    line.text = line.text.replace(token, reading, 1)
-                    block.repairs.append({"rule": repairs.REVERSED_DIGIT_GROUPS.rule_id, "from": token, "to": reading, "count": 1})
-                    block.flags = [f for f in block.flags if f != "digit_groups_suspect"] + ["digit_groups_confirmed"]
-                    checks["agreed"] += 1
+            if disagreed and cell is not None and "number_disagreement" not in cell.flags:
+                cell.flags.append("number_disagreement")
+            for token, reading in confirmed:
+                text = text.replace(token, reading, 1)
+                block.repairs.append({"rule": repairs.REVERSED_DIGIT_GROUPS.rule_id, "from": token, "to": reading, "count": 1})
+                block.flags = [f for f in block.flags if f != "digit_groups_suspect"] + ["digit_groups_confirmed"]
+                checks["agreed"] += 1
+            if confirmed:
+                if cell is not None:
+                    line[0] = text
+                    cell.text = "\n".join(l[0] for l in cell._lines)
+                else:
+                    line.text = text
     for block in touched.values():
-        block.text = "\n".join(line.text for line in block.lines)
+        if block.lines:
+            block.text = "\n".join(line.text for line in block.lines)
         if block.checks["disagreed"]:
             block.flags.append("number_disagreement")
         elif block.checks["agreed"] < block.checks["numbers"]:
@@ -759,7 +780,8 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
     first = len(doc.blocks)
     read = _ocr_blocks(doc, index, engine, result, scale)
     if grids:
-        t_blocks, in_cells = _ocr_tables(doc, index, engine, image, scale, grids)
+        numbers = number_engine_for(doc) if doc.options.get("check_numbers", "suspect") else None
+        t_blocks, in_cells = _ocr_tables(doc, index, engine, image, scale, grids, None if numbers is engine else numbers)
         _place_tables(doc, first, t_blocks)
         read += in_cells
         flags = flags + ["ocr_tables"]
@@ -796,8 +818,11 @@ def _without(image, scale: float, boxes) -> object:
     return out
 
 
-def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids) -> tuple[list[Block], int]:
-    """Table blocks for ruled tables found in a page image, each inked cell OCR'd as its own region."""
+def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids, numbers=None) -> tuple[list[Block], int]:
+    """Table blocks for ruled tables found in a page image, each inked cell OCR'd as its own region.
+
+    With ``numbers`` (the number model), a cell whose reading holds digits is read a second time.
+    """
     dpi = round(scale * 72)
     blocks: list[Block] = []
     read = 0
@@ -806,6 +831,7 @@ def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids) -
         lines_all = []
         unread_cells = 0
         psms: Counter = Counter()
+        checks = {"numbers": 0, "agreed": 0, "disagreed": 0, "read_by_number_model": 0}
         for row in grid.rows:
             ordered = sorted(row, key=lambda cell: -cell["col"] if doc._rtl else cell["col"])
             out_row: list[Cell] = []
@@ -831,6 +857,8 @@ def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids) -
                 if not text.strip():
                     empty += 1
                     cell_flags.append("ocr_empty_with_ink")
+                elif numbers is not None and any(ch.isdigit() for ch in text):
+                    text = _second_number_reading(numbers, crop, dpi, psm, text, cell_flags, checks)
                 read += sum(1 for ch in text if not ch.isspace())
                 out_row.append(Cell(text, colspan=cell["colspan"], rowspan=cell["rowspan"], flags=cell_flags))
             unread_cells += empty
@@ -842,6 +870,10 @@ def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids) -
         flags = ["ruled_table", "ocr_unverified", *grid.flags]
         if unread_cells:
             flags.append("table_cells_ink_unread")
+        if checks["disagreed"]:
+            flags.append("number_disagreement")
+        if checks["read_by_number_model"]:
+            flags.append("numbers_read_by_number_model")
         blocks.append(
             Block(
                 kind="table",
@@ -852,10 +884,45 @@ def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids) -
                 tool=engine.version,
                 direction="rtl" if doc._rtl else "ltr",
                 ocr={**block_ocr(engine, lines_all), "psm": "per_cell", "cells_psm7": psms[7], "cells_psm6": psms[6], "dpi": round(scale * 72, 1)},
+                checks=checks if checks["numbers"] or checks["read_by_number_model"] else None,
                 flags=flags + (["render_dpi_reduced"] if scale * 72 < RENDER_DPI else []),
             )
         )
     return blocks, read
+
+
+def _second_number_reading(numbers, crop, dpi: int, psm: int, text: str, cell_flags: list[str], checks: dict) -> str:
+    """Amounts in an OCR'd cell read a second time, by the number model (``eng``).
+
+    A **numeric cell** (no letters in either reading) takes the number model's reading when it is
+    confident and differs: stock ``heb`` misreads digits too often (dev: a cell's "8,500,000" read
+    as "00"). The cell is flagged ``number_read_by_number_model``. In any other cell the readings
+    are only compared, and a disagreement is flagged, never resolved (D3d's asymmetry).
+    """
+    from heocr.pdf.numbers import MIN_CONFIDENCE, compare, significant
+
+    try:
+        result = numbers.recognize(crop, dpi=dpi, psm=psm)
+    except OcrUnavailable:
+        return text
+    second = "\n".join(line.text for line in result.lines if line.text.strip())
+    confidence = result.mean_confidence
+    if not any(ch.isalpha() for ch in text) and second and not any(ch.isalpha() for ch in second):
+        if second.split() == text.split():
+            checks["numbers"] += len(significant(text))
+            checks["agreed"] += len(significant(text))
+            return text
+        if confidence is not None and confidence >= MIN_CONFIDENCE:
+            checks["read_by_number_model"] += 1
+            cell_flags.append("number_read_by_number_model")
+            return second
+    checked, agreed, disagreed, _ = compare(text, second, confidence)
+    checks["numbers"] += checked
+    checks["agreed"] += agreed
+    checks["disagreed"] += disagreed
+    if disagreed:
+        cell_flags.append("number_disagreement")
+    return text
 
 
 def _ocr_regions(

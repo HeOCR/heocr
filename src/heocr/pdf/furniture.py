@@ -84,10 +84,11 @@ def mark_furniture(doc: Document) -> int:
                 parts.append(_sub_block(block, lines, role))
         if body:
             parts.append(_sub_block(block, body, "body"))
-        # The block's repair log is kept whole, on its body part, or on its only part: lines do
-        # not carry their own repairs, and a log split by guess would be wrong.
+        # The block's repair log and number checks are kept whole, on its body part, or on its
+        # only part: lines do not carry their own, and a log split by guess would be wrong.
         keeper = parts[-1] if body else parts[0]
         keeper.repairs = list(block.repairs)
+        keeper.checks = block.checks
         blocks.extend(parts)
     doc.blocks[:] = _ordered(blocks)
     _clear_furniture_columns(doc)

@@ -36,6 +36,7 @@ class Cell:
     colspan: int = 1
     rowspan: int = 1
     flags: list[str] = field(default_factory=list)
+    _lines: Any = field(default=None, repr=False, compare=False)  # PDF layer cells: [text, bbox] per line, for number checks
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {"text": self.text}
@@ -171,6 +172,8 @@ class Document:
     _ocr_settings: dict[str, Any] | None = field(default=None, repr=False, compare=False)
     _ocr_engine: Any = field(default=None, repr=False, compare=False)
     _ocr_error: str | None = field(default=None, repr=False, compare=False)
+    _number_engine: Any = field(default=None, repr=False, compare=False)  # the second reading of numbers (eng)
+    _number_error: str | None = field(default=None, repr=False, compare=False)
     _font_codes: dict = field(default_factory=dict, repr=False, compare=False)  # (font, letter) -> code
     _rtl: bool = field(default=True, repr=False, compare=False)  # the document's direction (PDF tables)
     # font_private_use_by_ocr: the maps learned for this document, with their evidence (no text).
