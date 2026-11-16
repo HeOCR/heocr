@@ -4,7 +4,7 @@
 
 `heocr` looks at a document, works out what it is (its format, and for a PDF the state of each page's text layer), and sends each part to the right tool: the text layer where it can be trusted, the office XML for Word files, and OCR where the text exists only as an image. Every decision is recorded in the output, and text that could not be read is reported, never dropped silently.
 
-> Status: early development (milestone D1). Nothing is on PyPI yet. The repository is `HeOCR/heocr-py`; the package and its import name are `heocr`.
+> Status: early development (milestone D2). Nothing is on PyPI yet.
 
 ```python
 import heocr
