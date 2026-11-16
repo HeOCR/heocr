@@ -1,8 +1,13 @@
 """Ruled tables in PDF text-layer pages (D3b).
 
-**Rulings.** Rulings come from the page's vector paths. Every straight piece of every path is
-read, after the object's matrix is applied, so a grid drawn as one path, as thin filled
-rectangles, or as stroked cell boxes all yield the same lines. Collinear pieces are merged.
+**Rulings.** Rulings come from the page's vector paths, after the object's matrix is applied.
+Every straight piece of a stroked path is a ruling. A filled path that is not stroked is read
+by subpath: a thin one (a border drawn as a filled rectangle, as Word does) gives one ruling
+along its centre, and a wide one is **shading**, never a ruling. Word shades each cell, and
+each line of text inside it, with its own rectangle, so shading edges taken as rulings split
+a cell of two text lines into two rows and gave columns that were not there. A grid drawn as
+one path, as thin filled rectangles, or as stroked cell boxes all yield the same lines, and
+collinear pieces are merged.
 
 **The grid.** Intersecting horizontal and vertical lines form a table. Its distinct line
 positions give rows and columns. A cell boundary exists where a ruling covers most of that
@@ -38,6 +43,7 @@ COVER = 0.6  # a boundary exists when a ruling covers this share of the cell edg
 MIN_GAP = 6.0  # pt: grid lines closer than this are one line (cells drawn as separate boxes double each border)
 FULL_ROW = 0.8  # row by row: a band boundary is a ruling across this share of the table's width
 INSIDE = 1.0  # pt: a character belongs to a cell when its centre is this far inside or more
+THIN_FILL = 4.0  # pt: a filled, unstroked subpath at most this thick is a border; a thicker one is shading
 
 
 @dataclass
@@ -67,8 +73,13 @@ def rulings(page) -> tuple[list[Rule], list[Rule]]:
         matrix = raw.FS_MATRIX()
         if not raw.FPDFPageObj_GetMatrix(obj.raw, ctypes.byref(matrix)):
             continue
+        fill, stroke = ctypes.c_int(), ctypes.c_int()
+        if not raw.FPDFPath_GetDrawMode(obj.raw, ctypes.byref(fill), ctypes.byref(stroke)):
+            fill.value, stroke.value = 0, 1
+        fill_only = bool(fill.value) and not stroke.value
         a, b, c, d, e, f = matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f
         points: list[tuple[float, float]] = []
+        subpath: list[tuple[float, float]] = []
         start: tuple[float, float] | None = None
         count = raw.FPDFPath_CountSegments(obj.raw)
         for i in range(max(count, 0)):
@@ -78,15 +89,36 @@ def rulings(page) -> tuple[list[Rule], list[Rule]]:
             px, py = a * x.value + c * y.value + e, b * x.value + d * y.value + f
             kind = raw.FPDFPathSegment_GetType(segment)
             if kind == raw.FPDF_SEGMENT_MOVETO:
+                if fill_only:
+                    _filled(subpath, height, horizontal, vertical)
                 start = (px, py)
                 points = [start]
+                subpath = [start]
+                continue
+            subpath.append((px, py))
+            if fill_only:
                 continue
             if points:
                 _piece(points[-1], (px, py), height, horizontal, vertical, kind == raw.FPDF_SEGMENT_LINETO)
             points.append((px, py))
             if raw.FPDFPathSegment_GetClose(segment) and start is not None:
                 _piece((px, py), start, height, horizontal, vertical, True)
+        if fill_only:
+            _filled(subpath, height, horizontal, vertical)
     return _merge(horizontal), _merge(vertical)
+
+
+def _filled(points, height, horizontal, vertical) -> None:
+    """A filled, unstroked subpath: a ruling along its centre when thin, nothing when it is shading."""
+    if len(points) < 2:
+        return
+    x0, x1 = min(p[0] for p in points), max(p[0] for p in points)
+    y0, y1 = height - max(p[1] for p in points), height - min(p[1] for p in points)
+    w, h = x1 - x0, y1 - y0
+    if h <= THIN_FILL and w >= MIN_PIECE and w >= h:
+        horizontal.append(Rule((y0 + y1) / 2, x0, x1))
+    elif w <= THIN_FILL and h >= MIN_PIECE:
+        vertical.append(Rule((x0 + x1) / 2, y0, y1))
 
 
 def _piece(p, q, height, horizontal, vertical, straight: bool) -> None:

@@ -124,5 +124,78 @@ class RuledTableTest(unittest.TestCase):
         self.assertEqual(doc.text, "פסקה במסגרת\n")
 
 
+TALL = [700.0, 640.0, 610.0, 580.0]  # a header row tall enough for three lines of text
+LEADING = 14.0
+
+
+def tall_grid():
+    return [(XS[c], y, XS[c + 1], y) for y in TALL for c in range(3)] + [(x, TALL[r], x, TALL[r + 1]) for x in XS for r in range(3)]
+
+
+def multiline_page(shaded: bool, **page) -> PdfPage:
+    """A table whose header cells hold one, two and three lines. With shading, as Word draws it:
+    a rectangle per cell, and one per line of text inside it, inset from the cell's sides."""
+    header = [["לא", "קיים", "רלוונטי"], ["תעודה"], ["סעיף", "במכרז"]]  # visual order, left to right
+    body = [["כן", "אישור רישום", "3.1.1"], ["לא", "אישור ניהול", "3.1.2"]]
+    lines, fills = [], []
+    for c, texts in enumerate(header):
+        for k, text in enumerate(texts):
+            lines.append(TextLine(text, XS[c + 1] - 8, TALL[0] - 14 - k * LEADING, size=11))
+            if shaded:
+                top = TALL[0] - 2 - k * LEADING
+                fills.append((XS[c] + 5, top - LEADING, XS[c + 1] - XS[c] - 10, LEADING))
+        if shaded:
+            fills.append((XS[c], TALL[1], XS[c + 1] - XS[c], TALL[0] - TALL[1]))
+    for r, row in enumerate(body, start=1):
+        for c, text in enumerate(row):
+            lines.append(TextLine(text, XS[c + 1] - 8, TALL[r] - 20))
+    return PdfPage(lines=lines, rules=tall_grid(), fills=fills, **page)
+
+
+class RowsAndBordersTest(unittest.TestCase):
+    """The lead's D3b review: multi-line cells split into rows, and doubled borders made spans."""
+
+    def test_a_cell_of_several_lines_stays_one_cell(self) -> None:
+        for shaded in (False, True):
+            with self.subTest(shaded=shaded):
+                doc = heocr.extract(make_pdf([multiline_page(shaded)]), ocr=False)
+                (table,) = tables_of(doc)
+                cells = [[c.text for c in row] for row in table.cells]
+                self.assertEqual(
+                    cells,
+                    [["סעיף\nבמכרז", "תעודה", "לא\nקיים\nרלוונטי"], ["3.1.1", "אישור רישום", "כן"], ["3.1.2", "אישור ניהול", "לא"]],
+                )
+                self.assertTrue(all(c.colspan == 1 and c.rowspan == 1 for row in table.cells for c in row))
+                self.assertNotIn("table_rows_independent", table.flags)
+                cov = doc.pages[0].coverage
+                self.assertEqual(cov["chars_in_tables"], cov["chars_read"])
+
+    def test_double_and_thick_borders_make_no_spans(self) -> None:
+        variants = [
+            {"rules_as": "double", "rule_gap": 3.0},
+            {"rules_as": "double", "rule_gap": 4.5},
+            {"rules_as": "stroke", "rule_width": 3.0},
+            {"rules_as": "rects"},
+        ]
+        for variant in variants:
+            with self.subTest(**variant):
+                page = table_page(VISUAL)
+                for key, value in variant.items():
+                    setattr(page, key, value)
+                doc = heocr.extract(make_pdf([page]), ocr=False)
+                (table,) = tables_of(doc)
+                self.assertEqual([[c.text for c in row] for row in table.cells], [["שם", "תפקיד", "סכום"], ["ספק א", "מנהל", "100 ₪"], ["ספק ב", "עובד", "200 ₪"]])
+                self.assertTrue(all(c.colspan == 1 for row in table.cells for c in row))
+
+    def test_shading_alone_is_not_a_table(self) -> None:
+        # Shaded boxes side by side (a page banner, a coloured background) have no rulings.
+        fills = [(XS[c], YS[r + 1], XS[c + 1] - XS[c], YS[r] - YS[r + 1]) for r in range(3) for c in range(3)]
+        page = table_page(VISUAL, rules=[])
+        page.fills = fills
+        doc = heocr.extract(make_pdf([page]), ocr=False)
+        self.assertEqual(tables_of(doc), [])
+        self.assertIn("ספק א", doc.text)
+
+
 if __name__ == "__main__":
     unittest.main()
