@@ -100,10 +100,14 @@ def _md_block(block: "Block") -> str:
     if block.kind == "figure":
         return "<!-- heocr: figure not read -->"
     label = block.label
+    text = block.text
+    for ref in sorted(block.note_refs or [], key=lambda r: -r["offset"]):
+        # Footnote references as Markdown footnotes, tied to their place; endnotes keyed "e<id>".
+        key = ref["id"] if ref["kind"] == "footnote" else f"e{ref['id']}"
+        text = text[: ref["offset"]] + f"[^{key}]" + text[ref["offset"] :]
     if label and _MD_LIST_MARKER.match(label):
         # "2." at the start of a line would become a Markdown list and be renumbered.
         label = _MD_LIST_MARKER.sub(r"\1\\\2", label)
-    text = block.text
     if label:
         joiner = "" if "label_suffix_nothing" in block.flags else " "
         text = f"{label}{joiner}{text}"
@@ -133,7 +137,8 @@ def to_markdown(doc: "Document") -> str:
         for b in items:
             md = _md_block(b)
             if role in ("footnote", "endnote") and b.note_id:
-                md = f"[^{b.note_id}]: {md}"
+                key = b.note_id if role == "footnote" else f"e{b.note_id}"
+                md = f"[^{key}]: {md}"
             parts.append(md)
     for item in doc.unread:
         where = f" page {item.page + 1}" if item.page is not None else ""
