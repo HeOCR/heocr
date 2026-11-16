@@ -31,9 +31,13 @@ from heocr.ocr.regions import (  # noqa: F401  (re-exported for callers of the P
 )
 from heocr.pdf.classify import FIGURE_IMAGE, classify, object_stats, stream_signals, text_signals
 from heocr.pdf.lines import Atom, PageLines, build_lines, paragraphs
+from heocr.pdf.tables import find_tables, rulings, table_blocks
 from heocr.textflags import is_private_use, text_flags
 
 TOOL = "heocr.pdf"
+# A document is RTL when Hebrew is at least this share of its letters: a Hebrew tender with English
+# tables stays RTL, an English document with a Hebrew quotation does not.
+RTL_DOCUMENT_SHARE = 0.25
 # Fonts whose private-use codes are signs (bullets, boxes, arrows), not letters.
 SYMBOL_FONT = re.compile(r"wingdings|webdings|symbol|dingbats", re.I)
 # Characters whose baseline angle has a sine above this are rotated text.
@@ -171,6 +175,31 @@ def _attach_marks(atoms: list[Atom], marks: list[Atom]) -> None:
             best.text += mark.text
 
 
+def document_is_rtl(pdf) -> bool:
+    """The document's direction, from its script: RTL when Hebrew is at least ``RTL_DOCUMENT_SHARE`` of its letters.
+
+    Tables take the document's direction, not their own (the volunteer's ``clean.py`` rule 8:
+    an English table in a Hebrew document is still RTL).
+    """
+    import pypdfium2.raw as raw
+
+    hebrew = latin = 0
+    for index in range(len(pdf)):
+        page = pdf[index]
+        textpage = page.get_textpage()
+        try:
+            for i in range(raw.FPDFText_CountChars(textpage)):
+                code = raw.FPDFText_GetUnicode(textpage, i)
+                if 0x05D0 <= code <= 0x05EA:
+                    hebrew += 1
+                elif 0x41 <= code <= 0x5A or 0x61 <= code <= 0x7A:
+                    latin += 1
+        finally:
+            textpage.close()
+            page.close()
+    return hebrew > 0 and hebrew >= RTL_DOCUMENT_SHARE * (hebrew + latin)
+
+
 def eth_fonts_of(pdf) -> frozenset[str]:
     """Fonts whose ð is a broken נ: ð next to a Hebrew letter, and no נ anywhere in that font.
 
@@ -270,6 +299,7 @@ def read_pdf(body: bytes, doc: Document) -> None:
         return
     try:
         doc.page_count = len(pdf)
+        doc._rtl = document_is_rtl(pdf)
         eth_fonts = eth_fonts_of(pdf) if doc.options.get("repairs", True) else frozenset()
         font_maps = _learn_font_maps(doc, pdf) if doc.options.get("repairs", True) else {}
         for index in range(len(pdf)):
@@ -432,7 +462,22 @@ def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = froz
         )
         doc.unread.append(Unread(scope="page", reason=f"class_{page_class}_no_route", page=index, detail=_NO_ROUTE[page_class]))
         return
-    read = read_t1(doc, index, built)
+    # Ruled tables first: their characters go to cells, the rest to lines (D3b).
+    tables = find_tables(*rulings(page)) if stats.paths else []
+    table_flags = sorted({f for t in tables if not t.rows for f in t.flags if f == "table_grid_unresolved"})
+    t_blocks, body_atoms, in_tables, rejected = table_blocks(index, text.atoms, tables, doc._rtl)
+    if rejected:
+        table_flags.append("table_rejected_crosses_text")
+    body = build_lines(body_atoms) if t_blocks else built
+    first = len(doc.blocks)
+    in_lines = read_t1(doc, index, body)
+    _place_tables(doc, first, t_blocks)
+    read = in_lines + in_tables
+    # Silent loss check: every layer character ends up in a cell or in a line, never in neither.
+    ink = sum(1 for a in text.atoms if not a.is_space)
+    placed_ink = in_tables + sum(1 for a in body_atoms if not a.is_space)
+    if placed_ink != ink:
+        flags = flags + ["coverage_mismatch"]
     # Image regions are accounted on every class read through the text layer (T1, T2, T6). When
     # images cover a T6 share of the page, whatever the class (a T2 page can too), they go to
     # region OCR; otherwise they are logos and icons, counted in coverage.
@@ -451,13 +496,27 @@ def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = froz
             {
                 "chars_total": text.chars_total,
                 "chars_read": read,
+                "chars_in_tables": in_tables,
+                "chars_in_lines": in_lines,
                 **regions,
                 "status": status,
-                "selection_safe": built.selection_safe,
+                "selection_safe": body.selection_safe,
             },
-            flags + built.flags,
+            flags + body.flags + table_flags + (["ruled_tables"] if t_blocks else []),
         )
     )
+
+
+def _place_tables(doc: Document, first: int, tables: list[Block]) -> None:
+    """Insert a page's table blocks among its line blocks, by their top edge."""
+    for table in sorted(tables, key=lambda t: t.bbox[1]):
+        at = len(doc.blocks)
+        for i in range(first, len(doc.blocks)):
+            block = doc.blocks[i]
+            if block.bbox is not None and block.bbox[1] > table.bbox[1]:
+                at = i
+                break
+        doc.blocks.insert(at, table)
 
 
 def _render(page) -> tuple[object, float]:
