@@ -106,6 +106,7 @@ class TextLine:
     y: float  # baseline, PDF coordinates (origin bottom-left)
     size: float = 12.0
     rtl: bool = True
+    vertical: bool = False  # drawn top to bottom, each glyph rotated 90 degrees
 
 
 @dataclass
@@ -120,6 +121,8 @@ class PdfPage:
     images: list[tuple[float, float, float, float]] = field(default_factory=list)  # x, y, w, h
     paths: int = 0
     rotate: int = 0
+    unit_font_size: bool = False  # "Tf 1" with the size in the text matrix, as many producers write
+    glyphs: list[tuple[str, float, float]] = field(default_factory=list)  # extra glyphs (char, x, y), drawn as is
 
 
 def lines_block(texts: list[str], *, right: float = 545.0, top: float = 780.0, leading: float = 18.0, size: float = 12.0) -> list[TextLine]:
@@ -141,7 +144,9 @@ def make_pdf(pages: list[PdfPage]) -> bytes:
 
     page_ids = []
     for page in pages:
-        chars = sorted({ch for line in page.lines for ch in line.text if page.real_spaces or ch != " "})
+        chars = sorted(
+            {ch for line in page.lines for ch in line.text if page.real_spaces or ch != " "} | {g[0] for g in page.glyphs}
+        )
         codes = {ch: i + 1 for i, ch in enumerate(chars)}
         if len(codes) > 254:
             raise ValueError("one Type3 font holds at most 254 glyphs")
@@ -172,8 +177,16 @@ def make_pdf(pages: list[PdfPage]) -> bytes:
                 placed.sort(key=lambda item: item[0])
             sequence = [(ch, px) for _, ch, px in placed]
             mode = 3 if page.invisible else 0
-            for ch, px in sequence:
-                content.append(f"BT {mode} Tr /F1 {line.size:g} Tf 1 0 0 1 {px:.3f} {line.y:.3f} Tm <{codes[ch]:02X}> Tj ET")
+            for k, (ch, px) in enumerate(sequence):
+                if line.vertical:
+                    y = line.y - k * line.size * 0.6
+                    content.append(f"BT {mode} Tr /F1 {line.size:g} Tf 0 -1 1 0 {line.x:.3f} {y:.3f} Tm <{codes[ch]:02X}> Tj ET")
+                elif page.unit_font_size:
+                    content.append(f"BT {mode} Tr /F1 1 Tf {line.size:g} 0 0 {line.size:g} {px:.3f} {line.y:.3f} Tm <{codes[ch]:02X}> Tj ET")
+                else:
+                    content.append(f"BT {mode} Tr /F1 {line.size:g} Tf 1 0 0 1 {px:.3f} {line.y:.3f} Tm <{codes[ch]:02X}> Tj ET")
+        for ch, gx, gy in page.glyphs:
+            content.append(f"BT /F1 12 Tf 1 0 0 1 {gx:.3f} {gy:.3f} Tm <{codes[ch]:02X}> Tj ET")
         for i in range(page.paths):
             content.append(f"{20 + (i % 50) * 5} {20 + (i // 50) * 5} 3 3 re f")
         resources = ""

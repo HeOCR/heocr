@@ -26,8 +26,10 @@ import statistics
 import unicodedata
 from dataclasses import dataclass, field
 
-# A gap wider than this share of the font size, with no space character in it, is a word break.
-WORD_GAP_EM = 0.2
+# A gap wider than this share of the loose box height (the font's ascent to descent, about
+# 1.1-1.2 em), with no space character in it, is a word break. The reported font size is not used:
+# many producers set it to 1 and scale the text matrix instead.
+WORD_GAP_EM = 0.15
 # tendex: rows cluster within 0.42 of the median height; a column gap is max(24 pt, 2.5 heights).
 ROW_TOLERANCE = 0.42
 COLUMN_GAP_MIN = 24.0
@@ -164,18 +166,26 @@ def _strip_spaces(group: list[Atom]) -> list[Atom]:
     return group[start:end]
 
 
+def _overlap(a: Atom, b: Atom) -> float:
+    return min(a.x1, b.x1) - max(a.x0, b.x0)
+
+
 def _units(component: list[Atom]) -> list[tuple[str, Atom | None]]:
     """Visual sequence of character units, with word breaks made explicit as spaces."""
     units: list[tuple[str, Atom | None]] = []
     previous: Atom | None = None
+    ink = [a for a in component if not a.is_space]
     for atom in component:
         if atom.is_space:
+            # A space glyph drawn over a letter (a geresh placed on it, say) is not a visual gap.
+            if any(_overlap(atom, other) > 0.5 * min(atom.x1 - atom.x0, other.x1 - other.x0) for other in ink):
+                continue
             if units and units[-1][0] != " ":
                 units.append((" ", atom))
             continue
         if previous is not None and units and units[-1][0] != " ":
             gap = atom.x0 - previous.x1
-            if gap > WORD_GAP_EM * max(atom.size, previous.size):
+            if gap > WORD_GAP_EM * max(atom.height, previous.height):
                 tight = gap <= min(atom.height, previous.height) * TIGHT_JOIN
                 # tendex _join_words: no space before closing or after opening punctuation when tight.
                 if not (tight and (atom.text[:1] in _CLOSING or previous.text[-1:] in _OPENING)):

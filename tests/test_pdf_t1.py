@@ -95,6 +95,32 @@ class T1ReadingTest(unittest.TestCase):
         self.assertEqual(doc.text, "עמוד ראשון\fעמוד שלישי\n")
         self.assertIn("<!-- page 3 -->", doc.markdown)
 
+    def test_unit_font_size_with_scaled_matrix(self) -> None:
+        # Many producers write "Tf 1" and put the size in the text matrix; pdfium then reports size 1.
+        for spaces in (True, False):
+            with self.subTest(spaces=spaces):
+                page = PdfPage(lines=lines_block(LINES), unit_font_size=True, real_spaces=spaces)
+                self.assertEqual(lines_of(heocr.extract(make_pdf([page]))), LINES)
+
+    def test_astral_characters_join_their_surrogates(self) -> None:
+        for order in ("logical", "visual"):
+            with self.subTest(order=order):
+                doc = heocr.extract(make_pdf([PdfPage(lines=lines_block(["נוסחה 𝐀 כאן", "ערך 𝟏𝟐 ועוד"]), stream_order=order)]))
+                self.assertEqual(lines_of(doc), ["נוסחה 𝐀 כאן", "ערך 𝟏𝟐 ועוד"])
+                doc.to_json().encode("utf-8")
+
+    def test_rotated_text_is_reported_not_split_into_letters(self) -> None:
+        page = PdfPage(lines=lines_block(["המציע יגיש את הצעתו"]) + [TextLine("טבלה", 100, 500, vertical=True)])
+        doc = heocr.extract(make_pdf([page]))
+        self.assertEqual(lines_of(doc), ["המציע יגיש את הצעתו"])
+        self.assertIn("rotated_text_not_read", doc.pages[0].flags)
+        self.assertEqual(doc.pages[0].coverage["status"], "partial")
+        self.assertIn("rotated_text_not_read", [u.reason for u in doc.unread])
+
+    def test_space_glyph_drawn_over_a_letter_is_not_a_word_break(self) -> None:
+        page = PdfPage(lines=lines_block(["נספח ג'"]), glyphs=[(" ", 506.0, 780.0)])
+        self.assertEqual(lines_of(heocr.extract(make_pdf([page]))), ["נספח ג'"])
+
     def test_broken_pdf_is_reported(self) -> None:
         doc = heocr.extract(b"%PDF-1.7\n garbage")
         self.assertEqual(doc.unread[0].reason, "pdf_unreadable")
