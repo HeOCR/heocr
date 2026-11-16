@@ -37,7 +37,8 @@ class OcrRouteTest(unittest.TestCase):
         return [json.loads(line) for line in self.log.read_text(encoding="utf-8").splitlines()] if self.log.exists() else []
 
     def test_image_only_page_is_read_by_ocr(self) -> None:
-        doc = heocr.extract(make_pdf([PdfPage(images=FULL_PAGE)]), tesseract=FAKE)
+        # A white scan: the fake engine's lines are all there is, so no ink is left unread.
+        doc = heocr.extract(make_pdf([PdfPage(images=FULL_PAGE, image_gray=0xFF)]), tesseract=FAKE)
         page = doc.pages[0]
         self.assertEqual((page.page_class, page.route, page.coverage["status"]), ("T5", "ocr", "ocr"))
         self.assertEqual([b.text for b in doc.blocks], ["שלום עולם\nשורה", "פסקה"])
@@ -107,8 +108,15 @@ class OcrRouteTest(unittest.TestCase):
         self.assertTrue(regions and all("from_image_region" in b.flags for b in regions))
         top = 842 - 400  # the region's top edge, top-left origin
         self.assertAlmostEqual(regions[0].bbox[1], top + 48.0, delta=0.5)  # crop origin is pixel-aligned
-        self.assertEqual([u.reason for u in doc.unread], ["image_region_too_small"])
-        self.assertEqual(record.coverage["status"], "partial")
+        # The grey test image is ink everywhere, beyond the fake engine's lines: flagged on the block.
+        self.assertEqual(doc.unread, [])
+        self.assertTrue(all("ocr_short_for_ink" in b.flags for b in regions))
+        self.assertGreater(regions[0].ocr["ink_outside_share"], 0.5)
+        self.assertEqual(
+            {k: record.coverage[k] for k in ("image_regions", "image_regions_ocr", "image_regions_small", "image_regions_unread")},
+            {"image_regions": 2, "image_regions_ocr": 1, "image_regions_small": 1, "image_regions_unread": 0},
+        )
+        self.assertGreater(record.coverage["chars_ocr"], 0)
 
     def test_ocr_off(self) -> None:
         doc = heocr.extract(make_pdf([PdfPage(images=FULL_PAGE)]), ocr=False, tesseract=FAKE)
@@ -191,6 +199,50 @@ class OcrRouteTest(unittest.TestCase):
         page = Page()
         _, scale = _render(page)
         self.assertLessEqual((14400 * scale) ** 2, MAX_RENDER_PIXELS * 1.0001)
+
+
+    def test_small_images_on_t1_are_counted_not_recognized(self) -> None:
+        page = PdfPage(lines=lines_block(HEBREW), images=[(500, 780, 40, 40)])
+        doc = heocr.extract(make_pdf([page]), tesseract=FAKE)
+        record = doc.pages[0]
+        self.assertEqual((record.page_class, record.coverage["image_regions"], record.coverage["image_regions_small"]), ("T1", 1, 1))
+        self.assertFalse([c for c in self.calls() if c and not c[0].startswith("--")])
+        self.assertEqual(record.coverage["status"], "read")
+
+    def test_t2_page_with_a_large_image_gets_region_accounting(self) -> None:
+        page = PdfPage(lines=lines_block(HEBREW), stream_order="visual", images=[(50, 100, 495, 300)], image_gray=0xFF)
+        doc = heocr.extract(make_pdf([page]), tesseract=FAKE)
+        record = doc.pages[0]
+        self.assertEqual(record.page_class, "T2")
+        self.assertEqual(record.coverage["image_regions"], 1)
+        self.assertEqual([u.reason for u in doc.unread], ["image_region_blank"])
+
+    def test_scan_with_ink_beyond_the_ocr_lines_is_flagged(self) -> None:
+        doc = heocr.extract(make_pdf([PdfPage(images=FULL_PAGE)]), tesseract=FAKE)  # grey: ink everywhere
+        self.assertIn("ocr_short_for_ink", doc.pages[0].flags)
+        self.assertEqual(doc.pages[0].coverage["status"], "partial")
+        self.assertGreater(doc.pages[0].coverage["ink_outside_ocr_share"], 0.5)
+        self.assertIn("ocr_short_for_ink", [u.reason for u in doc.unread])
+
+
+class InkTest(unittest.TestCase):
+    def test_ink_outside_lines(self) -> None:
+        from PIL import Image, ImageDraw
+
+        from heocr.ocr.tesseract import OcrLine, OcrResult
+        from heocr.pdf.reader import ink_outside, short_for_ink
+
+        image = Image.new("L", (1000, 400), 255)
+        draw = ImageDraw.Draw(image)
+        draw.rectangle([100, 100, 900, 140], fill=0)  # a line of "text"
+        draw.rectangle([100, 250, 900, 330], fill=0)  # ink the OCR did not read
+        read = OcrResult([OcrLine("x", [100, 100, 900, 140], [90.0])])
+        total, outside = ink_outside(image, [line.bbox for line in read.lines])
+        self.assertEqual(total, 801 * 41 + 801 * 81)
+        self.assertEqual(outside, 801 * 81)
+        self.assertEqual(short_for_ink(image, read)[0], True)
+        both = OcrResult([OcrLine("x", [100, 100, 900, 140], [90.0]), OcrLine("y", [100, 250, 900, 330], [90.0])])
+        self.assertEqual(short_for_ink(image, both), (False, 0.0))
 
 
 class MaskTest(unittest.TestCase):

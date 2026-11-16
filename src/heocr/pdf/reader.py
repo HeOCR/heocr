@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from heocr import repairs
 from heocr.contract import Block, Document, Line, Page, Unread
 from heocr.ocr import OcrUnavailable, block_ocr, engine_for, unavailable_reason
-from heocr.pdf.classify import classify, object_stats, stream_signals, text_signals
+from heocr.pdf.classify import FIGURE_IMAGE, classify, object_stats, stream_signals, text_signals
 from heocr.pdf.lines import Atom, PageLines, build_lines, paragraphs
 from heocr.textflags import text_flags
 
@@ -326,14 +326,13 @@ def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = froz
         doc.unread.append(Unread(scope="page", reason=f"class_{page_class}_no_route", page=index, detail=_NO_ROUTE[page_class]))
         return
     read = read_t1(doc, index, built)
-    status = "read" if read >= text.chars_total else "partial"
-    route = "text_layer"
-    if page_class == "T6":
-        # The text layer is read; each image region, which may hold text, goes to region OCR.
-        ocr_regions = _ocr_regions(doc, index, page, stats.image_boxes, text.drawn_boxes)
-        status = "partial" if ocr_regions < len(stats.image_boxes) else status
-        if ocr_regions:
-            route = "text_layer+ocr_regions"
+    # Image regions are accounted on every class read through the text layer (T1, T2, T6). When
+    # images cover a T6 share of the page, whatever the class (a T2 page can too), they go to
+    # region OCR; otherwise they are logos and icons, counted in coverage.
+    ocr_wanted = stats.image_coverage >= FIGURE_IMAGE
+    regions = _ocr_regions(doc, index, page, width, height, stats.image_boxes, text.drawn_boxes, ocr_wanted)
+    status = "read" if read >= text.chars_total and not regions["image_regions_unread"] else "partial"
+    route = "text_layer+ocr_regions" if regions["image_regions_ocr"] else "text_layer"
     doc.pages.append(
         Page(
             index,
@@ -345,12 +344,34 @@ def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = froz
             {
                 "chars_total": text.chars_total,
                 "chars_read": read,
+                **regions,
                 "status": status,
                 "selection_safe": built.selection_safe,
             },
             flags + built.flags,
         )
     )
+
+
+def ink_outside(image, boxes_px, pad: int = 2) -> tuple[int, int]:
+    """Dark pixels in a grey image, in total and outside the given boxes (OCR line boxes)."""
+    from PIL import ImageDraw
+
+    total = sum(image.histogram()[:INK_LEVEL])
+    if not total:
+        return 0, 0
+    rest = image.copy()
+    draw = ImageDraw.Draw(rest)
+    for x0, y0, x1, y1 in boxes_px:
+        draw.rectangle([x0 - pad, y0 - pad, x1 + pad, y1 + pad], fill=255)
+    return total, sum(rest.histogram()[:INK_LEVEL])
+
+
+def short_for_ink(image, result) -> tuple[bool, float]:
+    """Whether OCR left much of an image's ink outside every line it read (region accounting)."""
+    total, outside = ink_outside(image, [line.bbox for line in result.lines])
+    share = outside / total if total else 0.0
+    return outside >= SHORT_INK_MIN_PX and share >= SHORT_INK_SHARE, round(share, 4)
 
 
 def _render(page) -> tuple[object, float]:
@@ -429,10 +450,17 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
         flags = flags + ["text_layer_ignored"]
     if not result.lines:
         doc.unread.append(Unread(scope="page", reason="ocr_found_no_text", page=index, detail=f"class {page_class}"))
+    short, outside_share = short_for_ink(image.convert("L"), result)
+    if short and result.lines:
+        flags = flags + ["ocr_short_for_ink"]
+        doc.unread.append(
+            Unread(scope="page", reason="ocr_short_for_ink", page=index, detail=f"{outside_share:.0%} of the ink lies outside every OCR line")
+        )
     doc.pages.append(
         Page(index, width, height, page_class, "ocr", signals,
              {"chars_total": text.chars_total, "chars_read": 0, "chars_ocr": read,
-              "status": "ocr" if result.lines else "unread"}, flags)
+              "ink_outside_ocr_share": outside_share,
+              "status": "ocr" if result.lines and not short else "partial" if result.lines else "unread"}, flags)
     )
 
 
@@ -465,53 +493,71 @@ def has_ink(image) -> bool:
     return dark >= max(MIN_INK_PIXELS, MIN_INK_SHARE * image.size[0] * image.size[1])
 
 
-def _ocr_regions(doc: Document, index: int, page, boxes: list[list[float]], drawn_boxes) -> int:
-    """Region OCR for image regions of a page read from its text layer. Returns regions recognized.
+def _ocr_regions(
+    doc: Document, index: int, page, width: float, height: float, boxes: list[list[float]], drawn_boxes, ocr_wanted: bool = True
+) -> dict:
+    """Region OCR for the image regions of a page read from its text layer. Returns coverage counts.
 
     The layer's own characters are masked out of each region first, so text already read from
     the layer (labels over a diagram, text on a background image) is not read again by OCR.
+    Regions under REGION_MIN_PAGE_SHARE of the page (logos, icons) are counted, not recognized.
     """
+    counts = {"image_regions": len(boxes), "image_regions_ocr": 0, "image_regions_unread": 0, "image_regions_small": 0, "chars_ocr": 0}
     if not boxes:
-        return 0
+        return counts
+    large = [b for b in boxes if ocr_wanted and (b[2] - b[0]) * (b[3] - b[1]) >= REGION_MIN_PAGE_SHARE * width * height]
+    counts["image_regions_small"] = len(boxes) - len(large)
+    if not large:
+        return counts
+
+    def unread(reason: str, box, detail: str | None = None) -> None:
+        doc.unread.append(Unread(scope="page", reason=reason, page=index, bbox=box, detail=detail))
+        counts["image_regions_unread"] += 1
+
     engine = engine_for(doc)
     if engine is None:
         reason = unavailable_reason(doc)
-        for box in boxes:
-            doc.unread.append(Unread(scope="page", reason="image_region_not_read", page=index, bbox=box, detail=reason))
-        return 0
+        for box in large:
+            unread("image_region_not_read", box, reason)
+        return counts
     image, scale = _render(page)
-    done = 0
-    for box in boxes:
+    for box in large:
         crop = [int(box[0] * scale), int(box[1] * scale), int(box[2] * scale + 0.999), int(box[3] * scale + 0.999)]
         if crop[2] - crop[0] < MIN_REGION_PX or crop[3] - crop[1] < MIN_REGION_PX:
-            doc.unread.append(Unread(scope="page", reason="image_region_too_small", page=index, bbox=box))
+            unread("image_region_too_small", box)
             continue
         inside = [b for b in drawn_boxes if b[0] < box[2] and b[2] > box[0] and b[1] < box[3] and b[3] > box[1]]
         region, masked = mask_layer_text(image.crop(crop), (crop[0] / scale, crop[1] / scale), scale, inside)
         if not has_ink(region):
+            # Not an unread loss: the layer holds this region's text, or it holds none.
             reason = "image_region_text_in_layer" if masked else "image_region_blank"
             doc.unread.append(Unread(scope="page", reason=reason, page=index, bbox=box, detail=f"{masked} layer characters masked"))
             continue
         try:
             result = engine.recognize(region, dpi=round(scale * 72))
         except OcrUnavailable as exc:
-            doc.unread.append(Unread(scope="page", reason="ocr_failed", page=index, bbox=box, detail=str(exc)))
+            unread("ocr_failed", box, str(exc))
             continue
         if not result.lines:
-            doc.unread.append(Unread(scope="page", reason="image_region_no_text_found", page=index, bbox=box))
+            unread("image_region_no_text_found", box)
             continue
         confidence = result.mean_confidence
         if confidence is not None and confidence < REGION_MIN_CONFIDENCE:
             # Logos and drawings yield stray marks at low confidence; they are reported, not emitted.
-            doc.unread.append(
-                Unread(scope="page", reason="image_region_ocr_low_confidence", page=index, bbox=box, detail=f"mean confidence {confidence}")
-            )
+            unread("image_region_ocr_low_confidence", box, f"mean confidence {confidence}")
             continue
         # Region text follows the page's text-layer blocks; its place in the reading order is not resolved.
         flags = ("from_image_region", "reading_order_region_appended") + (("layer_text_masked",) if masked else ())
-        _ocr_blocks(doc, index, engine, result, scale, offset=(crop[0] / scale, crop[1] / scale), flags=flags)
-        done += 1
-    return done
+        short, share = short_for_ink(region, result)
+        if short:
+            # In a region, ink beyond the text is often the drawing itself: flagged on the block, for review.
+            flags += ("ocr_short_for_ink",)
+        first = len(doc.blocks)
+        counts["chars_ocr"] += _ocr_blocks(doc, index, engine, result, scale, offset=(crop[0] / scale, crop[1] / scale), flags=flags)
+        for block in doc.blocks[first:]:
+            block.ocr["ink_outside_share"] = share
+        counts["image_regions_ocr"] += 1
+    return counts
 
 
 # Classes read through the text layer. T2 (a visual-order stream) is read by the same geometric
@@ -528,6 +574,12 @@ MAX_RENDER_PIXELS = 40_000_000
 INK_LEVEL = 160
 MIN_INK_PIXELS = 50
 MIN_INK_SHARE = 0.0005
+# Within a page sent to region OCR, regions under this share of the page are counted, not recognized.
+REGION_MIN_PAGE_SHARE = 0.01
+# OCR is "short for its ink" when at least this many dark pixels, and this share of all dark
+# pixels, lie outside every line it read (provisional; tuned on D-bench and dev only).
+SHORT_INK_MIN_PX = 5000
+SHORT_INK_SHARE = 0.5
 # Image regions smaller than this (in rendered pixels, either side) are icons, not text.
 MIN_REGION_PX = 24
 # Region OCR below this mean word confidence is stray marks from logos and drawings (dev split:
