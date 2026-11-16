@@ -22,6 +22,7 @@ classifiers = [
 dependencies = [
   "defusedxml>=0.7",
   "pypdfium2>=4.30",
+  "Pillow>=10",
 ]
 
 [project.scripts]
