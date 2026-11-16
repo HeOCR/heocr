@@ -68,11 +68,14 @@ def _font_name(raw, textpage, index: int) -> str:
     return buffer.value.decode("utf-8", "replace")
 
 
-def page_text(page, eth_fonts: frozenset[str] = frozenset()) -> PageText:
+def page_text(page, eth_fonts: frozenset[str] = frozenset(), font_maps: dict | None = None, all_fonts: bool = False) -> PageText:
     """Characters with loose boxes, in page coordinates with the origin at the top left.
 
     ``eth_fonts`` names the fonts whose ð is a broken נ (``latin1_eth_nun``, decided per font
     by ``eth_fonts_of``); in those fonts the character is restored and marked as repaired.
+    ``font_maps`` (font -> {code: letter}) are the maps ``font_private_use_by_ocr`` learned for this
+    document. Atoms carry their font name for private-use codes, or for every character with
+    ``all_fonts``.
     """
     import pypdfium2.raw as raw
 
@@ -126,13 +129,21 @@ def page_text(page, eth_fonts: frozenset[str] = frozenset()) -> PageText:
                 # Rotated text has no horizontal baseline; line building would make one line per letter.
                 out.rotated += 1
                 continue
-            if is_private_use(ch):
-                symbolic = SYMBOL_FONT.search(_font_name(raw, textpage, index)) is not None
-                (out.symbol_pua if symbolic else out.other_pua).add(ch)
+            font = ""
             repaired = None
+            if is_private_use(ch):
+                font = _font_name(raw, textpage, index)
+                symbolic = SYMBOL_FONT.search(font) is not None
+                (out.symbol_pua if symbolic else out.other_pua).add(ch)
+                if symbolic:
+                    font = ""
+                elif font_maps and ch in font_maps.get(font, {}):
+                    ch, repaired = font_maps[font][ch], repairs.FONT_PRIVATE_USE_BY_OCR.rule_id
+            elif all_fonts and not ch.isspace():
+                font = _font_name(raw, textpage, index)
             if ch == "ð" and eth_fonts and _font_name(raw, textpage, index) in eth_fonts:
                 ch, repaired = "נ", repairs.LATIN1_ETH_NUN.rule_id
-            atom = Atom(ch, left, height - top, right, height - bottom, size or 1.0, index, repaired)
+            atom = Atom(ch, left, height - top, right, height - bottom, size or 1.0, index, repaired, font)
             (marks if unicodedata.combining(ch) else out.atoms).append(atom)
     finally:
         textpage.close()
@@ -198,6 +209,13 @@ def read_t1(doc: Document, page_index: int, built: PageLines) -> int:
         lines: list[Line] = []
         bullets: Counter = Counter()
         eths = sum(1 for line in group for atom in line.atoms if atom.repaired == repairs.LATIN1_ETH_NUN.rule_id)
+        # A learned map gives each letter at most one code per font, so the code is recoverable.
+        by_ocr = Counter(
+            (f"U+{ord(doc._font_codes[(atom.font, atom.text)]):04X}", atom.text)
+            for line in group
+            for atom in line.atoms
+            if atom.repaired == repairs.FONT_PRIVATE_USE_BY_OCR.rule_id
+        )
         for line in group:
             text = line.text
             if doc.options.get("repairs", True):
@@ -210,6 +228,8 @@ def read_t1(doc: Document, page_index: int, built: PageLines) -> int:
         block_repairs = repairs.record(repairs.SYMBOL_FONT_BULLET, bullets)
         if eths:
             block_repairs += repairs.record(repairs.LATIN1_ETH_NUN, Counter({("U+00F0", "נ"): eths}))
+        if by_ocr:
+            block_repairs += repairs.record(repairs.FONT_PRIVATE_USE_BY_OCR, by_ocr)
         bbox = [
             min(line.bbox[0] for line in group),
             min(line.bbox[1] for line in group),
@@ -251,16 +271,78 @@ def read_pdf(body: bytes, doc: Document) -> None:
     try:
         doc.page_count = len(pdf)
         eth_fonts = eth_fonts_of(pdf) if doc.options.get("repairs", True) else frozenset()
+        font_maps = _learn_font_maps(doc, pdf) if doc.options.get("repairs", True) else {}
         for index in range(len(pdf)):
             page = pdf[index]
             try:
-                _read_page(doc, index, page, eth_fonts)
+                _read_page(doc, index, page, eth_fonts, font_maps)
             finally:
                 page.close()
     finally:
         pdf.close()
     if doc.options.get("repairs", True):
         _repair_rtl_brackets(doc)
+
+
+def _learn_font_maps(doc: Document, pdf) -> dict[str, dict[str, str]]:
+    """``font_private_use_by_ocr`` for one document; {} when there is nothing to learn or no OCR."""
+    import pypdfium2.raw as raw
+
+    candidates = []
+    for index in range(len(pdf)):
+        page = pdf[index]
+        textpage = page.get_textpage()
+        try:
+            count = raw.FPDFText_CountChars(textpage)
+            codes = [raw.FPDFText_GetUnicode(textpage, i) for i in range(count)]
+            if any(
+                0xE000 <= c <= 0xF8FF and any(0x05D0 <= n <= 0x05EA for n in codes[max(i - 1, 0) : i] + codes[i + 1 : i + 2])
+                for i, c in enumerate(codes)
+            ):
+                candidates.append(index)
+        finally:
+            textpage.close()
+            page.close()
+    if not candidates:
+        return {}
+    engine = engine_for(doc)
+    if engine is None:
+        return {}
+    from heocr.pdf.fontmap import WORD_PSM, learn
+
+    font_letters: dict[str, Counter] = {}
+    pages = []
+    for index in range(len(pdf)):
+        page = pdf[index]
+        try:
+            text = page_text(page, all_fonts=True)
+        finally:
+            page.close()
+        for atom in text.atoms:
+            if atom.font and "\u05d0" <= atom.text[:1] <= "\u05ea":
+                font_letters.setdefault(atom.font, Counter())[atom.text[:1]] += 1
+        if index in candidates:
+            pages.append((index, text.atoms))
+
+    def render(index: int):
+        page = pdf[index]
+        try:
+            return _render(page)
+        finally:
+            page.close()
+
+    def recognize(image):
+        try:
+            return engine.recognize(image, dpi=RENDER_DPI, psm=WORD_PSM).lines
+        except OcrUnavailable:
+            return []
+
+    maps = learn(pages, render, recognize, font_letters)
+    doc.font_maps = [fmap.record() for fmap in maps]
+    for fmap in maps:
+        for code, letter in fmap.letters.items():
+            doc._font_codes[(fmap.font, letter)] = code
+    return {fmap.font: fmap.letters for fmap in maps if fmap.letters}
 
 
 def _repair_rtl_brackets(doc: Document) -> None:
@@ -298,9 +380,9 @@ def _report_side_losses(doc: Document, index: int, text: PageText, flags: list[s
         flags.append("lone_surrogates_replaced")
 
 
-def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = frozenset()) -> None:
+def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = frozenset(), font_maps: dict | None = None) -> None:
     width, height = page.get_size()
-    text = page_text(page, eth_fonts)
+    text = page_text(page, eth_fonts, font_maps)
     stats = object_stats(page)
     built = build_lines(text.atoms)
     chars = "".join(a.text for a in text.atoms)
@@ -327,7 +409,8 @@ def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = froz
             Page(index, width, height, "empty", "none", signals, {"chars_total": 0, "chars_read": 0, "status": "nothing_to_read"}, flags)
         )
         return
-    needs_ocr = page_class in OCR_CLASSES or (page_class == "T2" and "reversed_after_line_building" in flags)
+    # T3 reaches here only with codes no rule recovered: whole-page OCR, as the plan says.
+    needs_ocr = page_class in OCR_CLASSES or page_class == "T3" or (page_class == "T2" and "reversed_after_line_building" in flags)
     if needs_ocr:
         _ocr_page(doc, index, page, width, height, page_class, signals, text, flags)
         return
@@ -455,6 +538,8 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
     read = _ocr_blocks(doc, index, engine, result, scale)
     if page_class == "T4":
         flags = flags + ["text_layer_ignored"]
+    elif page_class == "T3":
+        flags = flags + ["text_layer_ignored_broken_mapping"]
     if not result.lines:
         doc.unread.append(Unread(scope="page", reason="ocr_found_no_text", page=index, detail=f"class {page_class}"))
     short, outside_share = short_for_ink(image.convert("L"), result)
