@@ -87,6 +87,23 @@ class TesseractScanTest(unittest.TestCase):
         self.assertEqual((found.ocr["cells_psm7"], found.ocr["cells_psm6"]), (11, 1))  # the two-line cell is a block
         self.assertIn("טבלת הספקים", doc.text)
 
+    def test_amounts_in_a_scanned_table_are_read_by_the_number_model(self) -> None:
+        # Stock heb read these cells as "12000", "00" and "1700"; eng reads them.
+        import pypdfium2 as pdfium
+
+        rows = [["שם", "סכום"], ["ספק ראשון", "300"], ["ספק שני", "8,500,000"], ["ספק שלישי", "15.7.2020"]]
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "amounts.docx"
+            source.write_bytes(Docx(body=[table(rows, borders=True)]).build())
+            subprocess.run(["soffice", "--headless", "--convert-to", "pdf", "--outdir", tmp, str(source)], check=True, capture_output=True, timeout=180)
+            pdf = pdfium.PdfDocument(str(Path(tmp) / "amounts.pdf"))
+            scan = Path(tmp) / "scan.pdf"
+            pdf[0].render(scale=300 / 72).to_pil().convert("L").save(scan, resolution=300)
+            pdf.close()
+            doc = heocr.extract(scan)
+        (found,) = [b for b in doc.blocks if b.kind == "table"]
+        self.assertEqual([[c.text for c in row] for row in found.cells], rows)
+
 
 if __name__ == "__main__":
     unittest.main()

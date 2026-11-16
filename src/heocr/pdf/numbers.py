@@ -58,6 +58,19 @@ def readings(token: str) -> tuple[str, str]:
     return token[::-1], ",".join(reversed(token.split(",")))
 
 
+def _partial(token: str, reading: str) -> bool:
+    """A reading of only some of a comma-joined token's parts ("1:05" of "1:05,28.9.2026"):
+    OCR missed part of it, which is no evidence that the layer is wrong."""
+    parts, got = token.split(","), reading.split(",")
+    if len(got) >= len(parts):
+        return False
+    return any(parts[i : i + len(got)] == got for i in range(len(parts) - len(got) + 1))
+
+
+def _digits(tokens: list[str]) -> str:
+    return "".join(ch for token in tokens for ch in token if ch.isdigit())
+
+
 def compare(layer: str, ocr: str, confidence: float | None = None) -> tuple[int, int, int, list[tuple[str, str]]]:
     """(numbers checked, agreed, disagreed, digit-group repairs confirmed as (token, reading)).
 
@@ -74,6 +87,9 @@ def compare(layer: str, ocr: str, confidence: float | None = None) -> tuple[int,
     repairs: list[tuple[str, str]] = []
     pool = Counter(seen)
     aligned = len(theirs) == len(mine) and confidence is not None and confidence >= MIN_CONFIDENCE
+    # The same digits in the same order, split into tokens differently ("1:05,28.9.2026" as one
+    # token against two): no evidence of an error, so no disagreement (dev: all 9 with eng).
+    same_digits = _digits(mine) == _digits(theirs)
     for position, token in enumerate(mine):
         if pool[token] > 0:
             pool[token] -= 1
@@ -85,6 +101,6 @@ def compare(layer: str, ocr: str, confidence: float | None = None) -> tuple[int,
             if len(confirmed) == 1:
                 repairs.append((token, confirmed[0]))
                 continue
-        if aligned and theirs[position] != token:
+        if aligned and not same_digits and theirs[position] != token and not _partial(token, theirs[position]):
             disagreed += 1
     return len(mine), agreed, disagreed, repairs

@@ -252,8 +252,9 @@ def _ruled_rows(rows: list[_Row], xs: list[float], rtl: bool, median_height: flo
         c = 0
         for first, last, atoms in merged:
             cells.extend(Cell("") for _ in range(first - c))
-            text = ledger.text(atoms, rtl)
-            cells.append(Cell(text, colspan=last - first + 1))
+            cell_lines: list = []
+            text = ledger.text(atoms, rtl, cell_lines)
+            cells.append(Cell(text, colspan=last - first + 1, _lines=cell_lines))
             c = last + 1
         cells.extend(Cell("") for _ in range(columns - c))
         out.append(list(reversed(cells)) if rtl else cells)
@@ -339,7 +340,7 @@ def _decide(rows, run, consumed, median_height, gap_limit, rtl, page_index, repa
         ledger = CellRepairs(repairs_on)
         for group in groups:
             texts = _cell_texts(group, count, rtl, ledger)
-            cells.append([Cell(text) for text in (reversed(texts) if rtl else texts)])
+            cells.append([Cell(text, _lines=lines) for text, lines in (reversed(texts) if rtl else texts)])
         placed = _ink(atoms)
         bbox = [
             min(line.bbox[0] for row in members for line in row.lines),
@@ -395,11 +396,15 @@ def _table_rows(members: list[_Row], bands_of: list[list[int]]) -> list[list[tup
     return groups
 
 
-def _cell_texts(group: list[tuple[_Row, list[int]]], count: int, rtl: bool, ledger: CellRepairs) -> list[str]:
-    """Cell texts of one table row, left to right."""
+def _cell_texts(group: list[tuple[_Row, list[int]]], count: int, rtl: bool, ledger: CellRepairs) -> list[tuple[str, list]]:
+    """Cell texts of one table row, left to right, each with its lines' [text, bbox]."""
     per_band: list[list[Atom]] = [[] for _ in range(count)]
     for row, bands in group:
         for line, band in zip(row.lines, bands):
             if 0 <= band < count:
                 per_band[band].extend(line.atoms)
-    return [ledger.text(atoms, rtl) if atoms else "" for atoms in per_band]
+    out = []
+    for atoms in per_band:
+        lines: list = []
+        out.append((ledger.text(atoms, rtl, lines) if atoms else "", lines))
+    return out

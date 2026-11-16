@@ -124,6 +124,49 @@ class OcrTableTest(unittest.TestCase):
         self.assertEqual(self.calls("6|7"), 0)
         self.assertNotIn("ocr_tables", doc.pages[0].flags)
 
+    def numbers_setup(self, eng: dict) -> None:
+        (Path(os.environ["FAKE_TESSDATA"]) / "eng.traineddata").write_bytes(b"fake eng model")
+        path = Path(self.tmp.name) / "cells_eng.json"
+        path.write_text(json.dumps({str(k): v for k, v in eng.items()}), encoding="utf-8")
+        patcher = mock.patch.dict(os.environ, {"FAKE_CELLS_ENG": str(path)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_a_numeric_cell_misread_by_heb_takes_the_number_model_reading(self) -> None:
+        # Stock heb read a cell's "8,500,000" as "00" (dev); the number model (eng) reads it.
+        texts = {**TEXTS, 70: "00"}
+        cells = Path(self.tmp.name) / "cells.json"
+        cells.write_text(json.dumps({str(k): v for k, v in texts.items()}), encoding="utf-8")
+        self.numbers_setup({70: "8,500,000", 100: "200"})
+        doc = heocr.extract(scanned_pdf(scan(LEVELS)), tesseract=FAKE)
+        (table,) = [b for b in doc.blocks if b.kind == "table"]
+        amount = table.cells[1][2]
+        self.assertEqual(amount.text, "8,500,000")
+        self.assertEqual(amount.flags, ["number_read_by_number_model"])
+        self.assertIn("numbers_read_by_number_model", table.flags)
+        self.assertEqual(table.checks, {"numbers": 1, "agreed": 1, "disagreed": 0, "read_by_number_model": 1})
+        self.assertEqual(table.cells[2][2].text, "200")  # the readings agree: unchanged
+        self.assertEqual(doc.components["tesseract:number_lang"], "eng")
+
+    def test_a_cell_with_words_is_only_compared(self) -> None:
+        texts = {**TEXTS, 70: "סך 100"}
+        cells = Path(self.tmp.name) / "cells.json"
+        cells.write_text(json.dumps({str(k): v for k, v in texts.items()}), encoding="utf-8")
+        self.numbers_setup({70: "XXX 300", 100: "200"})
+        doc = heocr.extract(scanned_pdf(scan(LEVELS)), tesseract=FAKE)
+        (table,) = [b for b in doc.blocks if b.kind == "table"]
+        cell = table.cells[1][2]
+        self.assertEqual(cell.text, "סך 100")  # never resolved by a guess
+        self.assertEqual(cell.flags, ["number_disagreement"])
+        self.assertIn("number_disagreement", table.flags)
+
+    def test_no_second_reading_when_number_checks_are_off(self) -> None:
+        self.numbers_setup({70: "999", 100: "999"})
+        doc = heocr.extract(scanned_pdf(scan(LEVELS)), tesseract=FAKE, check_numbers=False)
+        (table,) = [b for b in doc.blocks if b.kind == "table"]
+        self.assertEqual(table.cells[1][2].text, "100")
+        self.assertIsNone(table.checks)
+
 
 class ImageRulingsTest(unittest.TestCase):
     def test_underlines_and_text_strokes_are_not_rulings(self) -> None:
