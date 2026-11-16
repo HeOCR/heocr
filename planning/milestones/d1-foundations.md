@@ -1,6 +1,6 @@
 # D1 — Foundations: contract, CLI, file types, DOCX, T1 PDF pages
 
-- Status: in progress
+- Status: **complete** on 2026-11-16 (main `1e68e76`); reviewed on the internal corpus by the lead, review round 1 included
 - Owner: `pipeline[claude/claude-code#shay-macbook-m4]@heocr/opensource`; reviewed and merged by the lead (heocr-engine decision 0001)
 - Serves: heocr-engine decisions 0019 (top goal) and 0020 (package plan); design in heocr-engine `planning/proposals/document-pipeline-package.md` §§2–4, 6–7
 - GitHub: milestone `D1 - Foundations`, label `roadmap:D1`
@@ -26,12 +26,12 @@ Each slice is one PR, with offline tests on fixtures generated in `tests/synth/`
 
 | Slice | Content | Status |
 |---|---|---|
-| **D1a** | Package skeleton; `heocr` CLI; the `heocr_document.v1` contract (builder, JSON schema, validator, the no-local-paths rule); `extract()` dispatch, with unsupported inputs recorded rather than raised | planned |
-| **D1b** | File-type identification by magic bytes and container parts, never by extension. Ports tendex `identify()` without PyMuPDF or olefile (our own OLE2 directory reader) | planned |
-| **D1c** | Our own DOCX `numbering.xml` renderer: abstract and concrete lists, nine levels, `lvlText` templates, `start`, `lvlRestart`, `isLgl`, level overrides and `startOverride`, style-linked lists, and Hebrew counting (`hebrew1`, `hebrew2`) | planned |
-| **D1d** | The DOCX reader: body in order; headings from outline levels (direct and through styles) as well as heading styles; hidden and deleted text dropped; line breaks in table cells kept; tables with their direction; footnotes, endnotes, comments, headers and footers kept separate from the body; images reported as unread | planned |
-| **D1e** | The PDF text-layer route for T1 pages: characters and boxes through pypdfium2, and our own RTL word and line building, with columns flagged and the `selection_safe` rule. Ports tendex `word_lines`, `ordered_words` and the `layout.py` geometry | planned |
-| **D1f** | PDF page signals and the T1–T6 classifier; T2–T6 pages are classified and flagged, not read; the text-layer warning flags. Ports tendex `text_flags` | planned |
+| **D1a** | Package skeleton; `heocr` CLI; the `heocr_document.v1` contract (builder, JSON schema, validator, the no-local-paths rule); `extract()` dispatch, with unsupported inputs recorded rather than raised | merged (#2) |
+| **D1b** | File-type identification by magic bytes and container parts, never by extension. Ports tendex `identify()` without PyMuPDF or olefile (our own OLE2 directory reader) | merged (#3) |
+| **D1c** | Our own DOCX `numbering.xml` renderer: abstract and concrete lists, nine levels, `lvlText` templates, `start`, `lvlRestart`, `isLgl`, level overrides and `startOverride`, style-linked lists, and Hebrew counting (`hebrew1`, `hebrew2`) | merged (#4) |
+| **D1d** | The DOCX reader: body in order; headings from outline levels (direct and through styles) as well as heading styles; hidden and deleted text dropped; line breaks in table cells kept; tables with their direction; footnotes, endnotes, comments, headers and footers kept separate from the body; images reported as unread | merged (#5) |
+| **D1e** | The PDF text-layer route for T1 pages: characters and boxes through pypdfium2, and our own RTL word and line building, with columns flagged and the `selection_safe` rule. Ports tendex `word_lines`, `ordered_words` and the `layout.py` geometry | merged (#6) |
+| **D1f** | PDF page signals and the T1–T6 classifier; T2–T5 pages are classified and flagged, not read, and T6 pages are read from the text layer with their image regions unread; the text-layer warning flags. Ports tendex `text_flags` | merged (#7) |
 
 ## The contract (`heocr_document.v1`)
 
