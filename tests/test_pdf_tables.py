@@ -106,7 +106,7 @@ class RuledTableTest(unittest.TestCase):
         # A band without its outer border cannot be read even row by row: flagged, text kept as lines.
         rules = grid(skip_vertical={(1, 1), (0, 1), (0, 2)}, skip_horizontal={(2, 0)})
         doc = heocr.extract(make_pdf([table_page(VISUAL, rules=rules)]), ocr=False)
-        self.assertEqual(tables_of(doc), [])
+        self.assertEqual([t for t in tables_of(doc) if "ruled_table" in t.flags], [])
         self.assertIn("table_grid_unresolved", doc.pages[0].flags)
         self.assertIn("ספק א", doc.text)
         self.assertEqual(doc.pages[0].coverage["chars_read"], doc.pages[0].coverage["chars_total"])
@@ -193,7 +193,8 @@ class RowsAndBordersTest(unittest.TestCase):
         page = table_page(VISUAL, rules=[])
         page.fills = fills
         doc = heocr.extract(make_pdf([page]), ocr=False)
-        self.assertEqual(tables_of(doc), [])
+        # No ruled table; the aligned text itself may still be read as an unruled one (D3c).
+        self.assertEqual([t for t in tables_of(doc) if "ruled_table" in t.flags], [])
         self.assertIn("ספק א", doc.text)
 
 
