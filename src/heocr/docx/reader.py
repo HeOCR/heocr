@@ -302,6 +302,10 @@ class _Reader:
                     flags.append("bullet_symbol_mapped")
             if label is not None:
                 flags.extend(label.flags)
+                if not text.strip() and ppr is not None and ppr.find(W + "sectPr") is not None:
+                    # An empty numbered paragraph that only carries a section break. Word is believed
+                    # to number it; LibreOffice drops it on import. Counted, and flagged until checked.
+                    flags.append("numbering_on_section_break_paragraph")
                 if label.suffix == "nothing":
                     flags.append("label_suffix_nothing")
             kind = "heading" if heading else ("list_item" if label_text else "text")

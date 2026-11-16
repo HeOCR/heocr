@@ -73,16 +73,24 @@ class NumberingTest(unittest.TestCase):
     def test_shared_counter_and_start_override(self) -> None:
         nums = [num(1, 0), num(2, 0), num(3, 0, starts={0: 1})]
         n = Numbering.parse(numbering_xml([abstract_num(0, [lvl(0), lvl(1)])], nums))
-        # numId 2 continues numId 1's list; numId 3 is a restarted list of its own, and the
-        # shared list continues around it.
-        steps = [(1, 0), (1, 0), (2, 0), (3, 0), (3, 1), (3, 0), (1, 0), (3, 0)]
-        self.assertEqual(labels(n, steps), ["1.", "2.", "3.", "1.", "1.1.", "2.", "4.", "3."])
+        # numId 2 continues numId 1's list; numId 3 restarts level 0 once, at its first use there,
+        # and the other instances continue from it.
+        steps = [(1, 0), (1, 0), (2, 0), (3, 0), (3, 1), (3, 0), (1, 0), (1, 1)]
+        self.assertEqual(labels(n, steps), ["1.", "2.", "3.", "1.", "1.1.", "2.", "3.", "3.1."])
 
-    def test_start_override_on_every_level_leaves_the_shared_list_alone(self) -> None:
+    def test_override_first_used_at_a_deep_level_keeps_the_parents(self) -> None:
+        # An instance overriding every level, first used at level 2: only level 2 restarts.
         nums = [num(1, 0), num(2, 0, starts={0: 1, 1: 1, 2: 1})]
         n = Numbering.parse(numbering_xml([abstract_num(0, [lvl(0), lvl(1), lvl(2)])], nums))
-        steps = [(1, 0), (1, 0), (1, 1), (2, 2), (1, 2)]
-        self.assertEqual(labels(n, steps), ["1.", "2.", "2.1.", "1.1.1.", "2.1.1."])
+        steps = [(1, 0), (1, 0), (1, 1), (1, 2), (1, 2), (2, 2), (1, 2)]
+        self.assertEqual(labels(n, steps), ["1.", "2.", "2.1.", "2.1.1.", "2.1.2.", "2.1.1.", "2.1.2."])
+
+    def test_interleaved_instances_share_one_list(self) -> None:
+        # Two restarting instances at level 0 and a plain one at level 1, as real templates interleave them.
+        nums = [num(15, 9), num(19, 9, starts={i: 1 for i in range(3)}), num(47, 9, starts={i: 1 for i in range(3)})]
+        n = Numbering.parse(numbering_xml([abstract_num(9, [lvl(0), lvl(1), lvl(2)])], nums))
+        steps = [(19, 0), (19, 0), (15, 1), (15, 1), (19, 0), (47, 0), (15, 1), (15, 1)]
+        self.assertEqual(labels(n, steps), ["1.", "2.", "2.1.", "2.2.", "3.", "1.", "1.1.", "1.2."])
 
     def test_level_override_replaces_definition(self) -> None:
         nums = [num(1, 0), num(2, 0, levels={0: lvl(0, "hebrew1", "%1)")})]
