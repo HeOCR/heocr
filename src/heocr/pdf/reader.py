@@ -471,7 +471,15 @@ def _ocr_regions(
     the layer (labels over a diagram, text on a background image) is not read again by OCR.
     Regions under REGION_MIN_PAGE_SHARE of the page (logos, icons) are counted, not recognized.
     """
-    counts = {"image_regions": len(boxes), "image_regions_ocr": 0, "image_regions_unread": 0, "image_regions_small": 0, "chars_ocr": 0}
+    # Every region lands in exactly one count: ocr + small + unread + no_ocr_needed == image_regions.
+    counts = {
+        "image_regions": len(boxes),
+        "image_regions_ocr": 0,
+        "image_regions_small": 0,
+        "image_regions_unread": 0,
+        "image_regions_no_ocr_needed": 0,
+        "chars_ocr": 0,
+    }
     if not boxes:
         return counts
     large = [b for b in boxes if ocr_wanted and (b[2] - b[0]) * (b[3] - b[1]) >= REGION_MIN_PAGE_SHARE * width * height]
@@ -501,6 +509,7 @@ def _ocr_regions(
             # Not an unread loss: the layer holds this region's text, or it holds none.
             reason = "image_region_text_in_layer" if masked else "image_region_blank"
             doc.unread.append(Unread(scope="page", reason=reason, page=index, bbox=box, detail=f"{masked} layer characters masked"))
+            counts["image_regions_no_ocr_needed"] += 1
             continue
         try:
             result = engine.recognize(region, dpi=round(scale * 72))

@@ -225,6 +225,21 @@ class OcrRouteTest(unittest.TestCase):
         self.assertIn("ocr_short_for_ink", [u.reason for u in doc.unread])
 
 
+    def test_region_counts_always_add_up(self) -> None:
+        cases = [
+            PdfPage(lines=lines_block(HEBREW), images=[(50, 100, 495, 300)], image_gray=0xFF),  # blank
+            PdfPage(lines=lines_block(HEBREW) + lines_block(["תווית"], right=500, top=300), images=[(50, 240, 495, 140)], image_gray=0xFF),
+            PdfPage(lines=lines_block(HEBREW), images=[(50, 100, 495, 300), (500, 20, 4, 4)]),  # read + small
+            PdfPage(lines=lines_block(HEBREW), images=[(50, 100, 495, 300)]),
+        ]
+        for page in cases:
+            for ocr in (True, False):
+                with self.subTest(ocr=ocr):
+                    c = heocr.extract(make_pdf([page]), tesseract=FAKE, ocr=ocr).pages[0].coverage
+                    parts = c["image_regions_ocr"] + c["image_regions_small"] + c["image_regions_unread"] + c["image_regions_no_ocr_needed"]
+                    self.assertEqual(parts, c["image_regions"], c)
+
+
 class InkTest(unittest.TestCase):
     def test_ink_outside_lines(self) -> None:
         from PIL import Image, ImageDraw
