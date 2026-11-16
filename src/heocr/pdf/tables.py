@@ -1,0 +1,327 @@
+"""Ruled tables in PDF text-layer pages (D3b).
+
+**Rulings.** Rulings come from the page's vector paths. Every straight piece of every path is
+read, after the object's matrix is applied, so a grid drawn as one path, as thin filled
+rectangles, or as stroked cell boxes all yield the same lines. Collinear pieces are merged.
+
+**The grid.** Intersecting horizontal and vertical lines form a table. Its distinct line
+positions give rows and columns. A cell boundary exists where a ruling covers most of that
+edge, and cells with a missing boundary between them merge into spans. A merge that is not
+a rectangle is flagged ``table_grid_unresolved``, and that table's text stays as lines.
+
+**Cell text from the page.** Each cell takes the text-layer characters whose centres fall
+inside it, built into lines by the same RTL line building. No word is invented, and no
+detector is a text source.
+
+**Direction per document** (the volunteer's ``scripts/clean.py`` rule 8): in a Hebrew
+document every table is RTL, an English one included, so a row's first cell is its rightmost.
+
+**Padding.** Every row is padded to the full grid. A spanned cell is followed by nothing, and
+the positions a vertical merge covers in later rows hold empty ``merged_above`` cells, so no
+cell shifts column.
+"""
+
+from __future__ import annotations
+
+import ctypes
+from dataclasses import dataclass, field
+
+from heocr.contract import Block, Cell
+from heocr.pdf.lines import Atom, build_lines
+
+TOOL = "heocr.pdf"
+STRAIGHT = 0.6  # pt: a piece this close to horizontal or vertical is a ruling piece
+MIN_PIECE = 4.0  # pt: shorter pieces (dots, glyph-like paths) are ignored
+SNAP = 2.5  # pt: rulings this close are the same line (double lines, thin filled rectangles)
+JOIN = 3.0  # pt: collinear pieces closer than this are one line
+COVER = 0.6  # a boundary exists when a ruling covers this share of the cell edge
+MIN_GAP = 6.0  # pt: grid lines closer than this are one line (cells drawn as separate boxes double each border)
+FULL_ROW = 0.8  # row by row: a band boundary is a ruling across this share of the table's width
+INSIDE = 1.0  # pt: a character belongs to a cell when its centre is this far inside or more
+
+
+@dataclass
+class Rule:
+    pos: float  # y for horizontal, x for vertical (top-left origin)
+    start: float
+    end: float
+
+
+@dataclass
+class Table:
+    bbox: list[float]
+    rows: list[list[dict]]  # per row, cells: {"box": [...], "colspan", "rowspan", "placeholder"}
+    flags: list[str] = field(default_factory=list)
+
+
+def rulings(page) -> tuple[list[Rule], list[Rule]]:
+    """Horizontal and vertical ruling lines of a page, in points, top-left origin."""
+    import pypdfium2.raw as raw
+
+    height = page.get_height()
+    horizontal: list[Rule] = []
+    vertical: list[Rule] = []
+    for obj in page.get_objects(max_depth=8):
+        if obj.type != raw.FPDF_PAGEOBJ_PATH:
+            continue
+        matrix = raw.FS_MATRIX()
+        if not raw.FPDFPageObj_GetMatrix(obj.raw, ctypes.byref(matrix)):
+            continue
+        a, b, c, d, e, f = matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f
+        points: list[tuple[float, float]] = []
+        start: tuple[float, float] | None = None
+        count = raw.FPDFPath_CountSegments(obj.raw)
+        for i in range(max(count, 0)):
+            segment = raw.FPDFPath_GetPathSegment(obj.raw, i)
+            x, y = ctypes.c_float(), ctypes.c_float()
+            raw.FPDFPathSegment_GetPoint(segment, ctypes.byref(x), ctypes.byref(y))
+            px, py = a * x.value + c * y.value + e, b * x.value + d * y.value + f
+            kind = raw.FPDFPathSegment_GetType(segment)
+            if kind == raw.FPDF_SEGMENT_MOVETO:
+                start = (px, py)
+                points = [start]
+                continue
+            if points:
+                _piece(points[-1], (px, py), height, horizontal, vertical, kind == raw.FPDF_SEGMENT_LINETO)
+            points.append((px, py))
+            if raw.FPDFPathSegment_GetClose(segment) and start is not None:
+                _piece((px, py), start, height, horizontal, vertical, True)
+    return _merge(horizontal), _merge(vertical)
+
+
+def _piece(p, q, height, horizontal, vertical, straight: bool) -> None:
+    if not straight:
+        return
+    (x0, y0), (x1, y1) = p, q
+    y0, y1 = height - y0, height - y1
+    if abs(y1 - y0) <= STRAIGHT and abs(x1 - x0) >= MIN_PIECE:
+        horizontal.append(Rule((y0 + y1) / 2, min(x0, x1), max(x0, x1)))
+    elif abs(x1 - x0) <= STRAIGHT and abs(y1 - y0) >= MIN_PIECE:
+        vertical.append(Rule((x0 + x1) / 2, min(y0, y1), max(y0, y1)))
+
+
+def _merge(rules: list[Rule]) -> list[Rule]:
+    """Snap rulings to shared positions and join collinear pieces."""
+    out: list[Rule] = []
+    for rule in sorted(rules, key=lambda r: (r.pos, r.start)):
+        for other in reversed(out[-50:]):
+            if abs(other.pos - rule.pos) <= SNAP and rule.start <= other.end + JOIN and rule.end >= other.start - JOIN:
+                other.start, other.end = min(other.start, rule.start), max(other.end, rule.end)
+                break
+        else:
+            out.append(Rule(rule.pos, rule.start, rule.end))
+    return out
+
+
+def _positions(values: list[float]) -> list[float]:
+    out: list[float] = []
+    for v in sorted(values):
+        if not out or v - out[-1] > MIN_GAP:
+            out.append(v)
+    return out
+
+
+def _assign(rules: list[Rule], positions: list[float]) -> list[Rule]:
+    """Each ruling moved onto its nearest grid position (within MIN_GAP), so it counts for that line only."""
+    out = []
+    for r in rules:
+        nearest = min(positions, key=lambda p: abs(p - r.pos))
+        if abs(nearest - r.pos) <= MIN_GAP:
+            out.append(Rule(nearest, r.start, r.end))
+    return out
+
+
+def _covered(rules: list[Rule], pos: float, lo: float, hi: float) -> bool:
+    need = COVER * (hi - lo)
+    covered = sum(max(0.0, min(r.end, hi) - max(r.start, lo)) for r in rules if abs(r.pos - pos) <= 0.01)
+    return covered >= need
+
+
+def find_tables(horizontal: list[Rule], vertical: list[Rule]) -> list[Table]:
+    """Tables formed by intersecting rulings."""
+    lines = [("h", r) for r in horizontal] + [("v", r) for r in vertical]
+    parent = list(range(len(lines)))
+
+    def root(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for i, (ki, ri) in enumerate(lines):
+        if ki != "h":
+            continue
+        for j, (kj, rj) in enumerate(lines):
+            if kj == "v" and rj.start - SNAP <= ri.pos <= rj.end + SNAP and ri.start - SNAP <= rj.pos <= ri.end + SNAP:
+                parent[root(i)] = root(j)
+    groups: dict[int, list[int]] = {}
+    for i in range(len(lines)):
+        groups.setdefault(root(i), []).append(i)
+    tables = []
+    for members in groups.values():
+        hs = [lines[i][1] for i in members if lines[i][0] == "h"]
+        vs = [lines[i][1] for i in members if lines[i][0] == "v"]
+        if len(hs) < 2 or len(vs) < 2:
+            continue
+        table = _grid(hs, vs)
+        if table is not None:
+            tables.append(table)
+    return tables
+
+
+def _grid(hs: list[Rule], vs: list[Rule]) -> Table | None:
+    ys = _positions([r.pos for r in hs])
+    xs = _positions([r.pos for r in vs])
+    if len(ys) < 2 or len(xs) < 2:
+        return None
+    hs, vs = _assign(hs, ys), _assign(vs, xs)
+    rows, cols = len(ys) - 1, len(xs) - 1
+    parent = {(r, c): (r, c) for r in range(rows) for c in range(cols)}
+
+    def root(key):
+        while parent[key] != key:
+            parent[key] = parent[parent[key]]
+            key = parent[key]
+        return key
+
+    for r in range(rows):
+        for c in range(cols):
+            if c + 1 < cols and not _covered(vs, xs[c + 1], ys[r], ys[r + 1]):
+                parent[root((r, c))] = root((r, c + 1))
+            if r + 1 < rows and not _covered(hs, ys[r + 1], xs[c], xs[c + 1]):
+                parent[root((r, c))] = root((r + 1, c))
+    merged: dict[tuple, list[tuple[int, int]]] = {}
+    for key in parent:
+        merged.setdefault(root(key), []).append(key)
+    flags: list[str] = []
+    spans = []
+    for cells in merged.values():
+        r0, r1 = min(r for r, _ in cells), max(r for r, _ in cells)
+        c0, c1 = min(c for _, c in cells), max(c for _, c in cells)
+        if len(cells) != (r1 - r0 + 1) * (c1 - c0 + 1):
+            flags.append("table_grid_unresolved")
+        spans.append((r0, r1, c0, c1))
+    if "table_grid_unresolved" in flags:
+        # Word tables often give each row its own column boundaries; a global grid then needs
+        # merges that are not rectangles. Read the rows one by one instead.
+        return _rows_independent(hs, vs, xs, ys)
+    if len(spans) < 2 or cols < 2 and all(c1 == c0 for _, _, c0, c1 in spans):
+        return Table([xs[0], ys[0], xs[-1], ys[-1]], [], ["table_single_column"])
+    by_start = {(r0, c0): (r0, r1, c0, c1) for r0, r1, c0, c1 in spans}
+    covered = {(r, c): (r0, c0) for r0, r1, c0, c1 in spans for r in range(r0, r1 + 1) for c in range(c0, c1 + 1)}
+    grid_rows = []
+    for r in range(rows):
+        row = []
+        for c in range(cols):
+            origin = covered[(r, c)]
+            r0, r1, c0, c1 = by_start[origin]
+            if origin == (r, c):
+                row.append({"box": [xs[c0], ys[r0], xs[c1 + 1], ys[r1 + 1]], "colspan": c1 - c0 + 1, "rowspan": r1 - r0 + 1, "placeholder": False, "col": c})
+            elif r > r0 and c == c0:
+                row.append({"box": None, "colspan": c1 - c0 + 1, "rowspan": 1, "placeholder": True, "col": c})
+        grid_rows.append(row)
+    return Table([xs[0], ys[0], xs[-1], ys[-1]], grid_rows, flags)
+
+
+def _rows_independent(hs: list[Rule], vs: list[Rule], xs: list[float], ys: list[float]) -> Table:
+    """A table read row by row: each band between full-width rulings gets its own columns, and
+    there are no row spans. When even that fails, the grid stays unresolved."""
+    left, right = xs[0], xs[-1]
+    width = right - left
+    full = [y for y in ys if sum(max(0.0, min(r.end, right) - max(r.start, left)) for r in hs if abs(r.pos - y) <= 0.01) >= FULL_ROW * width]
+    bands = list(zip(full, full[1:]))
+    rows = []
+    for top, bottom in bands:
+        cuts = [x for x in xs if _covered(vs, x, top, bottom)]
+        if len(cuts) < 2 or abs(cuts[0] - left) > MIN_GAP or abs(cuts[-1] - right) > MIN_GAP:
+            return Table([left, ys[0], right, ys[-1]], [], ["table_grid_unresolved"])
+        row = []
+        for c, (x0, x1) in enumerate(zip(cuts, cuts[1:])):
+            span = sum(1 for x in xs if x0 - MIN_GAP <= x < x1 - MIN_GAP)
+            row.append({"box": [x0, top, x1, bottom], "colspan": max(span, 1), "rowspan": 1, "placeholder": False, "col": xs.index(min(xs, key=lambda v: abs(v - x0)))})
+        rows.append(row)
+    if len(rows) < 1 or max(len(r) for r in rows) < 2:
+        return Table([left, ys[0], right, ys[-1]], [], ["table_grid_unresolved"])
+    return Table([left, ys[0], right, ys[-1]], rows, ["table_rows_independent"])
+
+
+def table_blocks(page_index: int, atoms: list[Atom], tables: list[Table], rtl: bool) -> tuple[list[Block], list[Atom], int, int]:
+    """(table blocks, the atoms left for lines, characters placed in cells, grids rejected)."""
+    remaining = list(atoms)
+    blocks: list[Block] = []
+    rejected: list[Table] = []
+    placed = 0
+    for table in tables:
+        if not table.rows:
+            continue
+        inside = [a for a in remaining if _within(a, table.bbox, 0.0)]
+        if not any(not a.is_space for a in inside):
+            continue  # a frame or a drawing, not a table of this layer's text
+        if _crosses_text(table, inside):
+            # Real table rulings never cut through characters: these are underlines, form lines
+            # or a column rule over running text. The text stays as lines.
+            rejected.append(table)
+            continue
+        taken: set[int] = set()
+        cells_out: list[list[Cell]] = []
+        for row in table.rows:
+            ordered = sorted(row, key=lambda cell: -cell["col"] if rtl else cell["col"])
+            out_row: list[Cell] = []
+            for cell in ordered:
+                if cell["placeholder"]:
+                    out_row.append(Cell("", colspan=cell["colspan"], flags=["merged_above"]))
+                    continue
+                mine = [a for a in inside if id(a) not in taken and _within(a, cell["box"], INSIDE)]
+                taken.update(id(a) for a in mine)
+                text = "\n".join(line.text for line in build_lines(mine, rtl=rtl).lines)
+                placed += sum(1 for a in mine if not a.is_space)
+                narrow = cell["box"][2] - cell["box"][0] < NARROW_CELL and cell["rowspan"] == 1 and not mine
+                if narrow and out_row and "merged_above" not in out_row[-1].flags:
+                    # An empty sliver between doubled borders: folded into its neighbour's span.
+                    out_row[-1].colspan += cell["colspan"]
+                    continue
+                out_row.append(Cell(text, colspan=cell["colspan"], rowspan=cell["rowspan"], flags=["narrow"] if narrow else []))
+            # A leading sliver joins the cell after it.
+            while len(out_row) > 1 and "narrow" in out_row[0].flags:
+                sliver = out_row.pop(0)
+                out_row[0].colspan += sliver.colspan
+            for cell_out in out_row:
+                if "narrow" in cell_out.flags:
+                    cell_out.flags.remove("narrow")
+            cells_out.append(out_row)
+        remaining = [a for a in remaining if id(a) not in taken]
+        blocks.append(
+            Block(
+                kind="table",
+                cells=cells_out,
+                page=page_index,
+                bbox=list(table.bbox),
+                source="text_layer",
+                tool=TOOL,
+                direction="rtl" if rtl else "ltr",
+                flags=["ruled_table", *table.flags],
+            )
+        )
+    return blocks, remaining, placed, len(rejected)
+
+
+NARROW_CELL = 12.0  # pt: an empty cell narrower than this is a sliver between doubled borders
+CROSSING_SHARE = 0.02  # a grid whose interior boundaries cut through more of its characters is not a table
+
+
+def _crosses_text(table: Table, atoms: list[Atom]) -> bool:
+    ink = [a for a in atoms if not a.is_space]
+    crossed = 0
+    for row in table.rows:
+        for cell in row:
+            box = cell["box"]
+            if box is None:
+                continue
+            for a in ink:
+                if box[1] <= a.cy <= box[3] and (a.x0 + 0.5 < box[0] < a.x1 - 0.5 or a.x0 + 0.5 < box[2] < a.x1 - 0.5):
+                    crossed += 1
+    return crossed > CROSSING_SHARE * max(len(ink), 1)
+
+
+def _within(atom: Atom, box, margin: float) -> bool:
+    return box[0] + margin <= atom.cx <= box[2] - margin and box[1] + margin <= atom.cy <= box[3] - margin

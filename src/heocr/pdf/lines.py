@@ -313,7 +313,7 @@ def clear_two_column_gutter(rendered_rows: list[list[BuiltLine]], median_height:
     return True
 
 
-def build_lines(atoms: list[Atom]) -> PageLines:
+def build_lines(atoms: list[Atom], rtl: bool | None = None) -> PageLines:
     """Lines in reading order, with the page's reading-order flags.
 
     ``selection_safe`` follows tendex's rule for when a geometric reading order may be used without review:
@@ -327,7 +327,8 @@ def build_lines(atoms: list[Atom]) -> PageLines:
     if not ink:
         return PageLines([], ["reading_order_no_usable_characters"] if atoms else [], False, False, False)
     median_height = statistics.median(a.height for a in ink)
-    page_rtl = is_rtl("".join(a.text for a in ink))
+    # ``rtl`` gives the base direction when the caller knows it (a table cell takes the document's).
+    page_rtl = is_rtl("".join(a.text for a in ink)) if rtl is None else rtl
     built_rows: list[list[BuiltLine]] = []
     for row_index, row in enumerate(rows(valid, median_height)):
         comps = components(row, median_height)

@@ -168,6 +168,7 @@ class Document:
     _ocr_engine: Any = field(default=None, repr=False, compare=False)
     _ocr_error: str | None = field(default=None, repr=False, compare=False)
     _font_codes: dict = field(default_factory=dict, repr=False, compare=False)  # (font, letter) -> code
+    _rtl: bool = field(default=True, repr=False, compare=False)  # the document's direction (PDF tables)
     # font_private_use_by_ocr: the maps learned for this document, with their evidence (no text).
     font_maps: list[dict[str, Any]] = field(default_factory=list)
 

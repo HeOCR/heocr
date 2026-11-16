@@ -121,6 +121,8 @@ class PdfPage:
     images: list[tuple[float, float, float, float]] = field(default_factory=list)  # x, y, w, h
     image_gray: int = 0x80  # grey level of every image (0xFF: a blank background)
     font_name: str = ""  # the Type3 font's /Name (and BaseFont), for per-font evidence
+    rules: list[tuple[float, float, float, float]] = field(default_factory=list)  # ruling segments x0, y0, x1, y1
+    rules_as: str = "stroke"  # "stroke": lines; "rects": thin filled rectangles, as Word draws borders
     paths: int = 0
     rotate: int = 0
     unit_font_size: bool = False  # "Tf 1" with the size in the text matrix, as many producers write
@@ -189,6 +191,12 @@ def make_pdf(pages: list[PdfPage]) -> bytes:
                     content.append(f"BT {mode} Tr /F1 {line.size:g} Tf 1 0 0 1 {px:.3f} {line.y:.3f} Tm <{codes[ch]:02X}> Tj ET")
         for ch, gx, gy in page.glyphs:
             content.append(f"BT /F1 12 Tf 1 0 0 1 {gx:.3f} {gy:.3f} Tm <{codes[ch]:02X}> Tj ET")
+        for x0, y0, x1, y1 in page.rules:
+            if page.rules_as == "rects":
+                w, h = max(abs(x1 - x0), 0.5), max(abs(y1 - y0), 0.5)
+                content.append(f"{min(x0, x1):.2f} {min(y0, y1) - (0.25 if h == 0.5 else 0):.2f} {w:.2f} {h:.2f} re f")
+            else:
+                content.append(f"0.5 w {x0:.2f} {y0:.2f} m {x1:.2f} {y1:.2f} l S")
         for i in range(page.paths):
             content.append(f"{20 + (i % 50) * 5} {20 + (i // 50) * 5} 3 3 re f")
         resources = ""
