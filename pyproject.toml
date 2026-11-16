@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "heocr"
+version = "0.0.1"
+description = "The best open pipeline for getting Hebrew text out of any document"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [
+  { name = "HeOCR maintainers" },
+]
+classifiers = [
+  "Natural Language :: Hebrew",
+  "Programming Language :: Python :: 3",
+  "Topic :: Text Processing",
+]
+# The core stays permissive (decision 0020): no copyleft dependency in the default install.
+dependencies = []
+
+[project.urls]
+Source = "https://github.com/HeOCR/heocr-py"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["heocr*"]
