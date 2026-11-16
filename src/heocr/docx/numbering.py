@@ -19,8 +19,9 @@ The counting model:
   this happens when L < D. When D has ``w:lvlRestart`` with value r, it happens when
   L < r, and never when r is 0.
 - **Unused levels:** ``%k`` for a level that has not been used yet shows that level's
-  start value. The label is flagged ``numbering_parent_unused``, because Word's behaviour
-  in this case is not verified yet.
+  start value, and that level then counts as used, so its next item is start + 1. This
+  agrees with LibreOffice on real tender documents. The label is flagged
+  ``numbering_parent_unused``.
 - **Legal numbering:** ``w:isLgl`` renders every number in the level's text as decimal.
 """
 
@@ -226,7 +227,10 @@ class Numbering:
             ref = levels.get(index, Level(ilvl=index))
             value = counters[index]
             if value is None:
+                # Shown at its start value, and from then on counted as used: the next item at
+                # that level is start + 1 (checked against LibreOffice on real tender documents).
                 value = ref.start
+                counters[index] = value
                 flags.append("numbering_parent_unused")
             fmt = "decimal" if level.is_lgl and ref.fmt not in ("none",) else ref.fmt
             text, more = format_number(value, fmt)

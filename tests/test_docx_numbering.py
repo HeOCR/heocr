@@ -104,6 +104,8 @@ class NumberingTest(unittest.TestCase):
         label = n.next_label("1", 1)
         self.assertEqual(label.text, "1.1.")
         self.assertIn("numbering_parent_unused", label.flags)
+        # The parent shown as 1 counts as used: the next level-0 item is 2.
+        self.assertEqual(labels(n, [(1, 1), (1, 0), (1, 1)]), ["1.2.", "2.", "2.1."])
 
     def test_bullets_and_suffix(self) -> None:
         levels = [lvl(0, "bullet", "", suff="space"), lvl(1, "bullet", "o")]
