@@ -79,9 +79,20 @@ FONT_PRIVATE_USE_BY_OCR = Rule(
     ),
 )
 
+REVERSED_DIGIT_GROUPS = Rule(
+    rule_id="reversed_digit_groups",
+    reason="Conversions and some producers reverse an amount's digit groups (000,005,8 for 8,500,000).",
+    example=("000,005,8", "8,500,000"),
+    formats=("pdf",),
+    evidence=(
+        "a digit_groups_suspect token whose line, read again by OCR of its own image, gives exactly one of "
+        "its two readings (all characters reversed, or the group order reversed) and not the token itself"
+    ),
+)
+
 RULES: dict[str, Rule] = {
     rule.rule_id: rule
-    for rule in (SYMBOL_FONT_BULLET, DIRECTION_MARKS, LATIN1_ETH_NUN, RTL_BRACKET_ORDER, FONT_PRIVATE_USE_BY_OCR)
+    for rule in (SYMBOL_FONT_BULLET, DIRECTION_MARKS, LATIN1_ETH_NUN, RTL_BRACKET_ORDER, FONT_PRIVATE_USE_BY_OCR, REVERSED_DIGIT_GROUPS)
 }
 
 
@@ -174,4 +185,14 @@ def font_private_use_by_ocr(text: str, mapping: dict[str, str] | None = None) ->
         if count:
             changes[(f"U+{ord(code):04X}", letter)] += count
             text = text.replace(code, letter)
+    return text, changes
+
+
+def reversed_digit_groups(text: str) -> tuple[str, Counter]:
+    """The repair's text change; the confirming OCR reading is checked in ``heocr.pdf.numbers``."""
+    changes: Counter = Counter()
+    if text.startswith("000,"):
+        fixed = text[::-1]
+        changes[(text, fixed)] += 1
+        return fixed, changes
     return text, changes

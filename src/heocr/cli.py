@@ -32,6 +32,12 @@ def _parser() -> argparse.ArgumentParser:
         help="turn every repair rule off: output the extracted text byte for byte",
     )
     parser.add_argument("--no-ocr", action="store_true", help="do not run OCR; pages that need it are reported unread")
+    parser.add_argument(
+        "--check-numbers",
+        choices=("suspect", "all", "off"),
+        default="suspect",
+        help="read numbers a second time by OCR: suspect digit groups only (default), all amounts and dates, or off",
+    )
     parser.add_argument("--ocr-lang", default="heb", help="Tesseract language list (default: heb; e.g. heb+eng)")
     parser.add_argument("--psm", type=int, default=3, help="Tesseract page segmentation mode (default: 3)")
     parser.add_argument("--tesseract", help="the tesseract program, when it is not on the PATH")
@@ -74,6 +80,7 @@ def main(argv: list[str] | None = None) -> int:
             ocr_psm=args.psm,
             tesseract=args.tesseract,
             ocr_model=args.ocr_model,
+            check_numbers=False if args.check_numbers == "off" else args.check_numbers,
         )
     except (OSError, ValueError) as exc:
         print(f"heocr: {exc}", file=sys.stderr)
