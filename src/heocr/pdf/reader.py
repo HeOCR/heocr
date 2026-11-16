@@ -834,7 +834,9 @@ def _ocr_blocks(
     return read
 
 
-def _ocr_page(doc: Document, index: int, page, width, height, page_class, signals, text: PageText, flags) -> None:
+def _ocr_page(doc: Document, index: int, page, width, height, page_class, signals, text: PageText, flags, rendered=None) -> None:
+    """Read a page by OCR. ``rendered`` is (image, pixels per point) when the page is already an
+    image (an image file, D4b); otherwise the PDF page is rendered."""
     engine = engine_for(doc)
     if engine is None:
         reason = unavailable_reason(doc)
@@ -844,8 +846,8 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
         )
         doc.unread.append(Unread(scope="page", reason="ocr_route_unavailable", page=index, detail=f"class {page_class}; {reason}"))
         return
-    image, scale = _render(page)
-    if scale * 72 < RENDER_DPI:
+    image, scale = rendered if rendered is not None else _render(page)
+    if scale * 72 < RENDER_DPI and rendered is None:
         flags = flags + ["render_dpi_reduced"]
     signals = {**signals, "render_dpi": round(scale * 72, 1)}
     # Ruled tables in the image are read cell by cell; the rest of the page once, without them (D3e).

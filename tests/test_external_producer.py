@@ -110,6 +110,28 @@ class TesseractScanTest(unittest.TestCase):
         self.assertEqual([line.text for b in doc.blocks for line in b.lines], LINES)
         self.assertTrue(doc.components["tesseract:heb.traineddata"].startswith("sha256:"))
 
+    def test_image_files_png_and_multipage_tiff(self) -> None:
+        import io
+
+        import pypdfium2 as pdfium
+
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "synth.docx"
+            source.write_bytes(Docx(body=[para(t) for t in LINES]).build())
+            subprocess.run(["soffice", "--headless", "--convert-to", "pdf", "--outdir", tmp, str(source)], check=True, capture_output=True, timeout=180)
+            pdf = pdfium.PdfDocument(str(Path(tmp) / "synth.pdf"))
+            picture = pdf[0].render(scale=300 / 72).to_pil().convert("L")
+            pdf.close()
+        png, tiff = io.BytesIO(), io.BytesIO()
+        picture.save(png, format="PNG", dpi=(300, 300))
+        picture.save(tiff, format="TIFF", save_all=True, append_images=[picture], dpi=(300, 300))
+        doc = heocr.extract(png.getvalue())
+        self.assertEqual((doc.format, doc.pages[0].page_class), ("png", "T5"))
+        self.assertEqual([line.text for b in doc.blocks for line in b.lines], LINES)
+        doc = heocr.extract(tiff.getvalue())
+        self.assertEqual(len(doc.pages), 2)
+        self.assertEqual([line.text for b in doc.blocks if b.page == 1 for line in b.lines], LINES)
+
     def test_scan_of_a_ruled_table_is_read_cell_by_cell(self) -> None:
         import pypdfium2 as pdfium
 

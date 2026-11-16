@@ -12,6 +12,7 @@ from heocr.convert import CONVERT_TIMEOUT, TO_DOCX
 from heocr.identify import identify
 from heocr.ocr.tesseract import DEFAULT_LANG, DEFAULT_PSM, check_settings
 
+IMAGE_FORMATS = ("png", "jpeg", "tiff", "gif", "bmp", "jp2", "webp")
 # Inputs above this size are refused before parsing. Real tender documents are far smaller.
 MAX_FILE_BYTES = 512 * 1024**2
 
@@ -22,9 +23,10 @@ def _readers() -> dict[str, Reader]:
     """Formats with a route, mapped to the reader that fills a Document in place."""
     from heocr.convert import TO_DOCX, read_converted
     from heocr.docx.reader import read_docx
+    from heocr.images import read_image
     from heocr.pdf.reader import read_pdf
 
-    return {"docx": read_docx, "pdf": read_pdf, **{fmt: read_converted for fmt in TO_DOCX}}
+    return {"docx": read_docx, "pdf": read_pdf, **{fmt: read_converted for fmt in TO_DOCX}, **{fmt: read_image for fmt in IMAGE_FORMATS}}
 
 
 def extract(
