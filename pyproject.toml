@@ -21,6 +21,9 @@ classifiers = [
 # The core stays permissive (decision 0020): no copyleft dependency in the default install.
 dependencies = []
 
+[project.scripts]
+heocr = "heocr.cli:main"
+
 [project.urls]
 Source = "https://github.com/HeOCR/heocr-py"
 
