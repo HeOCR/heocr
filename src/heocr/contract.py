@@ -80,6 +80,7 @@ class Block:
     checks: dict[str, Any] | None = None  # second readings: {"numbers": checked, "agreed": agreed}
     repairs: list[dict[str, Any]] = field(default_factory=list)
     flags: list[str] = field(default_factory=list)
+    _cell_repairs: Any = field(default=None, repr=False, compare=False)  # PDF tables: repairs made in cells, logged by the reader
 
     def to_dict(self, index: int) -> dict[str, Any]:
         out: dict[str, Any] = {"id": f"b{index}", "kind": self.kind, "role": self.role}

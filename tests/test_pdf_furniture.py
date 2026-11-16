@@ -52,6 +52,17 @@ class FurnitureTest(unittest.TestCase):
         one = extract([tender_page(1)])
         self.assertFalse([b for b in one.blocks if b.role != "body"])
 
+    def test_a_furniture_block_keeps_its_repair_log(self) -> None:
+        pages = []
+        for n in range(1, 5):
+            page = tender_page(n)
+            page.lines.append(TextLine("\uf0b7 נספח", 545, 30 - 12))  # a footer line with a symbol-font bullet
+            pages.append(page)
+        doc = extract(pages)
+        logged = [r for b in doc.blocks if b.role == "footer" for r in b.repairs if r["rule"] == "symbol_font_bullet"]
+        self.assertEqual(sum(r["count"] for r in logged), 4)
+        self.assertIn("• נספח", "\n".join(b.text for b in doc.blocks if b.role == "footer"))
+
 
 if __name__ == "__main__":
     unittest.main()
