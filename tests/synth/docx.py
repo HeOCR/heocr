@@ -159,8 +159,9 @@ def style(
     hidden: bool = False,
 ) -> str:
     ppr = ""
-    if num_id is not None:
-        ppr += "<w:numPr>" + (f'<w:ilvl w:val="{ilvl}"/>' if ilvl is not None else "") + f'<w:numId w:val="{num_id}"/></w:numPr>'
+    if num_id is not None or ilvl is not None:
+        ppr += "<w:numPr>" + (f'<w:ilvl w:val="{ilvl}"/>' if ilvl is not None else "")
+        ppr += (f'<w:numId w:val="{num_id}"/>' if num_id is not None else "") + "</w:numPr>"
     if outline is not None:
         ppr += f'<w:outlineLvl w:val="{outline}"/>'
     based = f'<w:basedOn w:val="{based_on}"/>' if based_on else ""

@@ -227,30 +227,30 @@ class _Reader:
             para.figures += 1
 
     def _label(self, ppr, pstyle: str | None):
+        """The paragraph's list label. ``numId`` and ``ilvl`` resolve field by field:
+        the paragraph's own ``numPr``, then the nearest style that sets each one; with no
+        ``ilvl`` anywhere, the level whose ``pStyle`` names a style in the chain, else 0."""
         num_el = ppr.find(W + "numPr") if ppr is not None else None
         num_id, ilvl = None, None
         if num_el is not None:
             n, i = num_el.find(W + "numId"), num_el.find(W + "ilvl")
             num_id = n.get(W + "val") if n is not None else None
             ilvl = int(i.get(W + "val", "0")) if i is not None and (i.get(W + "val") or "").isdigit() else None
-        style_num, style_ilvl, carrier = self.styles.num_pr(pstyle)
+        style_num, style_ilvl, chain = self.styles.num_pr(pstyle)
         if num_id is None:
             num_id = style_num
-            if num_id is None:
-                return None
-            if ilvl is None:
-                ilvl = style_ilvl
-            if ilvl is None and carrier:
-                ilvl = self.numbering.level_for_style(num_id, carrier)
-        elif ilvl is None:
-            ilvl = style_ilvl if style_num == num_id else None
-            if ilvl is None and pstyle:
-                ilvl = self.numbering.level_for_style(num_id, pstyle)
+        if ilvl is None:
+            ilvl = style_ilvl
         if num_id is None or num_id == "0":
             return None
         if not self.numbering.knows(num_id):
             self.doc.flags.append("numbering_reference_unknown")
             return None
+        if ilvl is None:
+            for style_id in chain or ([pstyle] if pstyle else []):
+                ilvl = self.numbering.level_for_style(num_id, style_id)
+                if ilvl is not None:
+                    break
         return self.numbering.next_label(num_id, ilvl or 0)
 
     def paragraph(self, p, role: str, note_id: str | None, shaded: bool) -> list[Block]:

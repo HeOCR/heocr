@@ -187,6 +187,37 @@ class DocxRobustnessTest(unittest.TestCase):
         self.assertEqual(doc.unread[0].reason, "docx_unreadable")
         self.assertEqual(doc.blocks, [])
 
+    def test_num_id_and_ilvl_inherit_separately(self) -> None:
+        # Style "3" sets only ilvl 2 and is based on "2", which sets numId 9 and ilvl 1.
+        d = Docx()
+        d.styles = [
+            style("1", "List 1", num_id=9, ilvl=0),
+            style("2", "List 2", based_on="1", ilvl=1),
+            style("3", "List 3", based_on="2", ilvl=2),
+        ]
+        d.abstracts = [abstract_num(0, [lvl(0), lvl(1), lvl(2)])]
+        d.nums = [num(9, 0)]
+        d.body = [
+            para("א", style="1"),
+            para("ב", style="1"),
+            para("ג", style="2"),
+            para("ד", style="2"),
+            para("ה", style="3"),
+            para("ו", style="3"),
+            para("ז", style="3"),
+        ]
+        doc = heocr.extract(d.build())
+        self.assertEqual([b.label for b in doc.blocks], ["1.", "2.", "2.1.", "2.2.", "2.2.1.", "2.2.2.", "2.2.3."])
+
+    def test_paragraph_ilvl_overrides_style_field_by_field(self) -> None:
+        d = Docx()
+        d.styles = [style("L", "List", num_id=9, ilvl=0)]
+        d.abstracts = [abstract_num(0, [lvl(0), lvl(1)])]
+        d.nums = [num(9, 0)]
+        d.body = [para("א", style="L"), para("ב", style="L").replace("<w:pPr>", '<w:pPr><w:numPr><w:ilvl w:val="1"/></w:numPr>', 1)]
+        doc = heocr.extract(d.build())
+        self.assertEqual([b.label for b in doc.blocks], ["1.", "1.1."])
+
     def test_white_text_on_a_shaded_paragraph_is_kept(self) -> None:
         shaded = para(WHITE).replace("<w:pPr>", '<w:pPr><w:shd w:val="clear" w:fill="1F3864"/>', 1)
         doc = heocr.extract(Docx(body=[shaded]).build())

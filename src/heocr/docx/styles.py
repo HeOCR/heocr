@@ -96,25 +96,29 @@ class Styles:
                 return int(match.group(1)) - 1
         return None
 
-    def num_pr(self, style_id: str | None) -> tuple[str | None, int | None, str | None]:
-        """(numId, ilvl, the style that carries them) from the style chain."""
-        for style in self.chain(style_id):
-            if style.ppr is None:
-                continue
-            element = style.ppr.find(W + "numPr")
+    def num_pr(self, style_id: str | None) -> tuple[str | None, int | None, list[str]]:
+        """(numId, ilvl, the style chain's ids) from the style chain.
+
+        ECMA-376 inherits ``numId`` and ``ilvl`` independently: each comes from the nearest
+        style in the ``basedOn`` chain that sets it. A style may set only ``ilvl`` and take
+        its list from its parent.
+        """
+        num_id: str | None = None
+        ilvl: int | None = None
+        chain = self.chain(style_id)
+        for style in chain:
+            element = style.ppr.find(W + "numPr") if style.ppr is not None else None
             if element is None:
                 continue
             num_el, ilvl_el = element.find(W + "numId"), element.find(W + "ilvl")
-            num_id = num_el.get(W + "val") if num_el is not None else None
-            ilvl = None
-            if ilvl_el is not None:
-                try:
-                    ilvl = int(ilvl_el.get(W + "val", "0"))
-                except ValueError:
-                    ilvl = None
-            if num_id is not None:
-                return num_id, ilvl, style.style_id
-        return None, None, None
+            if num_id is None and num_el is not None:
+                num_id = num_el.get(W + "val")
+            if ilvl is None and ilvl_el is not None:
+                value = ilvl_el.get(W + "val", "")
+                ilvl = int(value) if value.isdigit() else None
+            if num_id is not None and ilvl is not None:
+                break
+        return num_id, ilvl, [style.style_id for style in chain]
 
     def bidi(self, style_id: str | None) -> bool | None:
         for style in self.chain(style_id):
