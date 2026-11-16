@@ -85,6 +85,7 @@ class Block:
     checks: dict[str, Any] | None = None  # second readings: {"numbers": checked, "agreed": agreed}
     repairs: list[dict[str, Any]] = field(default_factory=list)
     flags: list[str] = field(default_factory=list)
+    half: str | None = None  # a PDF spread split in two (D4c): "right" or "left", the page it belongs to
     _cell_repairs: Any = field(default=None, repr=False, compare=False)  # PDF tables: repairs made in cells, logged by the reader
 
     def to_dict(self, index: int) -> dict[str, Any]:
@@ -93,7 +94,7 @@ class Block:
             out["cells"] = [[cell.to_dict() for cell in row] for row in (self.cells or [])]
         else:
             out["text"] = self.text
-        for key in ("level", "label", "note_id", "direction", "page"):
+        for key in ("level", "label", "note_id", "direction", "page", "half"):
             value = getattr(self, key)
             if value is not None:
                 out[key] = value
@@ -362,6 +363,8 @@ def validate(payload: Any) -> list[str]:
                         errors.append(f"{where}.cells readings must be objects with a model and a text")
         elif not isinstance(block.get("text"), str):
             errors.append(f"{where}.text must be a string")
+        if "half" in block and block["half"] not in ("right", "left"):
+            errors.append(f"{where}.half must be 'right' or 'left'")
         if "direction" in block and block["direction"] not in DIRECTIONS:
             errors.append(f"{where}.direction must be one of {DIRECTIONS}")
         if "page" in block and not (isinstance(block["page"], int) and 0 <= block["page"] < max(len(pages), 1)):

@@ -613,42 +613,35 @@ def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = froz
     tables = find_tables(*rulings(page)) if stats.paths else []
     table_flags = sorted({f for t in tables if not t.rows for f in t.flags if f == "table_grid_unresolved"})
     repairs_on = doc.options.get("repairs", True)
-    t_blocks, body_atoms, in_tables, rejected, grids = table_blocks(index, text.atoms, tables, doc._rtl, repairs_on)
-    if rejected:
-        table_flags.append("table_rejected_crosses_text")
-    # Side-by-side rows: rows of a ruled table, unruled tables, column flows (D3c).
-    if t_blocks or built.has_columns:
-        segments, t_blocks, moved = arrange(body_atoms, doc._rtl, index, list(zip(t_blocks, grids)), repairs_on)
-        in_tables += moved
+    # Two pages side by side are read as two, in the document's order (D4c).
+    halves = _spread_halves(width, text.atoms, tables, doc._rtl) if "possible_spread" in flags else None
+    if halves is not None:
+        gutter, parts = halves
+        flags = flags + ["spread_split"]
+        signals = {**signals, "spread_gutter": [round(gutter[0], 2), round(gutter[1], 2)]}
     else:
-        segments = [Segment("lines", body_atoms)]
-    first = len(doc.blocks)
-    in_lines = 0
-    line_ink = 0
+        parts = [(None, text.atoms, tables)]
+    in_tables = in_lines = line_ink = 0
     body_flags: list[str] = []
     selection_safe = True
     unruled = False
-    for segment in segments:
-        if segment.kind == "table":
-            _log_cell_repairs(doc, segment.block)
-            doc.blocks.append(segment.block)
-            in_tables += segment.chars
-            unruled = True
-            continue
-        parts = segment.bands if segment.kind in ("flow", "rows") else [segment.atoms]
-        for atoms in parts:
-            lines_built = built if len(segments) == 1 and segment.kind == "lines" and not t_blocks else build_lines(atoms)
-            if segment.kind == "rows":
-                lines_built.flags = [f for f in lines_built.flags if f != UNRESOLVED] + ["reading_order_row_major_unverified"]
-            in_lines += read_t1(doc, index, lines_built)
-            line_ink += sum(1 for a in atoms if not a.is_space)
-            body_flags += [f for f in lines_built.flags if f not in body_flags]
-            selection_safe = selection_safe and lines_built.selection_safe and segment.kind == "lines"
-        if segment.kind == "flow" and "reading_order_column_major_unverified" not in body_flags:
-            body_flags.append("reading_order_column_major_unverified")
-    for table in t_blocks:
-        _log_cell_repairs(doc, table)
-    _place_tables(doc, first, t_blocks)
+    all_tables: list[Block] = []
+    for half, atoms, region_tables in parts:
+        first = len(doc.blocks)
+        region = _read_region(doc, index, atoms, region_tables, built if half is None else None, repairs_on)
+        if half is not None:
+            for block in doc.blocks[first:]:
+                block.half = half
+        in_tables += region["in_tables"]
+        in_lines += region["in_lines"]
+        line_ink += region["line_ink"]
+        body_flags += [f for f in region["flags"] if f not in body_flags]
+        selection_safe = selection_safe and region["selection_safe"]
+        unruled = unruled or region["unruled"]
+        all_tables += region["tables"]
+        if region["rejected"] and "table_rejected_crosses_text" not in table_flags:
+            table_flags.append("table_rejected_crosses_text")
+    t_blocks = all_tables
     read = in_lines + in_tables
     # Silent loss check: every layer character ends up in a cell or in a line, never in neither.
     ink = sum(1 for a in text.atoms if not a.is_space)
@@ -682,6 +675,96 @@ def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = froz
             flags + body_flags + table_flags + (["ruled_tables"] if t_blocks else []) + (["unruled_tables"] if unruled else []),
         )
     )
+
+
+def _read_region(doc: Document, index: int, atoms: list[Atom], tables, built: PageLines | None, repairs_on: bool) -> dict:
+    """Read one region of a text-layer page (the page, or one half of a spread): ruled tables,
+    side-by-side rows, then lines. Blocks are appended in reading order, tables by their top edge."""
+    t_blocks, body_atoms, in_tables, rejected, grids = table_blocks(index, atoms, tables, doc._rtl, repairs_on)
+    if built is None or t_blocks:
+        built = build_lines(body_atoms)
+    # Side-by-side rows: rows of a ruled table, unruled tables, column flows (D3c).
+    if t_blocks or built.has_columns:
+        segments, t_blocks, moved = arrange(body_atoms, doc._rtl, index, list(zip(t_blocks, grids)), repairs_on)
+        in_tables += moved
+    else:
+        segments = [Segment("lines", body_atoms)]
+    first = len(doc.blocks)
+    in_lines = 0
+    line_ink = 0
+    body_flags: list[str] = []
+    selection_safe = True
+    unruled = False
+    for segment in segments:
+        if segment.kind == "table":
+            _log_cell_repairs(doc, segment.block)
+            doc.blocks.append(segment.block)
+            in_tables += segment.chars
+            unruled = True
+            continue
+        parts = segment.bands if segment.kind in ("flow", "rows") else [segment.atoms]
+        for part in parts:
+            lines_built = built if len(segments) == 1 and segment.kind == "lines" and not t_blocks else build_lines(part)
+            if segment.kind == "rows":
+                lines_built.flags = [f for f in lines_built.flags if f != UNRESOLVED] + ["reading_order_row_major_unverified"]
+            in_lines += read_t1(doc, index, lines_built)
+            line_ink += sum(1 for a in part if not a.is_space)
+            body_flags += [f for f in lines_built.flags if f not in body_flags]
+            selection_safe = selection_safe and lines_built.selection_safe and segment.kind == "lines"
+        if segment.kind == "flow" and "reading_order_column_major_unverified" not in body_flags:
+            body_flags.append("reading_order_column_major_unverified")
+    for table in t_blocks:
+        _log_cell_repairs(doc, table)
+    _place_tables(doc, first, t_blocks)
+    return {
+        "in_tables": in_tables,
+        "in_lines": in_lines,
+        "line_ink": line_ink,
+        "flags": body_flags,
+        "selection_safe": selection_safe,
+        "unruled": unruled,
+        "tables": t_blocks,
+        "rejected": rejected,
+    }
+
+
+SPREAD_MIDDLE = 0.05  # the gutter reaches within this share of the width from the page's middle (the fold)
+SPREAD_GUTTER_PT = 12.0  # and it is at least this wide, with no character crossing it
+
+
+def _spread_halves(width: float, atoms: list[Atom], tables, rtl: bool):
+    """(gutter, [(half, atoms, tables)] in reading order) for a page that is two pages side by
+    side, or None without the evidence: a clean vertical gutter near the middle, text on both
+    sides, and no table across it."""
+    ink = sorted((a.x0, a.x1) for a in atoms if not a.is_space)
+    if not ink:
+        return None
+    gaps = []
+    reach = ink[0][1]
+    for x0, x1 in ink[1:]:
+        if x0 - reach >= SPREAD_GUTTER_PT:
+            gaps.append((reach, x0))
+        reach = max(reach, x1)
+    middle = width / 2
+    tolerance = SPREAD_MIDDLE * width
+    # The gutter holds the fold: it reaches within the tolerance of the page's middle.
+    near = [g for g in gaps if g[0] <= middle + tolerance and g[1] >= middle - tolerance]
+    if not near:
+        return None
+    gutter = min(near, key=lambda g: max(0.0, g[0] - middle, middle - g[1]))
+    cut = min(max(middle, gutter[0]), gutter[1])
+    if any(t.bbox[0] < cut < t.bbox[2] for t in tables):
+        return None
+    left = [a for a in atoms if a.cx < cut]
+    right = [a for a in atoms if a.cx >= cut]
+    if not any(not a.is_space for a in left) or not any(not a.is_space for a in right):
+        return None
+    halves = {
+        "left": (left, [t for t in tables if (t.bbox[0] + t.bbox[2]) / 2 < cut]),
+        "right": (right, [t for t in tables if (t.bbox[0] + t.bbox[2]) / 2 >= cut]),
+    }
+    order = ("right", "left") if rtl else ("left", "right")
+    return gutter, [(half, *halves[half]) for half in order]
 
 
 def _place_tables(doc: Document, first: int, tables: list[Block]) -> None:
