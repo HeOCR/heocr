@@ -192,8 +192,11 @@ class Tesseract:
             out[f"tesseract:{self.released.name}.licence"] = self.released.licence
         return out
 
-    def recognize(self, image, dpi: int = RENDER_DPI) -> OcrResult:
-        """Recognize a PIL image rendered at ``dpi``; lines in Tesseract's reading order, with word confidences."""
+    def recognize(self, image, dpi: int = RENDER_DPI, psm: int | None = None) -> OcrResult:
+        """Recognize a PIL image rendered at ``dpi``; lines in Tesseract's reading order, with word confidences.
+
+        ``psm`` overrides the engine's page segmentation mode for this call (8 for a single word).
+        """
         with tempfile.TemporaryDirectory(prefix="heocr-ocr-") as temp:
             source = Path(temp) / "input.png"
             image.save(source, dpi=(dpi, dpi))
@@ -208,7 +211,7 @@ class Tesseract:
                     "-l",
                     self.lang,
                     "--psm",
-                    str(self.psm),
+                    str(self.psm if psm is None else psm),
                     "--dpi",
                     str(dpi),
                     "tsv",

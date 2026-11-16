@@ -164,6 +164,9 @@ class Document:
     _ocr_settings: dict[str, Any] | None = field(default=None, repr=False, compare=False)
     _ocr_engine: Any = field(default=None, repr=False, compare=False)
     _ocr_error: str | None = field(default=None, repr=False, compare=False)
+    _font_codes: dict = field(default_factory=dict, repr=False, compare=False)  # (font, letter) -> code
+    # font_private_use_by_ocr: the maps learned for this document, with their evidence (no text).
+    font_maps: list[dict[str, Any]] = field(default_factory=list)
 
     # -- views -------------------------------------------------------------
     @property
@@ -204,6 +207,8 @@ class Document:
             "unread": [item.to_dict() for item in self.unread],
             "flags": sorted(set(self.flags)),
         }
+        if self.font_maps:
+            payload["font_maps"] = [dict(m) for m in self.font_maps]
         errors = validate(payload)
         if errors:
             raise ContractError("; ".join(errors))
@@ -357,6 +362,9 @@ def validate(payload: Any) -> list[str]:
             errors.append(f"unread[{i}].bbox must be [x0, y0, x1, y1]")
     if not _strings(payload.get("flags")):
         errors.append("flags must be a list of strings")
+    for i, entry in enumerate(payload.get("font_maps", [])):
+        if not (isinstance(entry, dict) and isinstance(entry.get("font"), str) and isinstance(entry.get("map"), dict)):
+            errors.append(f"font_maps[{i}] must have a font and a map")
 
     # Provenance must be path-free. Block text and cells are content, not provenance.
     provenance = {key: value for key, value in payload.items() if key != "blocks"}

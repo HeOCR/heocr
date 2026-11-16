@@ -59,6 +59,7 @@ class Atom:
     size: float
     index: int
     repaired: str | None = None  # the repair rule that changed this character, if any
+    font: str = ""  # the font's name, recorded for private-use codes (font_private_use_by_ocr)
 
     @property
     def cx(self) -> float:
@@ -169,6 +170,28 @@ def _strip_spaces(group: list[Atom]) -> list[Atom]:
 
 def _overlap(a: Atom, b: Atom) -> float:
     return min(a.x1, b.x1) - max(a.x0, b.x0)
+
+
+def visual_words(atoms: list[Atom]) -> list[list[Atom]]:
+    """Words of a page, each as its atoms in visual (left to right) order, using the line builder's breaks."""
+    ink = [a for a in atoms if not a.is_space]
+    if not ink:
+        return []
+    median_height = statistics.median(a.height for a in ink)
+    words: list[list[Atom]] = []
+    for row in rows(atoms, median_height):
+        for component in components(row, median_height):
+            current: list[Atom] = []
+            for text, atom in _units(component):
+                if text == " ":
+                    if current:
+                        words.append(current)
+                    current = []
+                elif atom is not None:
+                    current.append(atom)
+            if current:
+                words.append(current)
+    return words
 
 
 def _units(component: list[Atom]) -> list[tuple[str, Atom | None]]:

@@ -66,8 +66,22 @@ RTL_BRACKET_ORDER = Rule(
     ),
 )
 
+FONT_PRIVATE_USE_BY_OCR = Rule(
+    rule_id="font_private_use_by_ocr",
+    reason="Some fonts map Hebrew letters to private-use codes and name no glyphs; the page itself shows the letter.",
+    example=("השרי\uf01a", "השרים"),
+    formats=("pdf",),
+    evidence=(
+        "word-level OCR of the words holding the code agrees letter for letter at every known position, in at "
+        "least 3 words with at least 90% agreement; the letter is absent from the font in regular form; "
+        "final letters sit at word ends; no two codes share a letter (learned per font, per document; "
+        "heocr.pdf.fontmap)"
+    ),
+)
+
 RULES: dict[str, Rule] = {
-    rule.rule_id: rule for rule in (SYMBOL_FONT_BULLET, DIRECTION_MARKS, LATIN1_ETH_NUN, RTL_BRACKET_ORDER)
+    rule.rule_id: rule
+    for rule in (SYMBOL_FONT_BULLET, DIRECTION_MARKS, LATIN1_ETH_NUN, RTL_BRACKET_ORDER, FONT_PRIVATE_USE_BY_OCR)
 }
 
 
@@ -149,3 +163,15 @@ def brackets_mirrored_in(units: list[str]) -> bool:
         if bracket_order_valid(text.translate(_MIRROR)):
             mirrored += 1
     return mirrored >= 3 and mirrored > 3 * as_read
+
+
+def font_private_use_by_ocr(text: str, mapping: dict[str, str] | None = None) -> tuple[str, Counter]:
+    """Apply a learned code -> letter map (the learning is ``heocr.pdf.fontmap``)."""
+    mapping = mapping if mapping is not None else {"\uf01a": "ם"}
+    changes: Counter = Counter()
+    for code, letter in mapping.items():
+        count = text.count(code)
+        if count:
+            changes[(f"U+{ord(code):04X}", letter)] += count
+            text = text.replace(code, letter)
+    return text, changes

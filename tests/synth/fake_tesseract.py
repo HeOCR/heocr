@@ -1,7 +1,8 @@
 """A stand-in for the tesseract program, for offline tests of the OCR route.
 
 It answers --version and --list-langs, and writes a TSV for a recognition call. The TSV comes
-from $FAKE_TSV (a file) or a built-in two-line Hebrew page. Every call's arguments are appended
+from $FAKE_TSV (a file) or a built-in two-line Hebrew page; a single-word call (--psm 8)
+answers with $FAKE_WORD when it is set. Every call's arguments are appended
 to $FAKE_LOG when it is set; $FAKE_FAIL=1 makes recognition fail.
 """
 
@@ -39,6 +40,16 @@ def main(argv: list[str]) -> int:
     if os.environ.get("FAKE_FAIL") == "1":
         return 1
     base = argv[1]
+    psm = argv[argv.index("--psm") + 1] if "--psm" in argv else "3"
+    word = os.environ.get("FAKE_WORD")
+    if psm == "8" and word is not None:
+        # A single-word call: answer with $FAKE_WORD (empty means nothing found).
+        rows = ["level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext"]
+        if word:
+            rows.append(f"5\t1\t1\t1\t1\t1\t2\t2\t40\t20\t95.0\t{word}")
+        with open(base + ".tsv", "w", encoding="utf-8") as stream:
+            stream.write("\n".join(rows) + "\n")
+        return 0
     source = os.environ.get("FAKE_TSV")
     tsv = open(source, encoding="utf-8").read() if source else DEFAULT_TSV
     with open(base + ".tsv", "w", encoding="utf-8") as stream:
