@@ -71,10 +71,33 @@ class PageClassTest(unittest.TestCase):
     def test_t5_vector_text(self) -> None:
         self.assertClass(PdfPage(paths=150), "T5", "text_may_be_vector_paths")
 
-    def test_t6_text_and_images(self) -> None:
+    def test_t6_reads_the_text_layer_and_reports_image_regions(self) -> None:
         page = PdfPage(lines=lines_block(HEBREW), images=[(50, 100, 495, 400)])
-        _, record = self.assertClass(page, "T6", "images_may_hold_text")
+        doc, record = self.assertClass(page, "T6", "images_may_hold_text")
         self.assertAlmostEqual(record.signals["image_coverage"], 495 * 400 / (595 * 842), places=3)
+        self.assertEqual(record.route, "text_layer")
+        self.assertEqual(record.coverage["status"], "partial")
+        self.assertEqual([l.text for b in doc.blocks for l in b.lines], HEBREW)
+        regions = [u for u in doc.unread if u.reason == "image_region_not_read"]
+        self.assertEqual(len(regions), 1)
+        self.assertEqual([round(v) for v in regions[0].bbox], [50, 342, 545, 742])
+        self.assertEqual(doc.to_dict()["unread"][0]["bbox"], [50.0, 342.0, 545.0, 742.0])
+
+    def test_symbol_font_bullets_are_not_t3(self) -> None:
+        bulleted = ["\uf0b7 " + line for line in HEBREW] + ["\uf0a7 סעיף אחרון"]
+        doc, record = self.assertClass(PdfPage(lines=lines_block(bulleted)), "T1")
+        self.assertEqual(record.signals["private_use_chars"], 6)
+        self.assertEqual(record.signals["private_use_next_to_hebrew"], 0)
+        lines = [l.text for b in doc.blocks for l in b.lines]
+        self.assertEqual(lines, ["• " + line for line in HEBREW] + ["• סעיף אחרון"])
+        repairs = doc.blocks[0].repairs
+        self.assertIn({"rule": "symbol_font_bullet", "from": "U+F0B7", "to": "•", "count": 5}, repairs)
+        self.assertIn("bullet_symbol_mapped", doc.blocks[0].flags)
+
+    def test_times_and_divide_signs_are_not_broken_letters(self) -> None:
+        lines = HEBREW + ["שטח 5×3 מטר ו-6÷2 חלקים", "אורך×רוחב×גובה"]
+        _, record = self.assertClass(PdfPage(lines=lines_block(lines)), "T1")
+        self.assertEqual(record.signals["latin1_next_to_hebrew"], 0)
 
     def test_small_logo_stays_t1(self) -> None:
         self.assertClass(PdfPage(lines=lines_block(HEBREW), images=[(500, 780, 40, 40)]), "T1")
@@ -86,9 +109,11 @@ class PageClassTest(unittest.TestCase):
 
     def test_spread_and_rotation_flags(self) -> None:
         self.assertClass(PdfPage(lines=lines_block(HEBREW, right=1100), width=1190), "T1", "possible_spread")
+        _, landscape = self.assertClass(PdfPage(lines=lines_block(HEBREW, top=550), width=842, height=595), "T1")
+        self.assertNotIn("possible_spread", landscape.flags)
         self.assertClass(PdfPage(lines=lines_block(HEBREW), rotate=90), "T1", "page_rotated")
 
-    def test_mixed_document_reads_only_t1(self) -> None:
+    def test_mixed_document_reads_only_text_layer_classes(self) -> None:
         pdf = make_pdf([PdfPage(lines=lines_block(HEBREW)), PdfPage(images=FULL_PAGE), PdfPage(lines=lines_block(HEBREW[:1]))])
         doc = heocr.extract(pdf)
         self.assertEqual([p.page_class for p in doc.pages], ["T1", "T5", "T1"])

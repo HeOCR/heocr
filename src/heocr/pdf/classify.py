@@ -10,7 +10,7 @@ from __future__ import annotations
 import ctypes
 import re
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from heocr.pdf.lines import WORD_GAP_EM, BuiltLine
 from heocr.textflags import is_private_use
@@ -32,10 +32,14 @@ BROKEN_SHARE = 0.005
 # An OCR layer (invisible text over a page image) is foreign OCR; below this Hebrew share it is garbage.
 INVISIBLE_SHARE = 0.5
 OCR_HEBREW_SHARE = 0.3
-# Wider than tall by this factor: maybe a two-page spread (split in D4).
-SPREAD_ASPECT = 1.2
+# A two-page spread is twice a standard portrait page at the same height (the volunteer's rule).
+# Aspect alone cannot tell: A4 landscape has the same aspect as two A4 pages side by side.
+# A5 is left out on purpose: two A5 pages are exactly A4 landscape, which is common (slides).
+STANDARD_PORTRAIT = ((595.0, 842.0), (612.0, 792.0), (612.0, 1008.0), (842.0, 1191.0))
+SPREAD_TOLERANCE = 0.02
 
 _FINALS = frozenset("ךםןףץ")
+_MATH_SIGNS = frozenset("\u00d7\u00f7")  # × and ÷ are Latin-1 but not letters
 _HEBREW_LETTER = re.compile(r"[א-ת]")
 _WORD = re.compile(r"[א-ת֑-ׇ׳״\"']+")
 
@@ -47,6 +51,7 @@ class ObjectStats:
     paths: int = 0
     text_objects: int = 0
     stream_text: str = ""
+    image_boxes: list[list[float]] = field(default_factory=list)  # top-left origin, points
 
 
 def _union_area(rects: list[tuple[float, float, float, float]]) -> float:
@@ -117,6 +122,7 @@ def object_stats(page, max_objects: int = 20000) -> ObjectStats:
     finally:
         textpage.close()
     stats.image_coverage = _union_area(rects) / (width * height) if width * height > 0 else 0.0
+    stats.image_boxes = [[left, height - top, right, height - bottom] for left, bottom, right, top in rects]
     stats.stream_text = "".join(pieces)
     return stats
 
@@ -138,7 +144,15 @@ def text_signals(chars: str, lines: list[BuiltLine], invisible: int, total: int)
     latin1_adjacent = 0
     for word in re.findall(r"\S+", built):
         if _HEBREW_LETTER.search(word):
-            latin1_adjacent += sum(1 for ch in word if 0xC0 <= ord(ch) <= 0xFF)
+            latin1_adjacent += sum(1 for ch in word if 0xC0 <= ord(ch) <= 0xFF and ch not in _MATH_SIGNS)
+    # Private-use codes inside Hebrew words are broken letters (the volunteer's rule); symbol-font
+    # bullets at line start are not.
+    pua_hebrew = 0
+    for line in built.split("\n"):
+        for i, ch in enumerate(line):
+            if is_private_use(ch):
+                neighbours = line[max(i - 1, 0) : i] + line[i + 1 : i + 2]
+                pua_hebrew += any(_HEBREW_LETTER.match(n) for n in neighbours)
     return {
         "chars": total,
         "hebrew_letters": hebrew,
@@ -148,9 +162,17 @@ def text_signals(chars: str, lines: list[BuiltLine], invisible: int, total: int)
         "final_start_rate": round(rate, 4),
         "replacement_chars": chars.count("�"),
         "private_use_chars": sum(1 for ch in chars if is_private_use(ch)),
+        "private_use_next_to_hebrew": pua_hebrew,
         "latin1_next_to_hebrew": latin1_adjacent,
         "invisible_share": round(invisible / total, 4) if total else 0.0,
     }
+
+
+def is_spread(width: float, height: float) -> bool:
+    for w, h in STANDARD_PORTRAIT:
+        if abs(height - h) <= SPREAD_TOLERANCE * h and abs(width - 2 * w) <= SPREAD_TOLERANCE * 2 * w:
+            return True
+    return False
 
 
 def classify(signals: dict) -> tuple[str, list[str]]:
@@ -159,7 +181,7 @@ def classify(signals: dict) -> tuple[str, list[str]]:
     chars = signals["chars"]
     coverage = signals["image_coverage"]
     paths = signals["paths"]
-    if signals.get("aspect", 0) > SPREAD_ASPECT:
+    if is_spread(signals.get("width", 0.0), signals.get("height", 0.0)):
         flags.append("possible_spread")
     if chars == 0:
         if signals["images"] and coverage > 0:
@@ -175,7 +197,7 @@ def classify(signals: dict) -> tuple[str, list[str]]:
         if signals["hebrew_share"] < OCR_HEBREW_SHARE or reversed_words:
             return "T4", flags + ["foreign_ocr_layer"]
         flags.append("text_layer_is_ocr")
-    broken = signals["replacement_chars"] + signals["private_use_chars"] + signals["latin1_next_to_hebrew"]
+    broken = signals["replacement_chars"] + signals["private_use_next_to_hebrew"] + signals["latin1_next_to_hebrew"]
     if broken >= BROKEN_MIN and broken >= BROKEN_SHARE * chars:
         return "T3", flags + ["broken_font_mapping"]
     stream_reversed = (

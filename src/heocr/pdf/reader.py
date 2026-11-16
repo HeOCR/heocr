@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from heocr.contract import Block, Document, Line, Page, Unread
 from heocr.pdf.classify import classify, object_stats, stream_signals, text_signals
 from heocr.pdf.lines import Atom, PageLines, build_lines, paragraphs
-from heocr.textflags import text_flags
+from heocr.textflags import is_private_use, text_flags
 
 TOOL = "heocr.pdf"
 # Characters whose baseline angle has a sine above this are rotated text.
@@ -127,8 +127,19 @@ def read_t1(doc: Document, page_index: int, built: PageLines) -> int:
     """Read a T1 page's built lines into blocks. Returns the characters read."""
     read = 0
     for group in paragraphs(built):
-        lines = [Line(line.text, line.bbox, line.direction) for line in group]
+        lines: list[Line] = []
+        bullets: dict[str, int] = {}
+        for line in group:
+            text = line.text
+            if text and is_private_use(text[0]) and (len(text) == 1 or text[1].isspace()):
+                # A symbol-font bullet (U+F0B7 and the like) at line start has no meaning outside its font.
+                code = f"U+{ord(text[0]):04X}"
+                bullets[code] = bullets.get(code, 0) + 1
+                text = "•" + text[1:]
+                line.flags.append("bullet_symbol_mapped")
+            lines.append(Line(text, line.bbox, line.direction))
         flags = sorted({flag for line in group for flag in line.flags})
+        repairs = [{"rule": "symbol_font_bullet", "from": code, "to": "•", "count": n} for code, n in sorted(bullets.items())]
         bbox = [
             min(line.bbox[0] for line in group),
             min(line.bbox[1] for line in group),
@@ -147,6 +158,7 @@ def read_t1(doc: Document, page_index: int, built: PageLines) -> int:
                 tool=TOOL,
                 direction=group[0].direction,
                 lines=lines,
+                repairs=repairs,
                 flags=flags + text_flags(block_text),
             )
         )
@@ -204,7 +216,8 @@ def _read_page(doc: Document, index: int, page) -> None:
             "paths": stats.paths,
             "text_objects": stats.text_objects,
             "control_chars": text.controls,
-            "aspect": round(width / height, 4) if height else 0.0,
+            "width": round(width, 2),
+            "height": round(height, 2),
             "fonts": [name for name, _ in sorted(text.fonts.items(), key=lambda kv: -kv[1])[:5]],
         }
     )
@@ -217,7 +230,7 @@ def _read_page(doc: Document, index: int, page) -> None:
             Page(index, width, height, "empty", "none", signals, {"chars_total": 0, "chars_read": 0, "status": "nothing_to_read"}, flags)
         )
         return
-    if page_class != "T1":
+    if page_class not in READ_CLASSES:
         doc.pages.append(
             Page(
                 index,
@@ -235,24 +248,35 @@ def _read_page(doc: Document, index: int, page) -> None:
         )
         return
     read = read_t1(doc, index, built)
+    status = "read" if read >= text.chars_total else "partial"
+    if page_class == "T6":
+        # The text layer is read; the image regions, which may hold text, wait for region OCR (D2).
+        status = "partial"
+        for box in stats.image_boxes:
+            doc.unread.append(
+                Unread(scope="page", reason="image_region_not_read", page=index, bbox=box, detail="region OCR arrives in D2")
+            )
     doc.pages.append(
         Page(
             index,
             width,
             height,
-            "T1",
+            page_class,
             "text_layer",
             signals,
             {
                 "chars_total": text.chars_total,
                 "chars_read": read,
-                "status": "read" if read >= text.chars_total else "partial",
+                "status": status,
                 "selection_safe": built.selection_safe,
             },
             flags + built.flags,
         )
     )
 
+
+# Classes read through the text layer in D1. T6 also reports its image regions as unread.
+READ_CLASSES = ("T1", "T6")
 
 _NO_ROUTE = {
     "T2": "text layer in visual order; reordering route arrives in D2",
