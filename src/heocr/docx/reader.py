@@ -74,6 +74,68 @@ def _open_image(data: bytes):
     return image, dpi, None
 
 
+def image_blocks(doc: Document, data: bytes, role: str, note_id: str | None, *, source: str, tool: str) -> list[Block]:
+    """An embedded image (DOCX, an HTML data URI) read by OCR, as text blocks; or a figure block recorded as unread."""
+
+    def unread(reason: str, detail: str | None = None) -> list[Block]:
+        doc.unread.append(Unread(scope="block", reason=reason, detail=detail))
+        return [Block(kind="figure", role=role, source=source, tool=tool, note_id=note_id, flags=[reason])]
+
+    engine = engine_for(doc)
+    if engine is None:
+        return unread("image_not_read", unavailable_reason(doc))
+    image, dpi, problem = _open_image(data)
+    if image is None:
+        return unread("image_format_not_supported", problem)
+    if image.size[0] < MIN_REGION_PX or image.size[1] < MIN_REGION_PX:
+        return unread("image_too_small")
+    if not has_ink(image):
+        return unread("image_blank")
+    try:
+        result = engine.recognize(image, dpi=dpi)
+    except OcrUnavailable as exc:
+        return unread("ocr_failed", str(exc))
+    if not result.lines:
+        return unread("image_no_text_found")
+    if result.mean_confidence is not None and result.mean_confidence < REGION_MIN_CONFIDENCE:
+        return unread("image_ocr_low_confidence", f"mean confidence {result.mean_confidence}")
+    short, share = short_for_ink(image, result)
+    groups: list[list] = []
+    for line in result.lines:
+        if groups and groups[-1][-1].paragraph == line.paragraph:
+            groups[-1].append(line)
+        else:
+            groups.append([line])
+    blocks = []
+    dropped = 0
+    for group in groups:
+        confidence = block_ocr(engine, group)["mean_confidence"]
+        if confidence is not None and confidence < REGION_MIN_CONFIDENCE:
+            dropped += 1
+            continue
+        text = "\n".join(line.text for line in group)
+        blocks.append(
+            Block(
+                kind="text",
+                text=text,
+                role=role,
+                source="ocr",
+                tool=engine.version,
+                note_id=note_id,
+                direction="rtl",
+                ocr={**block_ocr(engine, group), "dpi": dpi, "ink_outside_share": share},
+                flags=["ocr_unverified", "from_embedded_image"] + (["ocr_short_for_ink"] if short else []),
+            )
+        )
+    if dropped:
+        doc.unread.append(
+            Unread(scope="block", reason="image_ocr_low_confidence", detail=f"{dropped} of {len(groups)} paragraphs below confidence {REGION_MIN_CONFIDENCE:g}")
+        )
+    if not blocks:
+        return [Block(kind="figure", role=role, source=source, tool=tool, note_id=note_id, flags=["image_ocr_low_confidence"])]
+    return blocks
+
+
 class _Package:
     def __init__(self, body: bytes) -> None:
         self.zip = zipfile.ZipFile(io.BytesIO(body))
@@ -381,68 +443,12 @@ class _Reader:
     # -- embedded images --------------------------------------------------------
     def image(self, rel_id: str | None, role: str, note_id: str | None) -> list[Block]:
         """An embedded image read by OCR, as text blocks; or a figure block recorded as unread."""
-
-        def unread(reason: str, detail: str | None = None) -> list[Block]:
-            self.doc.unread.append(Unread(scope="block", reason=reason, detail=detail))
-            return [Block(kind="figure", role=role, source="office_xml", tool=TOOL, note_id=note_id, flags=[reason])]
-
         target = self.part_rels.get(rel_id or "")
         data = self.pkg.read(target) if target else None
         if data is None:
-            return unread("image_not_read", "embedded image without a readable part (linked or missing)")
-        engine = engine_for(self.doc)
-        if engine is None:
-            return unread("image_not_read", unavailable_reason(self.doc))
-        image, dpi, problem = _open_image(data)
-        if image is None:
-            return unread("image_format_not_supported", problem)
-        if image.size[0] < MIN_REGION_PX or image.size[1] < MIN_REGION_PX:
-            return unread("image_too_small")
-        if not has_ink(image):
-            return unread("image_blank")
-        try:
-            result = engine.recognize(image, dpi=dpi)
-        except OcrUnavailable as exc:
-            return unread("ocr_failed", str(exc))
-        if not result.lines:
-            return unread("image_no_text_found")
-        if result.mean_confidence is not None and result.mean_confidence < REGION_MIN_CONFIDENCE:
-            return unread("image_ocr_low_confidence", f"mean confidence {result.mean_confidence}")
-        short, share = short_for_ink(image, result)
-        groups: list[list] = []
-        for line in result.lines:
-            if groups and groups[-1][-1].paragraph == line.paragraph:
-                groups[-1].append(line)
-            else:
-                groups.append([line])
-        blocks = []
-        dropped = 0
-        for group in groups:
-            confidence = block_ocr(engine, group)["mean_confidence"]
-            if confidence is not None and confidence < REGION_MIN_CONFIDENCE:
-                dropped += 1
-                continue
-            text = "\n".join(line.text for line in group)
-            blocks.append(
-                Block(
-                    kind="text",
-                    text=text,
-                    role=role,
-                    source="ocr",
-                    tool=engine.version,
-                    note_id=note_id,
-                    direction="rtl",
-                    ocr={**block_ocr(engine, group), "dpi": dpi, "ink_outside_share": share},
-                    flags=["ocr_unverified", "from_embedded_image"] + (["ocr_short_for_ink"] if short else []),
-                )
-            )
-        if dropped:
-            self.doc.unread.append(
-                Unread(scope="block", reason="image_ocr_low_confidence", detail=f"{dropped} of {len(groups)} paragraphs below confidence {REGION_MIN_CONFIDENCE:g}")
-            )
-        if not blocks:
-            return [Block(kind="figure", role=role, source="office_xml", tool=TOOL, note_id=note_id, flags=["image_ocr_low_confidence"])]
-        return blocks
+            self.doc.unread.append(Unread(scope="block", reason="image_not_read", detail="embedded image without a readable part (linked or missing)"))
+            return [Block(kind="figure", role=role, source="office_xml", tool=TOOL, note_id=note_id, flags=["image_not_read"])]
+        return image_blocks(self.doc, data, role, note_id, source="office_xml", tool=TOOL)
 
     # -- tables ---------------------------------------------------------------
     def _cell_text(self, tc, table_repairs: Counter) -> tuple[str, list[str]]:

@@ -20,6 +20,7 @@ _SECTIONS = (
     ("comment", "Comments"),
     ("header", "Headers"),
     ("footer", "Footers"),
+    ("navigation", "Navigation"),
 )
 _MD_LIST_MARKER = re.compile(r"\A(\d+)([.)])\Z")
 

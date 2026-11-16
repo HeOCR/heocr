@@ -15,8 +15,9 @@ from typing import Any
 SCHEMA_ID = "heocr_document.v1"
 
 BLOCK_KINDS = ("text", "heading", "list_item", "table", "figure")
-ROLES = ("body", "header", "footer", "footnote", "endnote", "comment", "textbox")
-SOURCES = ("text_layer", "office_xml", "converted_docx", "ocr", "none")
+# "navigation": site menus, breadcrumbs and "skip to content" links (D4f); kept, out of the body flow.
+ROLES = ("body", "header", "footer", "footnote", "endnote", "comment", "textbox", "navigation")
+SOURCES = ("text_layer", "office_xml", "converted_docx", "html", "ocr", "none")
 PAGE_CLASSES = ("T1", "T2", "T3", "T4", "T5", "T6", "empty")
 DIRECTIONS = ("rtl", "ltr")
 UNREAD_SCOPES = ("document", "page", "block")
