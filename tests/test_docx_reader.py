@@ -223,6 +223,16 @@ class DocxRobustnessTest(unittest.TestCase):
         doc = heocr.extract(d.build())
         self.assertEqual([(b.label, b.text) for b in doc.blocks], [("1.1.", "ראשון"), ("2.1.", "שני")])
 
+    def test_numbered_section_break_paragraph_is_counted_and_flagged(self) -> None:
+        d = Docx()
+        d.abstracts = [abstract_num(0, [lvl(0)])]
+        d.nums = [num(1, 0)]
+        section_break = para(num_id=1, ilvl=0).replace("</w:pPr>", "<w:sectPr/></w:pPr>", 1)
+        d.body = [para("א", num_id=1, ilvl=0), section_break, para("ב", num_id=1, ilvl=0)]
+        doc = heocr.extract(d.build())
+        self.assertEqual([b.label for b in doc.blocks], ["1.", "2.", "3."])
+        self.assertIn("numbering_on_section_break_paragraph", doc.blocks[1].flags)
+
     def test_paragraph_ilvl_overrides_style_field_by_field(self) -> None:
         d = Docx()
         d.styles = [style("L", "List", num_id=9, ilvl=0)]
