@@ -110,6 +110,14 @@ class PageClassTest(unittest.TestCase):
         self.assertIn({"rule": "symbol_font_bullet", "from": "U+F0B7", "to": "•", "count": 5}, repairs)
         self.assertIn("bullet_symbol_mapped", doc.blocks[0].flags)
 
+    def test_symbol_font_signs_next_to_hebrew_are_not_broken_letters(self) -> None:
+        # Wingdings' U+F071 (a box) set against a Hebrew word, as on a real dev page: a sign, not a letter.
+        lines = ["\uf071סעיף " + line for line in HEBREW]
+        _, record = self.assertClass(PdfPage(lines=lines_block(lines), font_name="Wingdings-Regular"), "T1")
+        self.assertEqual(record.signals["private_use_next_to_hebrew"], 0)
+        _, record = self.assertClass(PdfPage(lines=lines_block(lines), font_name="David"), "T3", "broken_font_mapping")
+        self.assertGreater(record.signals["private_use_next_to_hebrew"], 0)
+
     def test_times_and_divide_signs_are_not_broken_letters(self) -> None:
         lines = HEBREW + ["שטח 5×3 מטר ו-6÷2 חלקים", "אורך×רוחב×גובה"]
         _, record = self.assertClass(PdfPage(lines=lines_block(lines)), "T1")

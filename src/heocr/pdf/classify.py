@@ -135,7 +135,8 @@ def _final_start_rate(text: str) -> tuple[float, int]:
     return starts / len(words), len(words)
 
 
-def text_signals(chars: str, lines: list[BuiltLine], invisible: int, total: int) -> dict:
+def text_signals(chars: str, lines: list[BuiltLine], invisible: int, total: int, symbol_pua: frozenset[str] | set[str] = frozenset()) -> dict:
+    """Text-layer signals. ``symbol_pua``: private-use codes the page draws only in symbol fonts."""
     hebrew = len(_HEBREW_LETTER.findall(chars))
     letters = sum(1 for ch in chars if unicodedata.category(ch).startswith("L"))
     latin = sum(1 for ch in chars if "LATIN" in unicodedata.name(ch, "") and unicodedata.category(ch).startswith("L"))
@@ -150,7 +151,7 @@ def text_signals(chars: str, lines: list[BuiltLine], invisible: int, total: int)
     pua_hebrew = 0
     for line in built.split("\n"):
         for i, ch in enumerate(line):
-            if is_private_use(ch):
+            if is_private_use(ch) and ch not in symbol_pua:
                 neighbours = line[max(i - 1, 0) : i] + line[i + 1 : i + 2]
                 pua_hebrew += any(_HEBREW_LETTER.match(n) for n in neighbours)
     return {
