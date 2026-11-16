@@ -58,6 +58,7 @@ class Table:
     bbox: list[float]
     rows: list[list[dict]]  # per row, cells: {"box": [...], "colspan", "rowspan", "placeholder"}
     flags: list[str] = field(default_factory=list)
+    xs: list[float] = field(default_factory=list)  # the grid's column positions, left to right
 
 
 def rulings(page) -> tuple[list[Rule], list[Rule]]:
@@ -252,7 +253,7 @@ def _grid(hs: list[Rule], vs: list[Rule]) -> Table | None:
             elif r > r0 and c == c0:
                 row.append({"box": None, "colspan": c1 - c0 + 1, "rowspan": 1, "placeholder": True, "col": c})
         grid_rows.append(row)
-    return Table([xs[0], ys[0], xs[-1], ys[-1]], grid_rows, flags)
+    return Table([xs[0], ys[0], xs[-1], ys[-1]], grid_rows, flags, list(xs))
 
 
 def _rows_independent(hs: list[Rule], vs: list[Rule], xs: list[float], ys: list[float]) -> Table:
@@ -274,13 +275,14 @@ def _rows_independent(hs: list[Rule], vs: list[Rule], xs: list[float], ys: list[
         rows.append(row)
     if len(rows) < 1 or max(len(r) for r in rows) < 2:
         return Table([left, ys[0], right, ys[-1]], [], ["table_grid_unresolved"])
-    return Table([left, ys[0], right, ys[-1]], rows, ["table_rows_independent"])
+    return Table([left, ys[0], right, ys[-1]], rows, ["table_rows_independent"], list(xs))
 
 
-def table_blocks(page_index: int, atoms: list[Atom], tables: list[Table], rtl: bool) -> tuple[list[Block], list[Atom], int, int]:
-    """(table blocks, the atoms left for lines, characters placed in cells, grids rejected)."""
+def table_blocks(page_index: int, atoms: list[Atom], tables: list[Table], rtl: bool) -> tuple[list[Block], list[Atom], int, int, list[list[float]]]:
+    """(table blocks, the atoms left for lines, characters placed in cells, grids rejected, each block's column positions)."""
     remaining = list(atoms)
     blocks: list[Block] = []
+    grids: list[list[float]] = []
     rejected: list[Table] = []
     placed = 0
     for table in tables:
@@ -334,7 +336,8 @@ def table_blocks(page_index: int, atoms: list[Atom], tables: list[Table], rtl: b
                 flags=["ruled_table", *table.flags],
             )
         )
-    return blocks, remaining, placed, len(rejected)
+        grids.append(list(table.xs))
+    return blocks, remaining, placed, len(rejected), grids
 
 
 NARROW_CELL = 12.0  # pt: an empty cell narrower than this is a sliver between doubled borders

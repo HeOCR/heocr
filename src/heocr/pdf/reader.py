@@ -31,6 +31,7 @@ from heocr.ocr.regions import (  # noqa: F401  (re-exported for callers of the P
 )
 from heocr.pdf.classify import FIGURE_IMAGE, classify, object_stats, stream_signals, text_signals
 from heocr.pdf.lines import Atom, PageLines, build_lines, paragraphs
+from heocr.pdf.columns import UNRESOLVED, Segment, arrange
 from heocr.pdf.tables import find_tables, rulings, table_blocks
 from heocr.textflags import is_private_use, text_flags
 
@@ -540,17 +541,43 @@ def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = froz
     # Ruled tables first: their characters go to cells, the rest to lines (D3b).
     tables = find_tables(*rulings(page)) if stats.paths else []
     table_flags = sorted({f for t in tables if not t.rows for f in t.flags if f == "table_grid_unresolved"})
-    t_blocks, body_atoms, in_tables, rejected = table_blocks(index, text.atoms, tables, doc._rtl)
+    t_blocks, body_atoms, in_tables, rejected, grids = table_blocks(index, text.atoms, tables, doc._rtl)
     if rejected:
         table_flags.append("table_rejected_crosses_text")
-    body = build_lines(body_atoms) if t_blocks else built
+    # Side-by-side rows: rows of a ruled table, unruled tables, column flows (D3c).
+    if t_blocks or built.has_columns:
+        segments, t_blocks, moved = arrange(body_atoms, doc._rtl, index, list(zip(t_blocks, grids)))
+        in_tables += moved
+    else:
+        segments = [Segment("lines", body_atoms)]
     first = len(doc.blocks)
-    in_lines = read_t1(doc, index, body)
+    in_lines = 0
+    line_ink = 0
+    body_flags: list[str] = []
+    selection_safe = True
+    unruled = False
+    for segment in segments:
+        if segment.kind == "table":
+            doc.blocks.append(segment.block)
+            in_tables += segment.chars
+            unruled = True
+            continue
+        parts = segment.bands if segment.kind in ("flow", "rows") else [segment.atoms]
+        for atoms in parts:
+            lines_built = built if len(segments) == 1 and segment.kind == "lines" and not t_blocks else build_lines(atoms)
+            if segment.kind == "rows":
+                lines_built.flags = [f for f in lines_built.flags if f != UNRESOLVED] + ["reading_order_row_major_unverified"]
+            in_lines += read_t1(doc, index, lines_built)
+            line_ink += sum(1 for a in atoms if not a.is_space)
+            body_flags += [f for f in lines_built.flags if f not in body_flags]
+            selection_safe = selection_safe and lines_built.selection_safe and segment.kind == "lines"
+        if segment.kind == "flow" and "reading_order_column_major_unverified" not in body_flags:
+            body_flags.append("reading_order_column_major_unverified")
     _place_tables(doc, first, t_blocks)
     read = in_lines + in_tables
     # Silent loss check: every layer character ends up in a cell or in a line, never in neither.
     ink = sum(1 for a in text.atoms if not a.is_space)
-    placed_ink = in_tables + sum(1 for a in body_atoms if not a.is_space)
+    placed_ink = in_tables + line_ink
     if placed_ink != ink:
         flags = flags + ["coverage_mismatch"]
     # Image regions are accounted on every class read through the text layer (T1, T2, T6). When
@@ -575,9 +602,9 @@ def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = froz
                 "chars_in_lines": in_lines,
                 **regions,
                 "status": status,
-                "selection_safe": body.selection_safe,
+                "selection_safe": selection_safe,
             },
-            flags + body.flags + table_flags + (["ruled_tables"] if t_blocks else []),
+            flags + body_flags + table_flags + (["ruled_tables"] if t_blocks else []) + (["unruled_tables"] if unruled else []),
         )
     )
 

@@ -14,7 +14,8 @@ A text-layer line is furniture when all three hold:
   not taken for furniture unless it keeps to the margin band.
 
 Once furniture leaves the body, a page whose side-by-side "columns" were only a header next
-to a page number no longer carries ``reading_order_unresolved_columns``.
+to a page number no longer carries ``reading_order_unresolved_columns`` (or, since D3c, the
+``reading_order_row_major_unverified`` that such a row gets).
 """
 
 from __future__ import annotations
@@ -113,13 +114,14 @@ def _ordered(blocks: list[Block]) -> list[Block]:
 
 
 def _clear_furniture_columns(doc: Document) -> None:
-    """Drop the unresolved-columns flag where only furniture stood side by side."""
+    """Drop the side-by-side flags where only furniture stood side by side."""
+    side_flags = ("reading_order_unresolved_columns", "reading_order_row_major_unverified")
     body_lines = defaultdict(list)
     for block in doc.blocks:
         if block.source == "text_layer" and block.role == "body" and block.page is not None:
             body_lines[block.page].extend(block.lines or [])
     for page in doc.pages:
-        if "reading_order_unresolved_columns" not in page.flags:
+        if not any(f in page.flags for f in side_flags):
             continue
         lines = body_lines.get(page.index, [])
         side_by_side = any(
@@ -128,6 +130,6 @@ def _clear_furniture_columns(doc: Document) -> None:
             for b in lines[n + 1 :]
         )
         if not side_by_side:
-            page.flags = [f for f in page.flags if f != "reading_order_unresolved_columns"] + ["columns_were_page_furniture"]
+            page.flags = [f for f in page.flags if f not in side_flags] + ["columns_were_page_furniture"]
             if "reading_order_invalid_geometry" not in page.flags:
                 page.coverage["selection_safe"] = True
