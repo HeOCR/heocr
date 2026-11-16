@@ -128,7 +128,9 @@ def para(
 def table(rows: list[list[str | tuple[str, dict]]], *, bidi: bool = True) -> str:
     """Rows of cells. A cell is text (``\\n`` starts a new paragraph) or (text, {"span": n, "vmerge": "restart"|"continue"})."""
     tblpr = "<w:tblPr>" + ("<w:bidiVisual/>" if bidi else "") + "</w:tblPr>"
-    out = [f"<w:tbl>{tblpr}"]
+    columns = max((sum((c[1].get("span", 1) if not isinstance(c, str) else 1) for c in row) for row in rows), default=1)
+    grid = "<w:tblGrid>" + '<w:gridCol w:w="2000"/>' * columns + "</w:tblGrid>"
+    out = [f"<w:tbl>{tblpr}{grid}"]
     for row in rows:
         out.append("<w:tr>")
         for cell in row:
@@ -227,6 +229,9 @@ class Docx:
         document = (
             f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document {NS}><w:body>'
             + "".join(self.body)
+            # Word always ends the body with a paragraph; a final table without one is invalid,
+            # and LibreOffice's text export loops on it.
+            + (para() if self.body and self.body[-1].startswith("<w:tbl>") else "")
             + f"<w:sectPr>{sect}</w:sectPr></w:body></w:document>"
         )
         parts["word/document.xml"] = document.encode()
