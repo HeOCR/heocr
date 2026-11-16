@@ -282,6 +282,9 @@ def read_pdf(body: bytes, doc: Document) -> None:
         pdf.close()
     if doc.options.get("repairs", True):
         _repair_rtl_brackets(doc)
+    from heocr.pdf.furniture import mark_furniture
+
+    mark_furniture(doc)
 
 
 def _learn_font_maps(doc: Document, pdf) -> dict[str, dict[str, str]]:
