@@ -308,6 +308,8 @@ def read_pdf(body: bytes, doc: Document) -> None:
                 _read_page(doc, index, page, eth_fonts, font_maps)
             finally:
                 page.close()
+        if doc.options.get("check_numbers"):
+            _check_numbers(doc, pdf, doc.options["check_numbers"])
     finally:
         pdf.close()
     if doc.options.get("repairs", True):
@@ -376,6 +378,79 @@ def _learn_font_maps(doc: Document, pdf) -> dict[str, dict[str, str]]:
         for code, letter in fmap.letters.items():
             doc._font_codes[(fmap.font, letter)] = code
     return {fmap.font: fmap.letters for fmap in maps if fmap.letters}
+
+
+def _check_numbers(doc: Document, pdf, scope: str = "suspect") -> None:
+    """Numbers in text-layer lines against OCR of each line's own image (``heocr.pdf.numbers``)."""
+    from heocr.pdf.numbers import LINE_PSM, PAD_PT, compare, wanted
+
+    candidates: dict[int, list[tuple[Block, Line]]] = {}
+    for block in doc.blocks:
+        if block.source == "text_layer" and block.page is not None and block.lines:
+            for line in block.lines:
+                if wanted(line.text, scope):
+                    candidates.setdefault(block.page, []).append((block, line))
+    if not candidates:
+        return
+    engine = engine_for(doc)
+    if engine is None:
+        doc.flags.append("numbers_not_checked")
+        return
+    totals: dict[int, list[int]] = {}
+    touched: dict[int, Block] = {}
+    for index, items in sorted(candidates.items()):
+        page = pdf[index]
+        try:
+            image, scale = _render(page)
+        finally:
+            page.close()
+        for block, line in items:
+            box = line.bbox
+            crop = (
+                max(0, int((box[0] - PAD_PT) * scale)),
+                max(0, int((box[1] - PAD_PT) * scale)),
+                min(image.size[0], int((box[2] + PAD_PT) * scale) + 1),
+                min(image.size[1], int((box[3] + PAD_PT) * scale) + 1),
+            )
+            if crop[2] <= crop[0] or crop[3] <= crop[1]:
+                continue  # a degenerate line box: nothing to read a second time
+            try:
+                result = engine.recognize(image.crop(crop), dpi=round(scale * 72), psm=LINE_PSM)
+            except OcrUnavailable:
+                continue
+            checked, agreed, disagreed, confirmed = compare(line.text, " ".join(l.text for l in result.lines), result.mean_confidence)
+            if not checked:
+                continue
+            if not doc.options.get("repairs", True):
+                # Not repaired, the reversed token stays wrong in the output: a disagreement.
+                disagreed += len(confirmed)
+                confirmed = []
+            page_totals = totals.setdefault(index, [0, 0, 0])
+            page_totals[0] += checked
+            page_totals[1] += agreed
+            page_totals[2] += disagreed
+            checks = block.checks or {"numbers": 0, "agreed": 0, "disagreed": 0}
+            checks["numbers"] += checked
+            checks["agreed"] += agreed
+            checks["disagreed"] += disagreed
+            block.checks = checks
+            touched[id(block)] = block
+            if doc.options.get("repairs", True):
+                for token, reading in confirmed:
+                    line.text = line.text.replace(token, reading, 1)
+                    block.repairs.append({"rule": repairs.REVERSED_DIGIT_GROUPS.rule_id, "from": token, "to": reading, "count": 1})
+                    block.flags = [f for f in block.flags if f != "digit_groups_suspect"] + ["digit_groups_confirmed"]
+                    checks["agreed"] += 1
+    for block in touched.values():
+        block.text = "\n".join(line.text for line in block.lines)
+        if block.checks["disagreed"]:
+            block.flags.append("number_disagreement")
+        elif block.checks["agreed"] < block.checks["numbers"]:
+            block.flags.append("numbers_unconfirmed")
+    for page in doc.pages:
+        if page.index in totals:
+            checked, agreed, disagreed = totals[page.index]
+            page.coverage.update({"numbers_checked": checked, "numbers_agreed": agreed, "numbers_disagreed": disagreed})
 
 
 def _repair_rtl_brackets(doc: Document) -> None:

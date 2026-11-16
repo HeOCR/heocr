@@ -34,6 +34,7 @@ def extract(
     ocr_psm: int = DEFAULT_PSM,
     tesseract: str | Sequence[str] | None = None,
     ocr_model: str | None = None,
+    check_numbers: str | bool = "suspect",
 ) -> Document:
     """Read a document and return its ``heocr_document.v1`` record.
 
@@ -49,7 +50,15 @@ def extract(
     ``ocr_model`` runs a HeOCR traineddata instead of ``ocr_lang``: a released model's name
     (downloaded on purpose first, ``heocr.models.download``) or a ``.traineddata`` path.
     Without Tesseract, or with ``ocr=False``, those pages are recorded as unread.
+
+    ``check_numbers`` reads text-layer lines a second time, by OCR of their own image
+    (``heocr.pdf.numbers``). ``"suspect"`` (the default) reads only lines with a reversed-looking
+    digit group, which is the evidence the ``reversed_digit_groups`` repair needs. ``"all"`` also
+    reads every line with amounts, percentages or dates, and flags trustworthy disagreements.
+    ``False`` turns the check off.
     """
+    if check_numbers not in (False, "suspect", "all"):
+        raise ValueError("check_numbers must be 'suspect', 'all' or False")
     if ocr:
         check_settings(ocr_lang, ocr_psm)
     if isinstance(source, (bytes, bytearray, memoryview)):
@@ -71,6 +80,7 @@ def extract(
         format_evidence=kind.evidence,
         options={
             "repairs": bool(repairs),
+            "check_numbers": (check_numbers if check_numbers in ("suspect", "all") else False) if ocr else False,
             "ocr": {"engine": "tesseract", "lang": ocr_lang, "psm": ocr_psm, **({"model": Path(ocr_model).name if ocr_model else None} if ocr_model else {})}
             if ocr
             else False,

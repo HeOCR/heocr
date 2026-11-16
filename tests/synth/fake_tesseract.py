@@ -2,7 +2,7 @@
 
 It answers --version and --list-langs, and writes a TSV for a recognition call. The TSV comes
 from $FAKE_TSV (a file) or a built-in two-line Hebrew page; a single-word call (--psm 8)
-answers with $FAKE_WORD when it is set. Every call's arguments are appended
+answers with $FAKE_WORD when it is set, and a single-line call (--psm 7) with $FAKE_LINE. Every call's arguments are appended
 to $FAKE_LOG when it is set; $FAKE_FAIL=1 makes recognition fail.
 """
 
@@ -42,11 +42,13 @@ def main(argv: list[str]) -> int:
     base = argv[1]
     psm = argv[argv.index("--psm") + 1] if "--psm" in argv else "3"
     word = os.environ.get("FAKE_WORD")
-    if psm == "8" and word is not None:
+    if psm == "7" and os.environ.get("FAKE_LINE") is not None:
+        word = os.environ["FAKE_LINE"]
+    if psm in ("7", "8") and word is not None:
         # A single-word call: answer with $FAKE_WORD (empty means nothing found).
         rows = ["level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext"]
-        if word:
-            rows.append(f"5\t1\t1\t1\t1\t1\t2\t2\t40\t20\t95.0\t{word}")
+        for n, token in enumerate(word.split(), 1):
+            rows.append(f"5\t1\t1\t1\t1\t{n}\t2\t2\t40\t20\t{os.environ.get('FAKE_CONF', '95.0')}\t{token}")
         with open(base + ".tsv", "w", encoding="utf-8") as stream:
             stream.write("\n".join(rows) + "\n")
         return 0

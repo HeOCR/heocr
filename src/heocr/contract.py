@@ -77,6 +77,7 @@ class Block:
     lines: list[Line] | None = None
     ocr: dict[str, Any] | None = None  # for source "ocr": engine, settings, status "unverified", confidence
     note_refs: list[dict[str, Any]] | None = None  # footnote/endnote references: kind, id, offset in text
+    checks: dict[str, Any] | None = None  # second readings: {"numbers": checked, "agreed": agreed}
     repairs: list[dict[str, Any]] = field(default_factory=list)
     flags: list[str] = field(default_factory=list)
 
@@ -98,6 +99,8 @@ class Block:
             out["ocr"] = dict(self.ocr)
         if self.note_refs:
             out["note_refs"] = [dict(r) for r in self.note_refs]
+        if self.checks:
+            out["checks"] = dict(self.checks)
         out["source"] = self.source
         out["tool"] = self.tool
         out["repairs"] = list(self.repairs)
@@ -288,6 +291,8 @@ def validate(payload: Any) -> list[str]:
         errors.append("options must be an object, with a boolean repairs")
     elif "ocr" in options and not (options["ocr"] is False or isinstance(options["ocr"], dict)):
         errors.append("options.ocr must be false or an object")
+    elif options.get("check_numbers", False) not in (False, "suspect", "all"):
+        errors.append("options.check_numbers must be 'suspect', 'all' or false")
 
     pages = payload.get("pages")
     if not isinstance(pages, list):
