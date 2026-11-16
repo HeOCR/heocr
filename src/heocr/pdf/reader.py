@@ -10,6 +10,7 @@ from __future__ import annotations
 import ctypes
 from collections import Counter
 import math
+import re
 import unicodedata
 from dataclasses import dataclass, field
 
@@ -30,9 +31,11 @@ from heocr.ocr.regions import (  # noqa: F401  (re-exported for callers of the P
 )
 from heocr.pdf.classify import FIGURE_IMAGE, classify, object_stats, stream_signals, text_signals
 from heocr.pdf.lines import Atom, PageLines, build_lines, paragraphs
-from heocr.textflags import text_flags
+from heocr.textflags import is_private_use, text_flags
 
 TOOL = "heocr.pdf"
+# Fonts whose private-use codes are signs (bullets, boxes, arrows), not letters.
+SYMBOL_FONT = re.compile(r"wingdings|webdings|symbol|dingbats", re.I)
 # Characters whose baseline angle has a sine above this are rotated text.
 ROTATED_SIN = 0.1
 
@@ -47,6 +50,9 @@ class PageText:
     invisible: int = 0
     lone_surrogates: int = 0
     rotated: int = 0  # characters drawn at an angle (vertical or rotated text), not read in D1
+    # Private-use codes drawn only by symbol fonts (Wingdings, Symbol ...): signs, not broken letters.
+    symbol_pua: set[str] = field(default_factory=set)
+    other_pua: set[str] = field(default_factory=set)
     # Loose boxes of every character in the layer (rotated and invisible ones included), top-left
     # origin, points: masked out of image regions before region OCR, so the layer's text is not read twice.
     drawn_boxes: list[tuple[float, float, float, float]] = field(default_factory=list)
@@ -120,6 +126,9 @@ def page_text(page, eth_fonts: frozenset[str] = frozenset()) -> PageText:
                 # Rotated text has no horizontal baseline; line building would make one line per letter.
                 out.rotated += 1
                 continue
+            if is_private_use(ch):
+                symbolic = SYMBOL_FONT.search(_font_name(raw, textpage, index)) is not None
+                (out.symbol_pua if symbolic else out.other_pua).add(ch)
             repaired = None
             if ch == "ð" and eth_fonts and _font_name(raw, textpage, index) in eth_fonts:
                 ch, repaired = "נ", repairs.LATIN1_ETH_NUN.rule_id
@@ -295,7 +304,7 @@ def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = froz
     stats = object_stats(page)
     built = build_lines(text.atoms)
     chars = "".join(a.text for a in text.atoms)
-    signals = text_signals(chars, built.lines, text.invisible, text.chars_total)
+    signals = text_signals(chars, built.lines, text.invisible, text.chars_total, text.symbol_pua - text.other_pua)
     signals.update(stream_signals(stats.stream_text))
     signals.update(
         {
