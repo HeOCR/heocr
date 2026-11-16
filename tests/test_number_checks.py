@@ -186,6 +186,19 @@ class TableCellTest(unittest.TestCase):
         self.assertIn("number_disagreement", table.cells[1][2].flags)
         self.assertEqual(doc.pages[0].coverage["numbers_disagreed"], 1)
 
+    def test_the_tables_scope_reads_cells_not_lines(self) -> None:
+        from tests.test_pdf_tables import table_page
+
+        rows = [["סכום", "תפקיד", "שם"], ["15.7.2020", "מנהל", "ספק א"], ["", "עובד", "ספק ב"]]
+        page = table_page(rows, extra=lines_block(["מיום 15.7.2020 ועד היום"], top=800))
+        with mock.patch.dict(os.environ, {"FAKE_LINE": "15.7.2020", "FAKE_CONF": "95.0"}):
+            doc = heocr.extract(make_pdf([page]), tesseract=FAKE, check_numbers="tables")
+        (table,) = [b for b in doc.blocks if b.kind == "table"]
+        self.assertEqual(table.checks, {"numbers": 1, "agreed": 1, "disagreed": 0})
+        self.assertTrue(all(b.checks is None for b in doc.blocks if b.kind == "text"))  # lines: suspect only
+        self.assertEqual(doc.options["check_numbers"], "tables")
+        self.assertEqual(heocr.validate(doc.to_dict()), [])
+
     def test_with_repairs_off_the_cell_stays_as_extracted(self) -> None:
         table = self.table(self.extract("000,005,8", "8,500,000", repairs=False))
         self.assertEqual(table.cells[1][2].text, "000,005,8")

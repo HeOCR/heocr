@@ -143,6 +143,11 @@ class OcrTableTest(unittest.TestCase):
         amount = table.cells[1][2]
         self.assertEqual(amount.text, "8,500,000")
         self.assertEqual(amount.flags, ["number_read_by_number_model"])
+        # Both readings are kept, with their models; the table stays OCR, unverified.
+        self.assertEqual(amount.readings, [{"model": "heb", "text": "00", "confidence": 90.0}, {"model": "eng", "text": "8,500,000", "confidence": 90.0}])
+        self.assertEqual((table.source, table.ocr["status"]), ("ocr", "unverified"))
+        self.assertEqual(doc.to_dict()["blocks"][-1]["cells"][1][2]["readings"][0]["text"], "00")
+        self.assertEqual(heocr.validate(doc.to_dict()), [])
         self.assertIn("numbers_read_by_number_model", table.flags)
         self.assertEqual(table.checks, {"numbers": 1, "agreed": 1, "disagreed": 0, "read_by_number_model": 1})
         self.assertEqual(table.cells[2][2].text, "200")  # the readings agree: unchanged

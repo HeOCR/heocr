@@ -36,6 +36,8 @@ class Cell:
     colspan: int = 1
     rowspan: int = 1
     flags: list[str] = field(default_factory=list)
+    # OCR'd cells whose number was read by two models: each reading, {"model", "text", "confidence"}.
+    readings: list[dict[str, Any]] | None = None
     _lines: Any = field(default=None, repr=False, compare=False)  # PDF layer cells: [text, bbox] per line, for number checks
 
     def to_dict(self) -> dict[str, Any]:
@@ -46,6 +48,8 @@ class Cell:
             out["rowspan"] = self.rowspan
         if self.flags:
             out["flags"] = list(self.flags)
+        if self.readings:
+            out["readings"] = [dict(r) for r in self.readings]
         return out
 
 
@@ -295,8 +299,8 @@ def validate(payload: Any) -> list[str]:
         errors.append("options must be an object, with a boolean repairs")
     elif "ocr" in options and not (options["ocr"] is False or isinstance(options["ocr"], dict)):
         errors.append("options.ocr must be false or an object")
-    elif options.get("check_numbers", False) not in (False, "suspect", "all"):
-        errors.append("options.check_numbers must be 'suspect', 'all' or false")
+    elif options.get("check_numbers", False) not in (False, "suspect", "tables", "all"):
+        errors.append("options.check_numbers must be 'suspect', 'tables', 'all' or false")
 
     pages = payload.get("pages")
     if not isinstance(pages, list):
@@ -345,6 +349,14 @@ def validate(payload: Any) -> list[str]:
                 for row in cells
             ):
                 errors.append(f"{where}.cells must be rows of cells with text")
+            for row in cells if isinstance(cells, list) else []:
+                for c in row if isinstance(row, list) else []:
+                    readings = c.get("readings") if isinstance(c, dict) else None
+                    if readings is not None and not (
+                        isinstance(readings, list)
+                        and all(isinstance(r, dict) and isinstance(r.get("model"), str) and isinstance(r.get("text"), str) for r in readings)
+                    ):
+                        errors.append(f"{where}.cells readings must be objects with a model and a text")
         elif not isinstance(block.get("text"), str):
             errors.append(f"{where}.text must be a string")
         if "direction" in block and block["direction"] not in DIRECTIONS:
