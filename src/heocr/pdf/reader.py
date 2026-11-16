@@ -13,7 +13,9 @@ import unicodedata
 from dataclasses import dataclass, field
 
 from heocr.contract import Block, Document, Line, Page, Unread
-from heocr.pdf.lines import Atom, build_lines, paragraphs
+from heocr.pdf.classify import classify, object_stats, stream_signals, text_signals
+from heocr.pdf.lines import Atom, PageLines, build_lines, paragraphs
+from heocr.textflags import is_private_use, text_flags
 
 TOOL = "heocr.pdf"
 # Characters whose baseline angle has a sine above this are rotated text.
@@ -121,13 +123,23 @@ def _attach_marks(atoms: list[Atom], marks: list[Atom]) -> None:
             best.text += mark.text
 
 
-def read_t1(doc: Document, page_index: int, text: PageText) -> tuple[int, list[str], bool]:
-    """Read a T1 page into blocks. Returns (characters read, page flags, selection_safe)."""
-    built = build_lines(text.atoms)
+def read_t1(doc: Document, page_index: int, built: PageLines) -> int:
+    """Read a T1 page's built lines into blocks. Returns the characters read."""
     read = 0
     for group in paragraphs(built):
-        lines = [Line(line.text, line.bbox, line.direction) for line in group]
+        lines: list[Line] = []
+        bullets: dict[str, int] = {}
+        for line in group:
+            text = line.text
+            if text and is_private_use(text[0]) and (len(text) == 1 or text[1].isspace()):
+                # A symbol-font bullet (U+F0B7 and the like) at line start has no meaning outside its font.
+                code = f"U+{ord(text[0]):04X}"
+                bullets[code] = bullets.get(code, 0) + 1
+                text = "•" + text[1:]
+                line.flags.append("bullet_symbol_mapped")
+            lines.append(Line(text, line.bbox, line.direction))
         flags = sorted({flag for line in group for flag in line.flags})
+        repairs = [{"rule": "symbol_font_bullet", "from": code, "to": "•", "count": n} for code, n in sorted(bullets.items())]
         bbox = [
             min(line.bbox[0] for line in group),
             min(line.bbox[1] for line in group),
@@ -146,10 +158,11 @@ def read_t1(doc: Document, page_index: int, text: PageText) -> tuple[int, list[s
                 tool=TOOL,
                 direction=group[0].direction,
                 lines=lines,
-                flags=flags,
+                repairs=repairs,
+                flags=flags + text_flags(block_text),
             )
         )
-    return read, built.flags, built.selection_safe
+    return read
 
 
 def read_pdf(body: bytes, doc: Document) -> None:
@@ -191,33 +204,84 @@ def _report_side_losses(doc: Document, index: int, text: PageText, flags: list[s
 def _read_page(doc: Document, index: int, page) -> None:
     width, height = page.get_size()
     text = page_text(page)
-    flags: list[str] = []
-    rotation = page.get_rotation()
-    if rotation:
+    stats = object_stats(page)
+    built = build_lines(text.atoms)
+    chars = "".join(a.text for a in text.atoms)
+    signals = text_signals(chars, built.lines, text.invisible, text.chars_total)
+    signals.update(stream_signals(stats.stream_text))
+    signals.update(
+        {
+            "images": stats.images,
+            "image_coverage": round(stats.image_coverage, 4),
+            "paths": stats.paths,
+            "text_objects": stats.text_objects,
+            "control_chars": text.controls,
+            "width": round(width, 2),
+            "height": round(height, 2),
+            "fonts": [name for name, _ in sorted(text.fonts.items(), key=lambda kv: -kv[1])[:5]],
+        }
+    )
+    page_class, flags = classify(signals)
+    if page.get_rotation():
         flags.append("page_rotated")
     _report_side_losses(doc, index, text, flags)
-    if text.chars_total == 0:
+    if page_class == "empty":
         doc.pages.append(
-            Page(index, width, height, "empty", "none", coverage={"chars_total": 0, "chars_read": 0, "status": "nothing_to_read"}, flags=flags)
+            Page(index, width, height, "empty", "none", signals, {"chars_total": 0, "chars_read": 0, "status": "nothing_to_read"}, flags)
         )
-        doc.unread.append(Unread(scope="page", reason="no_text_layer", page=index, detail="page classes arrive in D1f"))
         return
-    read, order_flags, safe = read_t1(doc, index, text)
-    flags += order_flags + ["class_not_measured"]
+    if page_class not in READ_CLASSES:
+        doc.pages.append(
+            Page(
+                index,
+                width,
+                height,
+                page_class,
+                "none",
+                signals,
+                {"chars_total": text.chars_total, "chars_read": 0, "status": "unread"},
+                flags + ["route_unavailable_d1"],
+            )
+        )
+        doc.unread.append(
+            Unread(scope="page", reason=f"class_{page_class}_no_route", page=index, detail=_NO_ROUTE[page_class])
+        )
+        return
+    read = read_t1(doc, index, built)
+    status = "read" if read >= text.chars_total else "partial"
+    if page_class == "T6":
+        # The text layer is read; the image regions, which may hold text, wait for region OCR (D2).
+        status = "partial"
+        for box in stats.image_boxes:
+            doc.unread.append(
+                Unread(scope="page", reason="image_region_not_read", page=index, bbox=box, detail="region OCR arrives in D2")
+            )
     doc.pages.append(
         Page(
             index,
             width,
             height,
-            "T1",
+            page_class,
             "text_layer",
-            signals={"chars": text.chars_total},
-            coverage={
+            signals,
+            {
                 "chars_total": text.chars_total,
                 "chars_read": read,
-                "status": "read" if read >= text.chars_total else "partial",
-                "selection_safe": safe,
+                "status": status,
+                "selection_safe": built.selection_safe,
             },
-            flags=flags,
+            flags + built.flags,
         )
     )
+
+
+# Classes read through the text layer in D1. T6 also reports its image regions as unread.
+READ_CLASSES = ("T1", "T6")
+
+_NO_ROUTE = {
+    "T2": "text layer in visual order; reordering route arrives in D2",
+    "T3": "broken font mapping; repairs arrive in D2",
+    "T4": "foreign OCR text layer; OCR route arrives in D2",
+    "T5": "image-only page; OCR route arrives in D2",
+    "T6": "text layer plus images that may hold text; region OCR arrives in D2",
+}

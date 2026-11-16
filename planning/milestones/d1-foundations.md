@@ -81,15 +81,29 @@ The thresholds are provisional. They will be tuned on D-bench, and each one is a
 | 1 | `empty` | No text, no images and no paths | Nothing to read |
 | 2 | **T5** | No usable text layer, and images or paths present | Flagged `route_unavailable_d1` |
 | 3 | **T4** | Invisible text over a page-sized image, with little Hebrew or many words that start with a final letter | Flagged |
-| 4 | **T3** | U+FFFD, private-use codes, or Latin-1 letters next to Hebrew above a threshold | Flagged |
+| 4 | **T3** | U+FFFD, private-use codes next to Hebrew letters, or Latin-1 letters inside Hebrew words (not × or ÷), above a threshold | Flagged |
 | 5 | **T2** | Many Hebrew words start with a final letter after line building | Flagged |
-| 6 | **T6** | A usable text layer, plus images that cover a large share of the page without being the whole page | Flagged |
+| 6 | **T6** | A usable text layer, plus images over 10% of the page | Read from the text layer; each image region is recorded as unread |
 | 7 | **T1** | Otherwise | Read from the text layer |
 
 Two cases are handled specially:
 
 - **A Hebrew OCR layer that passes the checks** is read as T1 and flagged `text_layer_is_ocr`, since it is someone else's unverified OCR.
-- **Pages that may be spreads** (wider than tall) and **rotated pages** are flagged. Splitting spreads is D4.
+- **Symbol-font bullets** (U+F0B7 and the like) at line start are mapped to • and logged as a repair. They do not make a page T3.
+- **Pages that may be spreads** are flagged. A spread is twice a standard portrait page at the same height, not just a wide page; splitting spreads is D4.
+- **Rotated pages** are flagged. **Rotated or vertical text** is not read, and is recorded as unread.
+
+## Carried to D2
+
+Found while reviewing D1 against the internal corpus:
+
+- **T2 route:** turn on T2 pages at the start of D2, through the existing line building (approved by the lead).
+- **Direction marks:** RLM and LRM characters remain in DOCX text, for example between a word and a section number. Removing them is a repair rule.
+- **A repairs switch:** the bullet mapping is the first logged repair. D2 adds the switch, so that with repairs off the output is the extracted text, byte for byte.
+- **Region OCR** for T6 image regions, and the OCR route for T4 and T5.
+- **Numbering residuals:** on 55 DOCX files, 98.7% of multi-level labels agree with LibreOffice's rendering. Two causes are known in the rest:
+  - "%1" that follows a heading from another list;
+  - an off-by-one in one file.
 
 ## Out of scope in D1
 

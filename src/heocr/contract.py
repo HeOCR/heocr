@@ -131,11 +131,14 @@ class Unread:
     reason: str
     page: int | None = None
     detail: str | None = None
+    bbox: list[float] | None = None  # the unread region, in the page's coordinates
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {"scope": self.scope, "reason": self.reason}
         if self.page is not None:
             out["page"] = self.page
+        if self.bbox is not None:
+            out["bbox"] = _round_box(self.bbox)
         if self.detail is not None:
             out["detail"] = self.detail
         return out
@@ -333,6 +336,8 @@ def validate(payload: Any) -> list[str]:
     for i, item in enumerate(unread):
         if not (isinstance(item, dict) and item.get("scope") in UNREAD_SCOPES and isinstance(item.get("reason"), str)):
             errors.append(f"unread[{i}] must have a scope in {UNREAD_SCOPES} and a reason")
+        elif "bbox" in item and not _is_box(item["bbox"]):
+            errors.append(f"unread[{i}].bbox must be [x0, y0, x1, y1]")
     if not _strings(payload.get("flags")):
         errors.append("flags must be a list of strings")
 
