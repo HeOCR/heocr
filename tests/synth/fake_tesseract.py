@@ -4,6 +4,11 @@ It answers --version and --list-langs, and writes a TSV for a recognition call. 
 from $FAKE_TSV (a file) or a built-in two-line Hebrew page; a single-word call (--psm 8)
 answers with $FAKE_WORD when it is set, and a single-line call (--psm 7) with $FAKE_LINE. Every call's arguments are appended
 to $FAKE_LOG when it is set; $FAKE_FAIL=1 makes recognition fail.
+
+A table-cell call (--psm 6 or 7) with $FAKE_CELLS set (a JSON file mapping grey levels to
+text) "reads" the image: the most common grey level darker than paper (0 excluded, being the
+rulings) is looked up, within 4 levels, and its text is the answer. A level not in the map is
+ink that could not be read: the answer is empty.
 """
 
 import json
@@ -41,6 +46,24 @@ def main(argv: list[str]) -> int:
         return 1
     base = argv[1]
     psm = argv[argv.index("--psm") + 1] if "--psm" in argv else "3"
+    cells = os.environ.get("FAKE_CELLS")
+    if psm in ("6", "7") and cells:
+        from PIL import Image
+
+        mapping = {int(k): v for k, v in json.load(open(cells, encoding="utf-8")).items()}
+        histogram = Image.open(argv[0]).convert("L").histogram()
+        levels = [(count, level) for level, count in enumerate(histogram[1:150], 1) if count]
+        text = ""
+        if levels:
+            level = max(levels)[1]
+            near = [k for k in mapping if abs(k - level) <= 4]
+            text = mapping[near[0]] if near else ""
+        rows = ["level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext"]
+        for n, token in enumerate(text.split(), 1):
+            rows.append(f"5\t1\t1\t1\t1\t{n}\t2\t2\t40\t20\t90.0\t{token}")
+        with open(base + ".tsv", "w", encoding="utf-8") as stream:
+            stream.write("\n".join(rows) + "\n")
+        return 0
     word = os.environ.get("FAKE_WORD")
     if psm == "7" and os.environ.get("FAKE_LINE") is not None:
         word = os.environ["FAKE_LINE"]

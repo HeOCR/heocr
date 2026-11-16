@@ -15,7 +15,7 @@ import unicodedata
 from dataclasses import dataclass, field
 
 from heocr import repairs
-from heocr.contract import Block, Document, Line, Page, Unread
+from heocr.contract import Block, Cell, Document, Line, Page, Unread
 from heocr.ocr import OcrUnavailable, block_ocr, engine_for, unavailable_reason
 from heocr.ocr.regions import (  # noqa: F401  (re-exported for callers of the PDF route)
     INK_LEVEL,
@@ -32,6 +32,7 @@ from heocr.ocr.regions import (  # noqa: F401  (re-exported for callers of the P
 from heocr.pdf.classify import FIGURE_IMAGE, classify, object_stats, stream_signals, text_signals
 from heocr.pdf.lines import Atom, PageLines, build_lines, paragraphs
 from heocr.pdf.columns import UNRESOLVED, Segment, arrange
+from heocr.pdf.ocrtables import cell_crop, cell_has_ink, cell_psm, tables_in
 from heocr.pdf.tables import find_tables, rulings, table_blocks
 from heocr.textflags import is_private_use, text_flags
 
@@ -176,11 +177,12 @@ def _attach_marks(atoms: list[Atom], marks: list[Atom]) -> None:
             best.text += mark.text
 
 
-def document_is_rtl(pdf) -> bool:
+def document_is_rtl(pdf) -> bool | None:
     """The document's direction, from its script: RTL when Hebrew is at least ``RTL_DOCUMENT_SHARE`` of its letters.
 
     Tables take the document's direction, not their own (the volunteer's ``clean.py`` rule 8:
-    an English table in a Hebrew document is still RTL).
+    an English table in a Hebrew document is still RTL). None when the text layer has no
+    letters at all (a scan): the caller then goes by the OCR language.
     """
     import pypdfium2.raw as raw
 
@@ -198,7 +200,18 @@ def document_is_rtl(pdf) -> bool:
         finally:
             textpage.close()
             page.close()
+    if hebrew + latin == 0:
+        return None
     return hebrew > 0 and hebrew >= RTL_DOCUMENT_SHARE * (hebrew + latin)
+
+
+RTL_LANGUAGES = frozenset({"heb", "yid", "ara", "fas", "urd", "syr"})
+
+
+def _language_is_rtl(doc: Document) -> bool:
+    """A scanned document's direction, from the OCR language it is read in (``heb`` by default)."""
+    lang = (doc._ocr_settings or {}).get("lang") or "heb"
+    return any(part in RTL_LANGUAGES for part in lang.split("+")[:1])
 
 
 def eth_fonts_of(pdf) -> frozenset[str]:
@@ -300,7 +313,8 @@ def read_pdf(body: bytes, doc: Document) -> None:
         return
     try:
         doc.page_count = len(pdf)
-        doc._rtl = document_is_rtl(pdf)
+        verdict = document_is_rtl(pdf)
+        doc._rtl = verdict if verdict is not None else _language_is_rtl(doc)
         eth_fonts = eth_fonts_of(pdf) if doc.options.get("repairs", True) else frozenset()
         font_maps = _learn_font_maps(doc, pdf) if doc.options.get("repairs", True) else {}
         for index in range(len(pdf)):
@@ -690,8 +704,11 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
     if scale * 72 < RENDER_DPI:
         flags = flags + ["render_dpi_reduced"]
     signals = {**signals, "render_dpi": round(scale * 72, 1)}
+    # Ruled tables in the image are read cell by cell; the rest of the page once, without them (D3e).
+    grids = tables_in(image, scale)
+    page_image = _without(image, scale, [t.bbox for t in grids]) if grids else image
     try:
-        result = engine.recognize(image, dpi=round(scale * 72))
+        result = engine.recognize(page_image, dpi=round(scale * 72))
     except OcrUnavailable as exc:
         doc.pages.append(
             Page(index, width, height, page_class, "none", signals,
@@ -699,14 +716,22 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
         )
         doc.unread.append(Unread(scope="page", reason="ocr_failed", page=index, detail=str(exc)))
         return
+    first = len(doc.blocks)
     read = _ocr_blocks(doc, index, engine, result, scale)
+    if grids:
+        t_blocks, in_cells = _ocr_tables(doc, index, engine, image, scale, grids)
+        _place_tables(doc, first, t_blocks)
+        read += in_cells
+        flags = flags + ["ocr_tables"]
+        if any("table_cells_ink_unread" in t.flags for t in t_blocks):
+            flags = flags + ["table_cells_ink_unread"]
     if page_class == "T4":
         flags = flags + ["text_layer_ignored"]
     elif page_class == "T3":
         flags = flags + ["text_layer_ignored_broken_mapping"]
     if not result.lines:
         doc.unread.append(Unread(scope="page", reason="ocr_found_no_text", page=index, detail=f"class {page_class}"))
-    short, outside_share = short_for_ink(image.convert("L"), result)
+    short, outside_share = short_for_ink(page_image.convert("L"), result)
     if short and result.lines:
         flags = flags + ["ocr_short_for_ink"]
         doc.unread.append(
@@ -718,6 +743,79 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
               "ink_outside_ocr_share": outside_share,
               "status": "ocr" if result.lines and not short else "partial" if result.lines else "unread"}, flags)
     )
+
+
+def _without(image, scale: float, boxes) -> object:
+    """A copy of the page image with the given boxes (points) painted white."""
+    from PIL import ImageDraw
+
+    out = image.copy()
+    draw = ImageDraw.Draw(out)
+    for x0, y0, x1, y1 in boxes:
+        draw.rectangle([(x0 - 2) * scale, (y0 - 2) * scale, (x1 + 2) * scale, (y1 + 2) * scale], fill="white")
+    return out
+
+
+def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids) -> tuple[list[Block], int]:
+    """Table blocks for ruled tables found in a page image, each inked cell OCR'd as its own region."""
+    dpi = round(scale * 72)
+    blocks: list[Block] = []
+    read = 0
+    for grid in grids:
+        rows: list[list[Cell]] = []
+        lines_all = []
+        unread_cells = 0
+        psms: Counter = Counter()
+        for row in grid.rows:
+            ordered = sorted(row, key=lambda cell: -cell["col"] if doc._rtl else cell["col"])
+            out_row: list[Cell] = []
+            inked = empty = 0
+            for cell in ordered:
+                if cell["placeholder"]:
+                    out_row.append(Cell("", colspan=cell["colspan"], flags=["merged_above"]))
+                    continue
+                crop = cell_crop(image, cell["box"], scale)
+                if not cell_has_ink(crop):
+                    out_row.append(Cell("", colspan=cell["colspan"], rowspan=cell["rowspan"]))
+                    continue
+                inked += 1
+                psm = cell_psm(crop)
+                psms[psm] += 1
+                try:
+                    result = engine.recognize(crop, dpi=dpi, psm=psm)
+                    text = "\n".join(line.text for line in result.lines if line.text.strip())
+                    lines_all.extend(result.lines)
+                    cell_flags = []
+                except OcrUnavailable:
+                    text, cell_flags = "", ["ocr_failed"]
+                if not text.strip():
+                    empty += 1
+                    cell_flags.append("ocr_empty_with_ink")
+                read += sum(1 for ch in text if not ch.isspace())
+                out_row.append(Cell(text, colspan=cell["colspan"], rowspan=cell["rowspan"], flags=cell_flags))
+            unread_cells += empty
+            if inked and empty == inked:
+                boxes = [c["box"] for c in row if c["box"] is not None]
+                bbox = [min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes)]
+                doc.unread.append(Unread(scope="page", reason="table_row_ink_unread", page=index, bbox=bbox, detail=f"{inked} inked cells, OCR read none"))
+            rows.append(out_row)
+        flags = ["ruled_table", "ocr_unverified", *grid.flags]
+        if unread_cells:
+            flags.append("table_cells_ink_unread")
+        blocks.append(
+            Block(
+                kind="table",
+                cells=rows,
+                page=index,
+                bbox=list(grid.bbox),
+                source="ocr",
+                tool=engine.version,
+                direction="rtl" if doc._rtl else "ltr",
+                ocr={**block_ocr(engine, lines_all), "psm": "per_cell", "cells_psm7": psms[7], "cells_psm6": psms[6], "dpi": round(scale * 72, 1)},
+                flags=flags + (["render_dpi_reduced"] if scale * 72 < RENDER_DPI else []),
+            )
+        )
+    return blocks, read
 
 
 def _ocr_regions(
