@@ -31,6 +31,10 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="turn every repair rule off: output the extracted text byte for byte",
     )
+    parser.add_argument("--no-ocr", action="store_true", help="do not run OCR; pages that need it are reported unread")
+    parser.add_argument("--ocr-lang", default="heb", help="Tesseract language list (default: heb; e.g. heb+eng)")
+    parser.add_argument("--psm", type=int, default=3, help="Tesseract page segmentation mode (default: 3)")
+    parser.add_argument("--tesseract", help="the tesseract program, when it is not on the PATH")
     parser.add_argument("-q", "--quiet", action="store_true", help="do not report unread parts on stderr")
     parser.add_argument("--version", action="version", version=f"heocr {__version__}")
     return parser
@@ -40,7 +44,14 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     fmt = args.format or (_BY_SUFFIX.get(args.output.suffix.lower(), "text") if args.output else "text")
     try:
-        doc = extract(args.file, repairs=not args.no_repairs)
+        doc = extract(
+            args.file,
+            repairs=not args.no_repairs,
+            ocr=not args.no_ocr,
+            ocr_lang=args.ocr_lang,
+            ocr_psm=args.psm,
+            tesseract=args.tesseract,
+        )
     except (OSError, ValueError) as exc:
         print(f"heocr: {exc}", file=sys.stderr)
         return 1

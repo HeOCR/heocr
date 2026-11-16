@@ -55,8 +55,8 @@ class SwitchTest(unittest.TestCase):
         off = heocr.extract(body, repairs=False)
         self.assertEqual(pdf_lines(off), BULLETED)  # the extracted text, byte for byte
         self.assertEqual([b.repairs for b in off.blocks], [[]])
-        self.assertEqual(off.to_dict()["options"], {"repairs": False})
-        self.assertEqual(on.to_dict()["options"], {"repairs": True})
+        self.assertFalse(off.to_dict()["options"]["repairs"])
+        self.assertTrue(on.to_dict()["options"]["repairs"])
 
     def test_docx_bullet_label_on_and_off(self) -> None:
         on = heocr.extract(bullet_docx()).blocks[0]
@@ -73,7 +73,7 @@ class SwitchTest(unittest.TestCase):
             with contextlib.redirect_stdout(out):
                 self.assertEqual(main([str(path), "-q", "-f", "json", "--no-repairs"]), 0)
         payload = json.loads(out.getvalue())
-        self.assertEqual(payload["options"], {"repairs": False})
+        self.assertFalse(payload["options"]["repairs"])
         self.assertEqual(payload["blocks"][0]["text"], BULLETED[0])
 
     def test_invalid_options_are_rejected(self) -> None:

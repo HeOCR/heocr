@@ -119,6 +119,7 @@ class PdfPage:
     invisible: bool = False
     remap: dict[str, str] = field(default_factory=dict)  # displayed char -> char in the ToUnicode map
     images: list[tuple[float, float, float, float]] = field(default_factory=list)  # x, y, w, h
+    image_gray: int = 0x80  # grey level of every image (0xFF: a blank background)
     paths: int = 0
     rotate: int = 0
     unit_font_size: bool = False  # "Tf 1" with the size in the text matrix, as many producers write
@@ -192,7 +193,7 @@ def make_pdf(pages: list[PdfPage]) -> bytes:
         resources = ""
         xobjects = []
         for n, (x, y, w, h) in enumerate(page.images):
-            image = new(stream(b"\x80" * 4, "/Type /XObject /Subtype /Image /Width 2 /Height 2 /ColorSpace /DeviceGray /BitsPerComponent 8 "))
+            image = new(stream(bytes([page.image_gray]) * 4, "/Type /XObject /Subtype /Image /Width 2 /Height 2 /ColorSpace /DeviceGray /BitsPerComponent 8 "))
             xobjects.append(f"/Im{n} {image} 0 R")
             content.append(f"q {w:g} 0 0 {h:g} {x:g} {y:g} cm /Im{n} Do Q")
         font = ""
