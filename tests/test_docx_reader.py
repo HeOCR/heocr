@@ -43,7 +43,8 @@ def tender() -> bytes:
     d.body = [
         para("תוכן עניינים", FIELD, style="TOC1"),
         para("הגדרות", style="Heading1"),
-        para(run("2.", hidden=True), style="Heading1"),
+        # The volunteer's case: a hidden paragraph whose text is a literal "2." (not a list item).
+        para(run("2.", hidden=True)),
         para("המציע", style="Heading2"),
         para("סעיף משנה", num_id=1, ilvl=2),
         para("תנאי סף", style="Heading1"),
@@ -208,6 +209,19 @@ class DocxRobustnessTest(unittest.TestCase):
         ]
         doc = heocr.extract(d.build())
         self.assertEqual([b.label for b in doc.blocks], ["1.", "2.", "2.1.", "2.2.", "2.2.1.", "2.2.2.", "2.2.3."])
+
+    def test_hidden_numbered_paragraph_still_counts(self) -> None:
+        d = Docx()
+        d.abstracts = [abstract_num(0, [lvl(0), lvl(1)])]
+        d.nums = [num(1, 0)]
+        d.body = [
+            para(run("1.", hidden=True), num_id=1, ilvl=0),
+            para("ראשון", num_id=1, ilvl=1),
+            para(run("2.", hidden=True), num_id=1, ilvl=0),
+            para("שני", num_id=1, ilvl=1),
+        ]
+        doc = heocr.extract(d.build())
+        self.assertEqual([(b.label, b.text) for b in doc.blocks], [("1.1.", "ראשון"), ("2.1.", "שני")])
 
     def test_paragraph_ilvl_overrides_style_field_by_field(self) -> None:
         d = Docx()

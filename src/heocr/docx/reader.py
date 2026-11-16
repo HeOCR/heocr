@@ -263,7 +263,9 @@ class _Reader:
         mark_rpr = ppr.find(W + "rPr") if ppr is not None else None
         fully_hidden = not text.strip() and para.hidden_chars > 0
         if fully_hidden or (not text and toggle(mark_rpr, "vanish")):
-            # A paragraph with only hidden text does not show, and is not numbered here.
+            # A paragraph with only hidden text does not show, but it still counts in its list:
+            # a hidden level-0 item is what makes the next visible level-1 item read 2.1, not 1.5.
+            self._label(ppr, pstyle)
             white = para.hidden_chars and para.white_chars == para.hidden_chars
             self.doc.flags.append("white_paragraph_dropped" if white else "hidden_paragraph_dropped")
             return []
