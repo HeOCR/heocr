@@ -77,7 +77,14 @@ def _md_escape_cell(text: str) -> str:
 
 
 def _md_table(block: "Block") -> str:
-    rows = [[_md_escape_cell(cell.text) for cell in row] for row in (block.cells or [])]
+    rows = []
+    for row in block.cells or []:
+        out: list[str] = []
+        for cell in row:
+            # Keep grid columns aligned: a spanned cell is followed by empty cells.
+            out.append(_md_escape_cell(cell.text))
+            out.extend([""] * (cell.colspan - 1))
+        rows.append(out)
     if not rows:
         return ""
     width = max(len(row) for row in rows)
