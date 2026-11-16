@@ -38,7 +38,37 @@ SYMBOL_FONT_BULLET = Rule(
     evidence="a private-use code at the start of a line, cell or list label, followed by a space or nothing",
 )
 
-RULES: dict[str, Rule] = {rule.rule_id: rule for rule in (SYMBOL_FONT_BULLET,)}
+DIRECTION_MARKS = Rule(
+    rule_id="direction_marks",
+    reason="Word inserts invisible RLM, LRM and ALM marks around numbers and Latin runs; they split tokens such as a section number from its word.",
+    example=("בסעיף \u200f2.2", "בסעיף 2.2"),
+    formats=("docx",),
+    evidence="U+200E, U+200F or U+061C in office XML text",
+)
+
+LATIN1_ETH_NUN = Rule(
+    rule_id="latin1_eth_nun",
+    reason="In cp1255 byte 0xF0 is נ; a font whose map was built as Latin-1 yields ð instead.",
+    example=("ðספח", "נספח"),
+    formats=("pdf",),
+    evidence="ð next to a Hebrew letter, in a font that has no נ anywhere in the document (decided per font, not per file)",
+)
+
+RTL_BRACKET_ORDER = Rule(
+    rule_id="rtl_bracket_order",
+    reason="Producers draw a bracket in RTL text with its mirrored glyph, and map the glyph, not the logical character.",
+    example=(")באופן השוואתי(", "(באופן השוואתי)"),
+    formats=("pdf",),
+    evidence=(
+        "in the document's RTL text-layer lines, mirroring every bracket makes the bracket order valid in at "
+        "least 3 lines and in more than 3 times as many as reading them as they are (decided per document); "
+        "a paragraph balanced as read and broken when mirrored is left as read"
+    ),
+)
+
+RULES: dict[str, Rule] = {
+    rule.rule_id: rule for rule in (SYMBOL_FONT_BULLET, DIRECTION_MARKS, LATIN1_ETH_NUN, RTL_BRACKET_ORDER)
+}
 
 
 def record(rule: Rule, changes: Counter) -> list[dict]:
@@ -56,3 +86,66 @@ def symbol_font_bullet(text: str) -> tuple[str, Counter]:
         changes[(f"U+{ord(text[0]):04X}", "•")] += 1
         text = "•" + text[1:]
     return text, changes
+
+
+_DIRECTION_MARKS = {"\u200e": "U+200E", "\u200f": "U+200F", "\u061c": "U+061C"}
+
+
+def direction_marks(text: str) -> tuple[str, Counter]:
+    """Remove RLM, LRM and ALM. Returns the text and the changes made."""
+    changes: Counter = Counter()
+    for mark, code in _DIRECTION_MARKS.items():
+        count = text.count(mark)
+        if count:
+            changes[(code, "")] += count
+            text = text.replace(mark, "")
+    return text, changes
+
+
+def latin1_eth_nun(text: str) -> tuple[str, Counter]:
+    """ð → נ. The per-font evidence is checked by the reader; this applies the change to text it chose."""
+    changes: Counter = Counter()
+    count = text.count("ð")
+    if count:
+        changes[("U+00F0", "נ")] += count
+        text = text.replace("ð", "נ")
+    return text, changes
+
+
+MIRROR = _MIRROR = str.maketrans("()[]{}", ")(][}{")
+_PAIRS = {")": "(", "]": "[", "}": "{"}
+
+
+def bracket_order_valid(text: str) -> bool | None:
+    """Whether the brackets in a text are balanced and in order; None when it has none."""
+    if not any(ch in "()[]{}" for ch in text):
+        return None
+    stack = []
+    for ch in text:
+        if ch in "([{":
+            stack.append(ch)
+        elif ch in ")]}":
+            if not stack or stack.pop() != _PAIRS[ch]:
+                return False
+    return not stack
+
+
+def rtl_bracket_order(text: str) -> tuple[str, Counter]:
+    """Mirror every bracket. The per-document evidence is checked by the reader."""
+    changes: Counter = Counter()
+    for ch in "()[]{}":
+        count = text.count(ch)
+        if count:
+            changes[(f"U+{ord(ch):04X}", ch.translate(_MIRROR))] += count
+    return text.translate(_MIRROR), changes
+
+
+def brackets_mirrored_in(units: list[str]) -> bool:
+    """The rtl_bracket_order evidence over a document's RTL lines."""
+    as_read = mirrored = 0
+    for text in units:
+        if bracket_order_valid(text):
+            as_read += 1
+        if bracket_order_valid(text.translate(_MIRROR)):
+            mirrored += 1
+    return mirrored >= 3 and mirrored > 3 * as_read

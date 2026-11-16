@@ -50,8 +50,12 @@ def _font_name(raw, textpage, index: int) -> str:
     return buffer.value.decode("utf-8", "replace")
 
 
-def page_text(page) -> PageText:
-    """Characters with loose boxes, in page coordinates with the origin at the top left."""
+def page_text(page, eth_fonts: frozenset[str] = frozenset()) -> PageText:
+    """Characters with loose boxes, in page coordinates with the origin at the top left.
+
+    ``eth_fonts`` names the fonts whose ð is a broken נ (``latin1_eth_nun``, decided per font
+    by ``eth_fonts_of``); in those fonts the character is restored and marked as repaired.
+    """
     import pypdfium2.raw as raw
 
     out = PageText()
@@ -104,7 +108,10 @@ def page_text(page) -> PageText:
                 # Rotated text has no horizontal baseline; line building would make one line per letter.
                 out.rotated += 1
                 continue
-            atom = Atom(ch, left, height - top, right, height - bottom, size or 1.0, index)
+            repaired = None
+            if ch == "ð" and eth_fonts and _font_name(raw, textpage, index) in eth_fonts:
+                ch, repaired = "נ", repairs.LATIN1_ETH_NUN.rule_id
+            atom = Atom(ch, left, height - top, right, height - bottom, size or 1.0, index, repaired)
             (marks if unicodedata.combining(ch) else out.atoms).append(atom)
     finally:
         textpage.close()
@@ -132,12 +139,44 @@ def _attach_marks(atoms: list[Atom], marks: list[Atom]) -> None:
             best.text += mark.text
 
 
+def eth_fonts_of(pdf) -> frozenset[str]:
+    """Fonts whose ð is a broken נ: ð next to a Hebrew letter, and no נ anywhere in that font.
+
+    Decided per font over the whole document, since one file can mix a broken font and a
+    healthy one (the lead's review of D2c).
+    """
+    import pypdfium2.raw as raw
+
+    eth: dict[str, int] = {}
+    nun: dict[str, int] = {}
+    for index in range(len(pdf)):
+        page = pdf[index]
+        textpage = page.get_textpage()
+        try:
+            count = raw.FPDFText_CountChars(textpage)
+            codes = [raw.FPDFText_GetUnicode(textpage, i) for i in range(count)]
+            for i, code in enumerate(codes):
+                if code == 0x05E0:
+                    name = _font_name(raw, textpage, i)
+                    nun[name] = nun.get(name, 0) + 1
+                elif code == 0x00F0:
+                    near = codes[max(i - 1, 0) : i] + codes[i + 1 : i + 2]
+                    if any(0x05D0 <= c <= 0x05EA for c in near):
+                        name = _font_name(raw, textpage, i)
+                        eth[name] = eth.get(name, 0) + 1
+        finally:
+            textpage.close()
+            page.close()
+    return frozenset(name for name in eth if not nun.get(name))
+
+
 def read_t1(doc: Document, page_index: int, built: PageLines) -> int:
     """Read a T1 page's built lines into blocks. Returns the characters read."""
     read = 0
     for group in paragraphs(built):
         lines: list[Line] = []
         bullets: Counter = Counter()
+        eths = sum(1 for line in group for atom in line.atoms if atom.repaired == repairs.LATIN1_ETH_NUN.rule_id)
         for line in group:
             text = line.text
             if doc.options.get("repairs", True):
@@ -148,6 +187,8 @@ def read_t1(doc: Document, page_index: int, built: PageLines) -> int:
             lines.append(Line(text, line.bbox, line.direction))
         flags = sorted({flag for line in group for flag in line.flags})
         block_repairs = repairs.record(repairs.SYMBOL_FONT_BULLET, bullets)
+        if eths:
+            block_repairs += repairs.record(repairs.LATIN1_ETH_NUN, Counter({("U+00F0", "נ"): eths}))
         bbox = [
             min(line.bbox[0] for line in group),
             min(line.bbox[1] for line in group),
@@ -188,14 +229,41 @@ def read_pdf(body: bytes, doc: Document) -> None:
         return
     try:
         doc.page_count = len(pdf)
+        eth_fonts = eth_fonts_of(pdf) if doc.options.get("repairs", True) else frozenset()
         for index in range(len(pdf)):
             page = pdf[index]
             try:
-                _read_page(doc, index, page)
+                _read_page(doc, index, page, eth_fonts)
             finally:
                 page.close()
     finally:
         pdf.close()
+    if doc.options.get("repairs", True):
+        _repair_rtl_brackets(doc)
+
+
+def _repair_rtl_brackets(doc: Document) -> None:
+    """``rtl_bracket_order``, decided once per document on its RTL text-layer paragraphs."""
+    blocks = [b for b in doc.blocks if b.source == "text_layer" and b.direction == "rtl" and b.lines]
+    lines = [line.text for b in blocks for line in b.lines if line.direction == "rtl"]
+    if not repairs.brackets_mirrored_in(lines):
+        return
+    for block in blocks:
+        flat = block.text.replace("\n", " ")
+        if repairs.bracket_order_valid(flat) and not repairs.bracket_order_valid(flat.translate(repairs.MIRROR)):
+            # The paragraph's own evidence wins: balanced as read, broken when mirrored (another
+            # source inside the document, such as photo credits). Left as read.
+            block.flags.append("brackets_kept_valid_as_read")
+            continue
+        changes: Counter = Counter()
+        for line in block.lines:
+            if line.direction == "rtl":
+                line.text, changed = repairs.rtl_bracket_order(line.text)
+                changes.update(changed)
+        if changes:
+            block.text = "\n".join(line.text for line in block.lines)
+            block.repairs += repairs.record(repairs.RTL_BRACKET_ORDER, changes)
+            block.flags = [f for f in block.flags if f != "rtl_brackets_unverified"] + ["brackets_mirrored"]
 
 
 def _report_side_losses(doc: Document, index: int, text: PageText, flags: list[str]) -> None:
@@ -209,9 +277,9 @@ def _report_side_losses(doc: Document, index: int, text: PageText, flags: list[s
         flags.append("lone_surrogates_replaced")
 
 
-def _read_page(doc: Document, index: int, page) -> None:
+def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = frozenset()) -> None:
     width, height = page.get_size()
-    text = page_text(page)
+    text = page_text(page, eth_fonts)
     stats = object_stats(page)
     built = build_lines(text.atoms)
     chars = "".join(a.text for a in text.atoms)

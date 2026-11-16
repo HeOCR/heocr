@@ -57,14 +57,15 @@
 
 Each rule needs its evidence before it fires, and logs what it changed.
 
-| Rule | Evidence that must be present | Change |
-|---|---|---|
-| `direction_marks` | U+200E LRM, U+200F RLM or U+061C ALM in office XML text, next to a digit, a letter or punctuation | removed (logged) |
-| `latin1_eth_nun` | ð next to Hebrew letters, and no נ anywhere in the same font (cp1255 0xF0 read as Latin-1) | ð → נ |
-| `font_private_use` | private-use codes inside Hebrew words, in a font whose glyph names or encoding differences (read through pdfminer.six) name the Hebrew letter | code → letter named by the glyph |
-| `rtl_bracket_order` | in an RTL unit, a bracket order that is invalid as read and valid when every bracket is mirrored (the volunteer's rules 5–7) | brackets mirrored |
-| `reversed_digit_groups` | a token such as `000,005,8`: a thousands group order that cannot be a number, whose reversal can | digit groups reversed |
-| `symbol_font_bullet` | a private-use symbol-font code at line or cell start, before a space | → • (moved from D1) |
+| Rule | Evidence that must be present | Change | PR |
+|---|---|---|---|
+| `direction_marks` | U+200E LRM, U+200F RLM or U+061C ALM in office XML text | removed (logged) | D2c1 |
+| `latin1_eth_nun` | ð next to Hebrew letters, in a font with no נ anywhere in the document (cp1255 0xF0 read as Latin-1). Decided **per font**, not per file, because one file can mix a broken font and a healthy one. | ð → נ | D2c1 |
+| `rtl_bracket_order` | In the document's RTL text-layer lines, mirroring every bracket makes the bracket order valid in at least 3 lines, and in more than 3 times as many as reading them as read. Decided per document. A paragraph balanced as read and broken when mirrored is left as read. On the dev split, 1.6% of RTL bracket paragraphs were valid as read. | every bracket in RTL lines mirrored | D2c1 |
+| `font_private_use` | private-use codes inside Hebrew words, in a font whose glyph names or encoding differences (read through pdfminer.six or the embedded font's `post` table) name the Hebrew letter | code → the letter the glyph names | D2c2 |
+| `symbol_font_bullet` | a private-use symbol-font code at line or cell start, before a space | → • (moved from D1) | D2b |
+
+**Digit groups are flagged only.** A token such as `000,005,8` is flagged `digit_groups_suspect`, and the text is not changed. It has two readings: reversing every character gives 8,500,000, and reversing the group order gives 8,005,000. The volunteer saw both. The repair comes in D3, with the number cross-check, and only where an independent reading confirms one of the two.
 
 Codes a rule does not cover stay as they are, and the block is flagged. In particular, font codes left unresolved by the volunteer, such as U+F001, are not guessed.
 

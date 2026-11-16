@@ -26,6 +26,15 @@ LINES = [
 
 @unittest.skipUnless(os.environ.get("HEOCR_TEST_SOFFICE") and shutil.which("soffice"), "opt-in; needs LibreOffice")
 class LibreOfficePdfTest(unittest.TestCase):
+    def test_libreoffice_brackets_are_restored(self) -> None:
+        bracketed = ["סעיף (א) קובע את התנאים", "המציע (להלן: הספק) יגיש", "על פי ההוראות (ראו נספח ב)"]
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "brackets.docx"
+            source.write_bytes(Docx(body=[para(t) for t in bracketed]).build())
+            subprocess.run(["soffice", "--headless", "--convert-to", "pdf", "--outdir", tmp, str(source)], check=True, capture_output=True, timeout=180)
+            doc = heocr.extract(Path(tmp) / "brackets.pdf", ocr=False)
+        self.assertEqual([line.text for b in doc.blocks for line in b.lines], bracketed)
+
     def test_libreoffice_pdf_is_t1_and_exact(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             source = Path(tmp) / "synth.docx"

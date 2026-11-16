@@ -11,6 +11,7 @@ line breaks in table cells kept.
 from __future__ import annotations
 
 import io
+from collections import Counter
 import posixpath
 import re
 import zipfile
@@ -294,11 +295,14 @@ class _Reader:
         if text or label is not None:
             flags = list(para.flags)
             block_repairs: list[dict] = []
+            if self.doc.options.get("repairs", True):
+                text, marks = repairs.direction_marks(text)
+                block_repairs += repairs.record(repairs.DIRECTION_MARKS, marks)
             label_text = label.text if label is not None else ""
             if label is not None and label.fmt == "bullet" and self.doc.options.get("repairs", True):
                 label_text, changes = repairs.symbol_font_bullet(label_text)
                 if changes:
-                    block_repairs = repairs.record(repairs.SYMBOL_FONT_BULLET, changes)
+                    block_repairs += repairs.record(repairs.SYMBOL_FONT_BULLET, changes)
                     flags.append("bullet_symbol_mapped")
             if label is not None:
                 flags.extend(label.flags)
@@ -334,12 +338,14 @@ class _Reader:
         return out
 
     # -- tables ---------------------------------------------------------------
-    def _cell_text(self, tc) -> tuple[str, list[str]]:
+    def _cell_text(self, tc, table_repairs: Counter) -> tuple[str, list[str]]:
         tcpr = tc.find(W + "tcPr")
         shaded = self._shaded(tcpr)
         lines: list[str] = []
         flags: list[str] = []
         for block in self.blocks(tc, "body", shaded=shaded):
+            for entry in block.repairs:
+                table_repairs[(entry["rule"], entry["from"], entry["to"])] += entry["count"]
             if block.kind == "table":
                 flags.append("nested_table")
                 lines.extend(" | ".join(c.text.replace("\n", " ") for c in row) for row in block.cells or [])
@@ -360,6 +366,7 @@ class _Reader:
         rows: list[list[Cell]] = []
         open_merges: dict[int, Cell] = {}
         flags: list[str] = []
+        table_repairs: Counter = Counter()
         for tr in self._children(tbl):
             if tr.tag != W + "tr":
                 continue
@@ -382,7 +389,7 @@ class _Reader:
                     span_el = tcpr.find(W + "gridSpan") if tcpr is not None else None
                     span = int(span_el.get(W + "val")) if span_el is not None and (span_el.get(W + "val") or "").isdigit() else 1
                     vmerge = tcpr.find(W + "vMerge") if tcpr is not None else None
-                    text, cell_flags = self._cell_text(cell_el)
+                    text, cell_flags = self._cell_text(cell_el, table_repairs)
                     cell = Cell(text=text, colspan=max(span, 1), flags=cell_flags)
                     if vmerge is not None and vmerge.get(W + "val", "continue") == "continue" and column in open_merges:
                         open_merges[column].rowspan += 1
@@ -406,6 +413,10 @@ class _Reader:
             tool=TOOL,
             note_id=note_id,
             direction="rtl" if rtl else "ltr",
+            repairs=[
+                {"rule": rule, "from": source, "to": target, "count": count}
+                for (rule, source, target), count in sorted(table_repairs.items())
+            ],
             flags=flags,
         )
 

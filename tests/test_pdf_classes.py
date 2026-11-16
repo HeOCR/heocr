@@ -63,10 +63,11 @@ class PageClassTest(unittest.TestCase):
         self.assertGreater(record.signals["private_use_chars"], 0)
         self.assertEqual(doc.blocks, [])
 
-    def test_t3_latin1_eth_for_nun(self) -> None:
+    def test_t3_latin1_eth_for_nun_without_repairs(self) -> None:
         page = PdfPage(lines=lines_block(HEBREW), remap={"נ": "ð"})
-        _, record = self.assertClass(page, "T3", "broken_font_mapping")
-        self.assertGreaterEqual(record.signals["latin1_next_to_hebrew"], 3)
+        doc = heocr.extract(make_pdf([page]), ocr=False, repairs=False)
+        self.assertEqual(doc.pages[0].page_class, "T3")
+        self.assertGreaterEqual(doc.pages[0].signals["latin1_next_to_hebrew"], 3)
 
     def test_t4_foreign_ocr_layer(self) -> None:
         garbage = [TextLine(t, 50, 780 - 18 * i, rtl=False) for i, t in enumerate(["CMLL LLIL NNOI", "IJLL CMMI LLOO", "NLLI CMLL"])]
