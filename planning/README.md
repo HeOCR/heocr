@@ -25,3 +25,9 @@ Planned work uses `D<milestone><slice>`, for example `D1a`. `D` is the document-
 | **D3** | Tables (PDF and office); number cross-checks | not yet planned |
 | **D4** | DOC, RTF and ODT through LibreOffice; images; spreads and columns; PPTX and XLSX | not yet planned |
 | **D5** | First PyPI release, after the D-bench gate | not yet planned |
+
+## Proposals
+
+Proposals are drafts for the lead's or the maintainer's decision. They decide nothing until accepted.
+
+- [Candidate models for the VLM route (D2g)](proposals/d2g-vlm-candidates.md): licences, sizes, Hebrew evidence, Mac and CPU support; a shortlist and a bake-off plan
