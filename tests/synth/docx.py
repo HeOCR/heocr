@@ -70,6 +70,15 @@ def num(num_id: int, abstract_id: int, starts: dict[int, int] | None = None, lev
     return f'<w:num w:numId="{num_id}"><w:abstractNumId w:val="{abstract_id}"/>{overrides}</w:num>'
 
 
+def image_run(n: int) -> str:
+    """A run holding the n-th embedded image (Docx.images), as Word writes an inline picture."""
+    return (
+        '<w:r><w:drawing><wp:inline><a:graphic><a:graphicData>'
+        f'<a:blip r:embed="rIdImg{n}"/>'
+        "</a:graphicData></a:graphic></wp:inline></w:drawing></w:r>"
+    )
+
+
 def numbering_xml(abstracts: list[str], nums: list[str]) -> bytes:
     return f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:numbering {NS}>{"".join(abstracts)}{"".join(nums)}</w:numbering>'.encode()
 
@@ -183,6 +192,7 @@ class Docx:
     headers: list[str] = field(default_factory=list)
     footers: list[str] = field(default_factory=list)
     extra_parts: dict[str, bytes] = field(default_factory=dict)
+    images: list[bytes] = field(default_factory=list)  # embedded as word/media/image<n>, relationship rIdImg<n>
 
     def build(self) -> bytes:
         rels = []
@@ -202,6 +212,11 @@ class Docx:
             parts[f"word/{name}"] = xml.encode()
             return rid
 
+        for n, data in enumerate(self.images, 1):
+            parts[f"word/media/image{n}.png"] = data
+            rels.append(
+                f'<Relationship Id="rIdImg{n}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image{n}.png"/>'
+            )
         if self.styles:
             add("styles.xml", "styles", f'<?xml version="1.0" encoding="UTF-8"?><w:styles {NS}>{"".join(self.styles)}</w:styles>')
         if self.abstracts or self.nums:
