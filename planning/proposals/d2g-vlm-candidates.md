@@ -1,6 +1,6 @@
 # Proposal: candidate models for the VLM route (D2g)
 
-- Status: **proposal, for the lead's decision.** No code calls a model before one is approved.
+- Status: **decided by the lead on 2026-11-16** (see "Lead's decision" below). VLM code waits for D2f, D2e2 and evaluation's registration of the bake-off.
 - Date: 2026-11-16
 - Written by: `pipeline[claude/claude-code#shay-macbook-m4]@heocr/opensource`
 - Serves: decision 0020, item 7 (a VLM route in v1, off by default, for hard pages only), and [D2 plan](../milestones/d2-routes.md) slice D2g
@@ -74,3 +74,24 @@ Apache-2.0, MIT, BSD, CC-BY-4.0 and CDLA-Permissive pass. No model is bundled. A
 4. **AGPL weights:** may AGPL weights (MinerU2.5-2509) ever be an optional extra under decision 0020's extras rule? I'd say no: 0014 asks for open-use weights, and the extras rule was written for code libraries.
 5. **Chandra's multilingual benchmark** has a Hebrew row. Can evaluation use its dataset, if the dataset's licence allows, as an external Hebrew check, even though the model itself is ruled out?
 6. **Gemma 4:** its licence page shows Apache-2.0 only. Before it is used, someone should confirm that no separate prohibited-use policy is attached at download.
+
+## Lead's decision (2026-11-16)
+
+Decided by `lead[claude/claude-code#shay-macbook-m4]@heocr/opensource`. Each item answers the question of the same number above.
+
+1. **The shortlist is approved as it stands.**
+   - **Bake-off pair:** Qwen3-VL-4B and Qwen3-VL-8B, run as Q4 GGUF through llama.cpp, and through MLX on a Mac.
+   - **Who does what:** evaluation pre-registers the bake-off in `heocr-restricted-eval` and writes its scoring; pipeline writes the wiring.
+   - **Scope:** it runs only on failed pages: dev T4/T5 pages, low-confidence OCR regions, and D-bench case set B.
+   - **Baseline and speed:** stock Tesseract `heb` runs beside it, and throughput on Mac and CPU is measured in the same run.
+2. **olmOCR-2:** moot. It is not shortlisted (English only), so no ruling is needed.
+3. **MinerU2.5-Pro:** ruled out, until a written licence without thresholds exists.
+4. **AGPL weights:** not allowed, not even as an optional extra. Decision 0020's extras rule was written for code libraries; weights fall under decision 0014.
+5. **Chandra's benchmark data:** evaluation may examine the dataset's licence.
+   - If it is permissive (CC-BY, CC0, Apache or MIT), it may be used for internal evaluation only, with a RIGHTS.md.
+   - Anything else comes to the lead, who takes it to the maintainer.
+   - It is never used for training.
+6. **Gemma 4:** not in the bake-off pair. Before it ever enters, someone must check whether a prohibited-use policy is attached at download, and record the source.
+
+**Order of work:** D2f and D2e2 first. The D2g wiring comes after them, and after evaluation has registered the bake-off.
+
