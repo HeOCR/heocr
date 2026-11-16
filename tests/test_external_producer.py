@@ -13,7 +13,7 @@ import unittest
 from pathlib import Path
 
 import heocr
-from tests.synth.docx import Docx, para
+from tests.synth.docx import Docx, para, table
 
 LINES = [
     "המציע יגיש את הצעתו עד המועד הקבוע",
@@ -66,6 +66,26 @@ class TesseractScanTest(unittest.TestCase):
         self.assertEqual(doc.pages[0].route, "ocr")
         self.assertEqual([line.text for b in doc.blocks for line in b.lines], LINES)
         self.assertTrue(doc.components["tesseract:heb.traineddata"].startswith("sha256:"))
+
+    def test_scan_of_a_ruled_table_is_read_cell_by_cell(self) -> None:
+        import pypdfium2 as pdfium
+
+        rows = [["שם", "תפקיד", "סכום"], ["ספק ראשון", "מנהל", "100"], ["ספק שני", "עובד", "200"], ["ספק שלישי\n\nירושלים", "יועץ", "חיפה"]]  # words only: stock heb misread an isolated "300" as "100"
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "table.docx"
+            source.write_bytes(Docx(body=[para("טבלת הספקים"), table(rows, borders=True)]).build())
+            subprocess.run(["soffice", "--headless", "--convert-to", "pdf", "--outdir", tmp, str(source)], check=True, capture_output=True, timeout=180)
+            pdf = pdfium.PdfDocument(str(Path(tmp) / "table.pdf"))
+            scan = Path(tmp) / "scan.pdf"
+            pdf[0].render(scale=300 / 72).to_pil().convert("L").save(scan, resolution=300)
+            pdf.close()
+            doc = heocr.extract(scan)
+        self.assertEqual(doc.pages[0].page_class, "T5")
+        (found,) = [b for b in doc.blocks if b.kind == "table"]
+        self.assertEqual(found.source, "ocr")
+        self.assertEqual([[c.text for c in row] for row in found.cells], [[t.replace("\n\n", "\n") for t in row] for row in rows])
+        self.assertEqual((found.ocr["cells_psm7"], found.ocr["cells_psm6"]), (11, 1))  # the two-line cell is a block
+        self.assertIn("טבלת הספקים", doc.text)
 
 
 if __name__ == "__main__":

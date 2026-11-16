@@ -120,6 +120,7 @@ class PdfPage:
     remap: dict[str, str] = field(default_factory=dict)  # displayed char -> char in the ToUnicode map
     images: list[tuple[float, float, float, float]] = field(default_factory=list)  # x, y, w, h
     image_gray: int = 0x80  # grey level of every image (0xFF: a blank background)
+    rasters: list[tuple] = field(default_factory=list)  # (x, y, w, h, PIL "L" image): real pixels, as a scan
     font_name: str = ""  # the Type3 font's /Name (and BaseFont), for per-font evidence
     rules: list[tuple[float, float, float, float]] = field(default_factory=list)  # ruling segments x0, y0, x1, y1
     rules_as: str = "stroke"  # "stroke": lines; "rects": thin filled rectangles, as Word draws borders; "double": two parallel lines
@@ -214,6 +215,15 @@ def make_pdf(pages: list[PdfPage]) -> bytes:
             image = new(stream(bytes([page.image_gray]) * 4, "/Type /XObject /Subtype /Image /Width 2 /Height 2 /ColorSpace /DeviceGray /BitsPerComponent 8 "))
             xobjects.append(f"/Im{n} {image} 0 R")
             content.append(f"q {w:g} 0 0 {h:g} {x:g} {y:g} cm /Im{n} Do Q")
+        for n, (x, y, w, h, picture) in enumerate(page.rasters):
+            import zlib
+
+            gray = picture.convert("L")
+            data = zlib.compress(gray.tobytes())
+            extra = f"/Type /XObject /Subtype /Image /Width {gray.size[0]} /Height {gray.size[1]} /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /FlateDecode "
+            image = new(stream(data, extra))
+            xobjects.append(f"/Ra{n} {image} 0 R")
+            content.append(f"q {w:g} 0 0 {h:g} {x:g} {y:g} cm /Ra{n} Do Q")
         font = ""
         if codes:
             procs = []
