@@ -35,6 +35,9 @@ class PageText:
     invisible: int = 0
     lone_surrogates: int = 0
     rotated: int = 0  # characters drawn at an angle (vertical or rotated text), not read in D1
+    # Loose boxes of every character in the layer (rotated and invisible ones included), top-left
+    # origin, points: masked out of image regions before region OCR, so the layer's text is not read twice.
+    drawn_boxes: list[tuple[float, float, float, float]] = field(default_factory=list)
     fonts: dict[str, int] = field(default_factory=dict)
 
 
@@ -93,6 +96,9 @@ def page_text(page) -> PageText:
                 out.chars_total += 1
                 name = _font_name(raw, textpage, index)
                 out.fonts[name] = out.fonts.get(name, 0) + 1
+            if not ch.isspace():
+                # Invisible text (render mode 3) is masked too: it sits over the image that holds the same words.
+                out.drawn_boxes.append((left, height - top, right, height - bottom))
             angle = raw.FPDFText_GetCharAngle(textpage, index)
             if angle > 0 and abs(math.sin(angle)) > ROTATED_SIN and not ch.isspace():
                 # Rotated text has no horizontal baseline; line building would make one line per letter.
@@ -256,7 +262,7 @@ def _read_page(doc: Document, index: int, page) -> None:
     route = "text_layer"
     if page_class == "T6":
         # The text layer is read; each image region, which may hold text, goes to region OCR.
-        ocr_regions = _ocr_regions(doc, index, page, stats.image_boxes)
+        ocr_regions = _ocr_regions(doc, index, page, stats.image_boxes, text.drawn_boxes)
         status = "partial" if ocr_regions < len(stats.image_boxes) else status
         if ocr_regions:
             route = "text_layer+ocr_regions"
@@ -279,13 +285,23 @@ def _read_page(doc: Document, index: int, page) -> None:
     )
 
 
-def _render(page):
-    return page.render(scale=RENDER_DPI / 72).to_pil()
+def _render(page) -> tuple[object, float]:
+    """The page as a PIL image at RENDER_DPI, or lower when that would pass MAX_RENDER_PIXELS.
+
+    Returns the image and the scale used (pixels per point). A huge or hostile page size
+    cannot allocate billions of pixels.
+    """
+    width, height = page.get_size()
+    scale = RENDER_DPI / 72
+    if width * height * scale * scale > MAX_RENDER_PIXELS:
+        scale = (MAX_RENDER_PIXELS / (width * height)) ** 0.5
+    return page.render(scale=scale).to_pil(), scale
 
 
-def _ocr_blocks(doc: Document, index: int, engine, result, *, offset=(0.0, 0.0), flags=()) -> int:
+def _ocr_blocks(doc: Document, index: int, engine, result, render_scale: float, *, offset=(0.0, 0.0), flags=()) -> int:
     """OCR lines into blocks, one per Tesseract paragraph, with boxes in page points. Returns characters."""
-    scale = 72 / RENDER_DPI
+    scale = 1 / render_scale
+    dpi = round(render_scale * 72, 1)
     groups: list[list] = []
     for line in result.lines:
         if groups and groups[-1][-1].paragraph == line.paragraph:
@@ -310,8 +326,8 @@ def _ocr_blocks(doc: Document, index: int, engine, result, *, offset=(0.0, 0.0),
                 tool=engine.version,
                 direction="rtl",
                 lines=lines,
-                ocr=block_ocr(engine, group),
-                flags=["ocr_unverified", *flags] + text_flags(text),
+                ocr={**block_ocr(engine, group), "dpi": dpi},
+                flags=["ocr_unverified", *flags] + (["render_dpi_reduced"] if dpi < RENDER_DPI else []) + text_flags(text),
             )
         )
     return read
@@ -327,8 +343,12 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
         )
         doc.unread.append(Unread(scope="page", reason="ocr_route_unavailable", page=index, detail=f"class {page_class}; {reason}"))
         return
+    image, scale = _render(page)
+    if scale * 72 < RENDER_DPI:
+        flags = flags + ["render_dpi_reduced"]
+    signals = {**signals, "render_dpi": round(scale * 72, 1)}
     try:
-        result = engine.recognize(_render(page))
+        result = engine.recognize(image, dpi=round(scale * 72))
     except OcrUnavailable as exc:
         doc.pages.append(
             Page(index, width, height, page_class, "none", signals,
@@ -336,7 +356,7 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
         )
         doc.unread.append(Unread(scope="page", reason="ocr_failed", page=index, detail=str(exc)))
         return
-    read = _ocr_blocks(doc, index, engine, result)
+    read = _ocr_blocks(doc, index, engine, result, scale)
     if page_class == "T4":
         flags = flags + ["text_layer_ignored"]
     if not result.lines:
@@ -348,8 +368,41 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
     )
 
 
-def _ocr_regions(doc: Document, index: int, page, boxes: list[list[float]]) -> int:
-    """Region OCR for image regions of a page read from its text layer. Returns regions recognized."""
+def mask_layer_text(crop, origin: tuple[float, float], scale: float, boxes) -> tuple[object, int]:
+    """Paint the text layer's character boxes white inside an image crop.
+
+    ``origin`` is the crop's top-left corner in page points; ``boxes`` are character boxes in
+    points. Returns the masked image and the number of characters masked.
+    """
+    from PIL import ImageDraw
+
+    image = crop.convert("L")
+    draw = ImageDraw.Draw(image)
+    width, height = image.size
+    masked = 0
+    for x0, y0, x1, y1 in boxes:
+        left, top = (x0 - origin[0]) * scale - 1, (y0 - origin[1]) * scale - 1
+        right, bottom = (x1 - origin[0]) * scale + 1, (y1 - origin[1]) * scale + 1
+        if right <= 0 or bottom <= 0 or left >= width or top >= height:
+            continue
+        draw.rectangle([left, top, right, bottom], fill=255)
+        masked += 1
+    return image, masked
+
+
+def has_ink(image) -> bool:
+    """Whether a grey image holds anything darker than paper, beyond a few stray pixels."""
+    histogram = image.histogram()
+    dark = sum(histogram[:INK_LEVEL])
+    return dark >= max(MIN_INK_PIXELS, MIN_INK_SHARE * image.size[0] * image.size[1])
+
+
+def _ocr_regions(doc: Document, index: int, page, boxes: list[list[float]], drawn_boxes) -> int:
+    """Region OCR for image regions of a page read from its text layer. Returns regions recognized.
+
+    The layer's own characters are masked out of each region first, so text already read from
+    the layer (labels over a diagram, text on a background image) is not read again by OCR.
+    """
     if not boxes:
         return 0
     engine = engine_for(doc)
@@ -358,16 +411,21 @@ def _ocr_regions(doc: Document, index: int, page, boxes: list[list[float]]) -> i
         for box in boxes:
             doc.unread.append(Unread(scope="page", reason="image_region_not_read", page=index, bbox=box, detail=reason))
         return 0
-    image = _render(page)
-    scale = RENDER_DPI / 72
+    image, scale = _render(page)
     done = 0
     for box in boxes:
         crop = [int(box[0] * scale), int(box[1] * scale), int(box[2] * scale + 0.999), int(box[3] * scale + 0.999)]
         if crop[2] - crop[0] < MIN_REGION_PX or crop[3] - crop[1] < MIN_REGION_PX:
             doc.unread.append(Unread(scope="page", reason="image_region_too_small", page=index, bbox=box))
             continue
+        inside = [b for b in drawn_boxes if b[0] < box[2] and b[2] > box[0] and b[1] < box[3] and b[3] > box[1]]
+        region, masked = mask_layer_text(image.crop(crop), (crop[0] / scale, crop[1] / scale), scale, inside)
+        if not has_ink(region):
+            reason = "image_region_text_in_layer" if masked else "image_region_blank"
+            doc.unread.append(Unread(scope="page", reason=reason, page=index, bbox=box, detail=f"{masked} layer characters masked"))
+            continue
         try:
-            result = engine.recognize(image.crop(crop))
+            result = engine.recognize(region, dpi=round(scale * 72))
         except OcrUnavailable as exc:
             doc.unread.append(Unread(scope="page", reason="ocr_failed", page=index, bbox=box, detail=str(exc)))
             continue
@@ -382,7 +440,8 @@ def _ocr_regions(doc: Document, index: int, page, boxes: list[list[float]]) -> i
             )
             continue
         # Region text follows the page's text-layer blocks; its place in the reading order is not resolved.
-        _ocr_blocks(doc, index, engine, result, offset=(box[0], box[1]), flags=("from_image_region", "reading_order_region_appended"))
+        flags = ("from_image_region", "reading_order_region_appended") + (("layer_text_masked",) if masked else ())
+        _ocr_blocks(doc, index, engine, result, scale, offset=(crop[0] / scale, crop[1] / scale), flags=flags)
         done += 1
     return done
 
@@ -394,6 +453,13 @@ READ_CLASSES = ("T1", "T2", "T6")
 # are drawn reversed join them.
 OCR_CLASSES = ("T4", "T5")
 RENDER_DPI = 300
+# Rendering is capped at this many pixels (heocr-engine uses 40 M); the dpi drops to fit.
+MAX_RENDER_PIXELS = 40_000_000
+# After masking the layer's characters, a region needs this much ink (grey level below INK_LEVEL)
+# to be worth OCR: at least MIN_INK_PIXELS, and MIN_INK_SHARE of its area.
+INK_LEVEL = 160
+MIN_INK_PIXELS = 50
+MIN_INK_SHARE = 0.0005
 # Image regions smaller than this (in rendered pixels, either side) are icons, not text.
 MIN_REGION_PX = 24
 # Region OCR below this mean word confidence is stray marks from logos and drawings (dev split:

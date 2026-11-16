@@ -44,7 +44,7 @@ class OcrRouteTest(unittest.TestCase):
         first = doc.blocks[0]
         self.assertEqual(first.source, "ocr")
         self.assertIn("ocr_unverified", first.flags)
-        self.assertEqual(first.ocr, {"status": "unverified", "engine": "tesseract", "lang": "heb", "psm": 3, "words": 3, "mean_confidence": 91.83})
+        self.assertEqual(first.ocr, {"status": "unverified", "engine": "tesseract", "lang": "heb", "psm": 3, "words": 3, "mean_confidence": 91.83, "dpi": 300.0})
         # Boxes are in page points: pixels at 300 dpi times 72/300.
         self.assertEqual([round(v, 2) for v in first.lines[0].bbox], [72.0, 48.0, 504.0, 62.4])
         self.assertEqual(doc.unread, [])
@@ -106,7 +106,7 @@ class OcrRouteTest(unittest.TestCase):
         self.assertEqual([l.text for b in layer for l in b.lines], HEBREW)
         self.assertTrue(regions and all("from_image_region" in b.flags for b in regions))
         top = 842 - 400  # the region's top edge, top-left origin
-        self.assertAlmostEqual(regions[0].bbox[1], top + 48.0, places=1)
+        self.assertAlmostEqual(regions[0].bbox[1], top + 48.0, delta=0.5)  # crop origin is pixel-aligned
         self.assertEqual([u.reason for u in doc.unread], ["image_region_too_small"])
         self.assertEqual(record.coverage["status"], "partial")
 
@@ -143,6 +143,69 @@ class OcrRouteTest(unittest.TestCase):
             doc = heocr.extract(make_pdf([page]), tesseract=FAKE)
         self.assertFalse([b for b in doc.blocks if b.source == "ocr"])
         self.assertEqual([u.reason for u in doc.unread], ["image_region_ocr_low_confidence"])
+
+
+    def test_layer_text_over_a_blank_image_is_not_read_twice(self) -> None:
+        # A label from the text layer drawn on a white background image: masked, nothing left to OCR.
+        label = lines_block(["תווית בתוך התמונה"], right=500, top=300)
+        page = PdfPage(lines=lines_block(HEBREW) + label, images=[(50, 240, 495, 140)], image_gray=0xFF)
+        doc = heocr.extract(make_pdf([page]), tesseract=FAKE)
+        self.assertEqual(doc.pages[0].page_class, "T6")
+        self.assertFalse([b for b in doc.blocks if b.source == "ocr"])
+        self.assertEqual([u.reason for u in doc.unread], ["image_region_text_in_layer"])
+        self.assertIn("תווית בתוך התמונה", doc.text)
+        self.assertFalse([c for c in self.calls() if c and not c[0].startswith("--")])
+
+    def test_blank_image_region_is_not_sent_to_ocr(self) -> None:
+        page = PdfPage(lines=lines_block(HEBREW), images=[(50, 100, 495, 300)], image_gray=0xFF)
+        doc = heocr.extract(make_pdf([page]), tesseract=FAKE)
+        self.assertEqual([u.reason for u in doc.unread], ["image_region_blank"])
+
+    def test_render_is_capped_and_the_dpi_recorded(self) -> None:
+        with mock.patch("heocr.pdf.reader.MAX_RENDER_PIXELS", 2_000_000):
+            doc = heocr.extract(make_pdf([PdfPage(images=FULL_PAGE)]), tesseract=FAKE)
+        page = doc.pages[0]
+        self.assertIn("render_dpi_reduced", page.flags)
+        dpi = page.signals["render_dpi"]
+        self.assertLess(dpi, 300)
+        self.assertAlmostEqual(595 * 842 * (dpi / 72) ** 2, 2_000_000, delta=20_000)
+        self.assertEqual(doc.blocks[0].ocr["dpi"], dpi)
+        self.assertIn("render_dpi_reduced", doc.blocks[0].flags)
+        recognition = [c for c in self.calls() if c and not c[0].startswith("--")][0]
+        self.assertEqual(recognition[recognition.index("--dpi") + 1], str(round(dpi)))
+
+    def test_huge_page_does_not_allocate_beyond_the_cap(self) -> None:
+        from heocr.pdf.reader import MAX_RENDER_PIXELS, _render
+
+        class Page:  # a stand-in that records the scale it is asked to render at
+            def get_size(self):
+                return (14400.0, 14400.0)  # 200 inches square, the PDF maximum
+
+            def render(self, scale):
+                self.scale = scale
+                return self
+
+            def to_pil(self):
+                return None
+
+        page = Page()
+        _, scale = _render(page)
+        self.assertLessEqual((14400 * scale) ** 2, MAX_RENDER_PIXELS * 1.0001)
+
+
+class MaskTest(unittest.TestCase):
+    def test_mask_whitens_layer_boxes_and_ink_is_measured(self) -> None:
+        from PIL import Image
+
+        from heocr.pdf.reader import has_ink, mask_layer_text
+
+        crop = Image.new("L", (400, 200), 40)  # dark everywhere
+        masked, count = mask_layer_text(crop, (100.0, 100.0), 4.0, [(100, 100, 150, 125), (500, 500, 510, 510)])
+        self.assertEqual(count, 1)  # the second box lies outside the crop
+        self.assertEqual(masked.getpixel((10, 10)), 255)
+        self.assertEqual(masked.getpixel((399, 199)), 40)
+        self.assertTrue(has_ink(masked))
+        self.assertFalse(has_ink(Image.new("L", (400, 200), 255)))
 
 
 class TsvTest(unittest.TestCase):

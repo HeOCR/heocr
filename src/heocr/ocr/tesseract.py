@@ -157,11 +157,11 @@ class Tesseract:
             out[f"tesseract:{language}.traineddata"] = f"sha256:{sha}"
         return out
 
-    def recognize(self, image) -> OcrResult:
-        """Recognize a PIL image; lines in Tesseract's reading order, with word confidences."""
+    def recognize(self, image, dpi: int = RENDER_DPI) -> OcrResult:
+        """Recognize a PIL image rendered at ``dpi``; lines in Tesseract's reading order, with word confidences."""
         with tempfile.TemporaryDirectory(prefix="heocr-ocr-") as temp:
             source = Path(temp) / "input.png"
-            image.save(source, dpi=(RENDER_DPI, RENDER_DPI))
+            image.save(source, dpi=(dpi, dpi))
             base = Path(temp) / "result"
             done = _run(
                 [
@@ -175,7 +175,7 @@ class Tesseract:
                     "--psm",
                     str(self.psm),
                     "--dpi",
-                    str(RENDER_DPI),
+                    str(dpi),
                     "tsv",
                 ],
                 self.timeout,
