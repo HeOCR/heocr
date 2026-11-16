@@ -22,7 +22,7 @@ Planned work uses `D<milestone><slice>`, for example `D1a`. `D` is the document-
 |---|---|---|
 | **D1** | Repository, contract and CLI; file-type identification; DOCX with numbering and headings; T1 PDF pages; page classes T1–T6 measured and flagged | [d1-foundations.md](milestones/d1-foundations.md) (complete) |
 | **D2** | All PDF page classes; repairs; the OCR route (stock Tesseract and HeOCR recognizers); coverage accounting; the VLM route, off by default | [d2-routes.md](milestones/d2-routes.md) |
-| **D3** | Tables (PDF and office); number cross-checks | not yet planned |
+| **D3** | Tables; page furniture; reading order beyond one column; numbers checked against a second reading (and the digit-groups repair) | [d3-tables-numbers.md](milestones/d3-tables-numbers.md) |
 | **D4** | DOC, RTF and ODT through LibreOffice; images; spreads and columns; PPTX and XLSX | not yet planned |
 | **D5** | First PyPI release, after the D-bench gate | not yet planned |
 
