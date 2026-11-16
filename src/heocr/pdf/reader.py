@@ -15,7 +15,7 @@ import unicodedata
 from dataclasses import dataclass, field
 
 from heocr import repairs
-from heocr.contract import Block, Cell, Document, Line, Page, Unread
+from heocr.contract import Block, Cell, Document, Line, Page, Unread, page_limit
 from heocr.ocr import OcrUnavailable, block_ocr, engine_for, number_engine_for, unavailable_reason
 from heocr.ocr.regions import (  # noqa: F401  (re-exported for callers of the PDF route)
     INK_LEVEL,
@@ -177,7 +177,7 @@ def _attach_marks(atoms: list[Atom], marks: list[Atom]) -> None:
             best.text += mark.text
 
 
-def document_is_rtl(pdf) -> bool | None:
+def document_is_rtl(pdf, limit: int | None = None) -> bool | None:
     """The document's direction, from its script: RTL when Hebrew is at least ``RTL_DOCUMENT_SHARE`` of its letters.
 
     Tables take the document's direction, not their own (the volunteer's ``clean.py`` rule 8:
@@ -187,7 +187,7 @@ def document_is_rtl(pdf) -> bool | None:
     import pypdfium2.raw as raw
 
     hebrew = latin = 0
-    for index in range(len(pdf)):
+    for index in range(len(pdf) if limit is None else min(len(pdf), limit)):
         page = pdf[index]
         textpage = page.get_textpage()
         try:
@@ -214,7 +214,7 @@ def _language_is_rtl(doc: Document) -> bool:
     return any(part in RTL_LANGUAGES for part in lang.split("+")[:1])
 
 
-def eth_fonts_of(pdf) -> frozenset[str]:
+def eth_fonts_of(pdf, limit: int | None = None) -> frozenset[str]:
     """Fonts whose ð is a broken נ: ð next to a Hebrew letter, and no נ anywhere in that font.
 
     Decided per font over the whole document, since one file can mix a broken font and a
@@ -224,7 +224,7 @@ def eth_fonts_of(pdf) -> frozenset[str]:
 
     eth: dict[str, int] = {}
     nun: dict[str, int] = {}
-    for index in range(len(pdf)):
+    for index in range(len(pdf) if limit is None else min(len(pdf), limit)):
         page = pdf[index]
         textpage = page.get_textpage()
         try:
@@ -329,11 +329,13 @@ def read_pdf(body: bytes, doc: Document) -> None:
         return
     try:
         doc.page_count = len(pdf)
-        verdict = document_is_rtl(pdf)
+        pages = min(len(pdf), doc._max_pages)
+        page_limit(doc, len(pdf))
+        verdict = document_is_rtl(pdf, pages)
         doc._rtl = verdict if verdict is not None else _language_is_rtl(doc)
-        eth_fonts = eth_fonts_of(pdf) if doc.options.get("repairs", True) else frozenset()
+        eth_fonts = eth_fonts_of(pdf, pages) if doc.options.get("repairs", True) else frozenset()
         font_maps = _learn_font_maps(doc, pdf) if doc.options.get("repairs", True) else {}
-        for index in range(len(pdf)):
+        for index in range(pages):
             page = pdf[index]
             try:
                 _read_page(doc, index, page, eth_fonts, font_maps)
@@ -355,7 +357,7 @@ def _learn_font_maps(doc: Document, pdf) -> dict[str, dict[str, str]]:
     import pypdfium2.raw as raw
 
     candidates = []
-    for index in range(len(pdf)):
+    for index in range(min(len(pdf), doc._max_pages)):
         page = pdf[index]
         textpage = page.get_textpage()
         try:
@@ -378,7 +380,7 @@ def _learn_font_maps(doc: Document, pdf) -> dict[str, dict[str, str]]:
 
     font_letters: dict[str, Counter] = {}
     pages = []
-    for index in range(len(pdf)):
+    for index in range(min(len(pdf), doc._max_pages)):
         page = pdf[index]
         try:
             text = page_text(page, all_fonts=True)
@@ -834,7 +836,9 @@ def _ocr_blocks(
     return read
 
 
-def _ocr_page(doc: Document, index: int, page, width, height, page_class, signals, text: PageText, flags) -> None:
+def _ocr_page(doc: Document, index: int, page, width, height, page_class, signals, text: PageText, flags, rendered=None) -> None:
+    """Read a page by OCR. ``rendered`` is (image, pixels per point) when the page is already an
+    image (an image file, D4b); otherwise the PDF page is rendered."""
     engine = engine_for(doc)
     if engine is None:
         reason = unavailable_reason(doc)
@@ -844,8 +848,8 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
         )
         doc.unread.append(Unread(scope="page", reason="ocr_route_unavailable", page=index, detail=f"class {page_class}; {reason}"))
         return
-    image, scale = _render(page)
-    if scale * 72 < RENDER_DPI:
+    image, scale = rendered if rendered is not None else _render(page)
+    if scale * 72 < RENDER_DPI and rendered is None:
         flags = flags + ["render_dpi_reduced"]
     signals = {**signals, "render_dpi": round(scale * 72, 1)}
     # Ruled tables in the image are read cell by cell; the rest of the page once, without them (D3e).

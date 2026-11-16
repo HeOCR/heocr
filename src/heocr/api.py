@@ -7,11 +7,12 @@ import os
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from heocr.contract import Document, Unread
+from heocr.contract import MAX_PAGES, Document, Unread
 from heocr.convert import CONVERT_TIMEOUT, TO_DOCX
 from heocr.identify import identify
 from heocr.ocr.tesseract import DEFAULT_LANG, DEFAULT_PSM, check_settings
 
+IMAGE_FORMATS = ("png", "jpeg", "tiff", "gif", "bmp", "jp2", "webp")
 # Inputs above this size are refused before parsing. Real tender documents are far smaller.
 MAX_FILE_BYTES = 512 * 1024**2
 
@@ -22,9 +23,10 @@ def _readers() -> dict[str, Reader]:
     """Formats with a route, mapped to the reader that fills a Document in place."""
     from heocr.convert import TO_DOCX, read_converted
     from heocr.docx.reader import read_docx
+    from heocr.images import read_image
     from heocr.pdf.reader import read_pdf
 
-    return {"docx": read_docx, "pdf": read_pdf, **{fmt: read_converted for fmt in TO_DOCX}}
+    return {"docx": read_docx, "pdf": read_pdf, **{fmt: read_converted for fmt in TO_DOCX}, **{fmt: read_image for fmt in IMAGE_FORMATS}}
 
 
 def extract(
@@ -40,6 +42,7 @@ def extract(
     convert: bool = True,
     soffice: str | Sequence[str] | None = None,
     convert_timeout: float | None = None,
+    max_pages: int = MAX_PAGES,
 ) -> Document:
     """Read a document and return its ``heocr_document.v1`` record.
 
@@ -68,7 +71,13 @@ def extract(
     the PATH, and ``convert_timeout`` bounds each conversion (180 s by default). The conversion
     runs with a throwaway profile, and its processes are stopped on timeout. Without LibreOffice,
     or with ``convert=False``, those files are recorded as unread.
+
+    ``max_pages`` bounds the pages (PDF pages, image frames) read from one document: 2,000 by
+    default, since every page may cost an OCR run. The rest are recorded as one unread entry
+    (``page_limit``) and the document is flagged ``page_limit_reached``.
     """
+    if isinstance(max_pages, bool) or not isinstance(max_pages, int) or max_pages < 1:
+        raise ValueError("max_pages must be a positive integer")
     if check_numbers not in (False, "suspect", "tables", "all"):
         raise ValueError("check_numbers must be 'suspect', 'tables', 'all' or False")
     if ocr:
@@ -98,6 +107,8 @@ def extract(
             else False,
         },
     )
+    doc._max_pages = max_pages
+    doc.options["max_pages"] = max_pages
     doc._ocr_settings = {"cmd": tesseract, "lang": ocr_lang, "psm": ocr_psm, "model": ocr_model} if ocr else None
     if kind.format in TO_DOCX:
         doc.options["convert"] = {"engine": "libreoffice", "to": "docx"} if convert else False
