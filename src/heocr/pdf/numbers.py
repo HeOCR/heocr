@@ -6,7 +6,9 @@ OCR of the line's own image on the rendered page:
 
 - **Which lines:** by default (``check_numbers="suspect"``), only lines holding a
   ``digit_groups_suspect`` token are read a second time. That is the repair's evidence, and it
-  costs nothing on documents without one. With ``check_numbers="all"``, every line holding
+  costs nothing on documents without one. ``check_numbers="tables"`` adds every table cell
+  holding amounts or dates (cells are where amounts live), at a fraction of the cost of
+  ``"all"``. With ``check_numbers="all"``, every line holding
   amounts (thousands groups, ₪, %) or dates is read too. That is opt-in: on the dev split it
   more than doubled the time (91 s to 222 s), and Tesseract's own digit errors left 51% of
   numbers unconfirmed. Either way, each line gets one ``--psm 7`` call (the lead's cost rule).

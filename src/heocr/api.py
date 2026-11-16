@@ -53,12 +53,13 @@ def extract(
 
     ``check_numbers`` reads text-layer lines a second time, by OCR of their own image
     (``heocr.pdf.numbers``). ``"suspect"`` (the default) reads only lines with a reversed-looking
-    digit group, which is the evidence the ``reversed_digit_groups`` repair needs. ``"all"`` also
-    reads every line with amounts, percentages or dates, and flags trustworthy disagreements.
-    ``False`` turns the check off.
+    digit group, which is the evidence the ``reversed_digit_groups`` repair needs. ``"tables"``
+    also reads every table cell with amounts, percentages or dates. ``"all"`` reads every line
+    and cell with them, and flags trustworthy disagreements. ``False`` turns the check off,
+    including the second reading of numbers in OCR'd table cells.
     """
-    if check_numbers not in (False, "suspect", "all"):
-        raise ValueError("check_numbers must be 'suspect', 'all' or False")
+    if check_numbers not in (False, "suspect", "tables", "all"):
+        raise ValueError("check_numbers must be 'suspect', 'tables', 'all' or False")
     if ocr:
         check_settings(ocr_lang, ocr_psm)
     if isinstance(source, (bytes, bytearray, memoryview)):
@@ -80,7 +81,7 @@ def extract(
         format_evidence=kind.evidence,
         options={
             "repairs": bool(repairs),
-            "check_numbers": (check_numbers if check_numbers in ("suspect", "all") else False) if ocr else False,
+            "check_numbers": (check_numbers if check_numbers in ("suspect", "tables", "all") else False) if ocr else False,
             "ocr": {"engine": "tesseract", "lang": ocr_lang, "psm": ocr_psm, **({"model": Path(ocr_model).name if ocr_model else None} if ocr_model else {})}
             if ocr
             else False,

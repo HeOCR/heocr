@@ -89,5 +89,16 @@ class ExtractTest(unittest.TestCase):
         self.assertEqual(doc.text, "")
 
 
+class CellReadingsTest(unittest.TestCase):
+    def test_readings_must_name_a_model_and_a_text(self) -> None:
+        doc = _doc()
+        cell = Cell("100", readings=[{"model": "heb", "text": "00"}, {"model": "eng", "text": "100", "confidence": 95.0}])
+        doc.blocks.append(Block(kind="table", cells=[[cell]], page=0, source="ocr", tool="t", ocr={"status": "unverified"}))
+        self.assertEqual(heocr.validate(doc.to_dict()), [])
+        data = doc.to_dict()
+        data["blocks"][-1]["cells"][0][0]["readings"] = [{"text": "00"}]
+        self.assertTrue(any("readings" in e for e in heocr.validate(data)))
+
+
 if __name__ == "__main__":
     unittest.main()

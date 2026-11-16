@@ -34,9 +34,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-ocr", action="store_true", help="do not run OCR; pages that need it are reported unread")
     parser.add_argument(
         "--check-numbers",
-        choices=("suspect", "all", "off"),
+        choices=("suspect", "tables", "all", "off"),
         default="suspect",
-        help="read numbers a second time by OCR: suspect digit groups only (default), all amounts and dates, or off",
+        help="read numbers a second time by OCR: suspect digit groups only (default), also every table cell, all amounts and dates, or off",
     )
     parser.add_argument("--ocr-lang", default="heb", help="Tesseract language list (default: heb; e.g. heb+eng)")
     parser.add_argument("--psm", type=int, default=3, help="Tesseract page segmentation mode (default: 3)")

@@ -426,12 +426,12 @@ def _check_numbers(doc: Document, pdf, scope: str = "suspect") -> None:
             continue
         if block.lines:
             for line in block.lines:
-                if wanted(line.text, scope):
+                if wanted(line.text, "suspect" if scope == "tables" else scope):
                     candidates.setdefault(block.page, []).append((block, None, line))
         for row in block.cells or []:
             for cell in row:
                 for line in cell._lines or []:
-                    if wanted(line[0], scope):
+                    if wanted(line[0], "all" if scope == "tables" else scope):
                         candidates.setdefault(block.page, []).append((block, cell, line))
     if not candidates:
         return
@@ -857,10 +857,12 @@ def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids, n
                 if not text.strip():
                     empty += 1
                     cell_flags.append("ocr_empty_with_ink")
-                elif numbers is not None and any(ch.isdigit() for ch in text):
-                    text = _second_number_reading(numbers, crop, dpi, psm, text, cell_flags, checks)
+                readings = None
+                if text.strip() and numbers is not None and any(ch.isdigit() for ch in text):
+                    first = {"model": engine.lang, "text": text, "confidence": result.mean_confidence}
+                    text, readings = _second_number_reading(numbers, crop, dpi, psm, first, cell_flags, checks)
                 read += sum(1 for ch in text if not ch.isspace())
-                out_row.append(Cell(text, colspan=cell["colspan"], rowspan=cell["rowspan"], flags=cell_flags))
+                out_row.append(Cell(text, colspan=cell["colspan"], rowspan=cell["rowspan"], flags=cell_flags, readings=readings))
             unread_cells += empty
             if inked and empty == inked:
                 boxes = [c["box"] for c in row if c["box"] is not None]
@@ -891,38 +893,44 @@ def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids, n
     return blocks, read
 
 
-def _second_number_reading(numbers, crop, dpi: int, psm: int, text: str, cell_flags: list[str], checks: dict) -> str:
+def _second_number_reading(numbers, crop, dpi: int, psm: int, first: dict, cell_flags: list[str], checks: dict) -> tuple[str, list | None]:
     """Amounts in an OCR'd cell read a second time, by the number model (``eng``).
 
     A **numeric cell** (no letters in either reading) takes the number model's reading when it is
     confident and differs: stock ``heb`` misreads digits too often (dev: a cell's "8,500,000" read
-    as "00"). The cell is flagged ``number_read_by_number_model``. In any other cell the readings
-    are only compared, and a disagreement is flagged, never resolved (D3d's asymmetry).
+    as "00"). The cell is flagged ``number_read_by_number_model`` and keeps both readings in
+    ``readings`` (model, text, confidence); the table stays ``source: "ocr"``, unverified. Both
+    readings are OCR, so this chooses between readings and overwrites no layer text: a cell read
+    from the layer is only ever checked. In any other cell the readings are only compared, and a
+    disagreement is flagged, never resolved (D3d's asymmetry).
     """
     from heocr.pdf.numbers import MIN_CONFIDENCE, compare, significant
 
+    text = first["text"]
     try:
         result = numbers.recognize(crop, dpi=dpi, psm=psm)
     except OcrUnavailable:
-        return text
+        return text, None
     second = "\n".join(line.text for line in result.lines if line.text.strip())
     confidence = result.mean_confidence
     if not any(ch.isalpha() for ch in text) and second and not any(ch.isalpha() for ch in second):
         if second.split() == text.split():
             checks["numbers"] += len(significant(text))
             checks["agreed"] += len(significant(text))
-            return text
+            return text, None
         if confidence is not None and confidence >= MIN_CONFIDENCE:
+            # Both readings are OCR: this chooses between two readings, it overwrites no layer
+            # text. Both are kept in the cell; the block stays source "ocr", unverified.
             checks["read_by_number_model"] += 1
             cell_flags.append("number_read_by_number_model")
-            return second
+            return second, [first, {"model": numbers.lang, "text": second, "confidence": confidence}]
     checked, agreed, disagreed, _ = compare(text, second, confidence)
     checks["numbers"] += checked
     checks["agreed"] += agreed
     checks["disagreed"] += disagreed
     if disagreed:
         cell_flags.append("number_disagreement")
-    return text
+    return text, None
 
 
 def _ocr_regions(
