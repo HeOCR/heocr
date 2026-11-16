@@ -10,9 +10,10 @@ The counting model:
 - **Shared counters:** counters belong to the abstract list (``w:abstractNum``), after
   ``numStyleLink`` is resolved. Every ``w:num`` that points at the same abstract list
   continues the same count.
-- **Start overrides:** a ``w:num`` whose ``w:lvlOverride`` has a ``w:startOverride``
-  restarts that level at the given value. It does so once, at the first paragraph that
-  uses that ``w:num``.
+- **Start overrides:** a ``w:num`` whose ``w:lvlOverride`` has a ``w:startOverride`` is a
+  list of its own, with its own counters, starting each overridden level at the given
+  value. That is how Word's "restart numbering" works, and it agrees with LibreOffice on
+  real tender documents: the shared list continues undisturbed around such an instance.
 - **Level overrides:** a ``w:lvlOverride`` that contains a full ``w:lvl`` replaces the
   level's definition for that ``w:num`` only.
 - **Restarts:** numbering a paragraph at level L resets every deeper level D. By default
@@ -117,7 +118,6 @@ class Numbering:
         self.abstracts = abstracts
         self.instances = instances
         self._counters: dict[str, list[int | None]] = {}
-        self._used_instances: set[str] = set()
 
     # -- parsing -------------------------------------------------------------
     @classmethod
@@ -201,19 +201,17 @@ class Numbering:
         ilvl = min(max(ilvl, 0), MAX_LEVELS - 1)
         levels = self._levels(num_id)
         instance = self.instances[num_id]
-        counters = self._counters.setdefault(abstract.abstract_id, [None] * MAX_LEVELS)
+        key = f"num:{num_id}" if instance.start_overrides else f"abstract:{abstract.abstract_id}"
+        counters = self._counters.setdefault(key, [None] * MAX_LEVELS)
 
-        if num_id not in self._used_instances:
-            self._used_instances.add(num_id)
-            for level_index, start in instance.start_overrides.items():
-                if 0 <= level_index < MAX_LEVELS:
-                    counters[level_index] = start - 1
-                    for deeper in range(level_index + 1, MAX_LEVELS):
-                        counters[deeper] = None
+        def start_of(index: int) -> int:
+            if index in instance.start_overrides:
+                return instance.start_overrides[index]
+            return levels.get(index, Level(ilvl=index)).start
 
         level = levels.get(ilvl, Level(ilvl=ilvl))
         current = counters[ilvl]
-        counters[ilvl] = level.start if current is None else current + 1
+        counters[ilvl] = start_of(ilvl) if current is None else current + 1
         for deeper in range(ilvl + 1, MAX_LEVELS):
             restart = levels.get(deeper, Level(ilvl=deeper)).restart
             limit = deeper if restart is None else restart
@@ -229,7 +227,7 @@ class Numbering:
             if value is None:
                 # Shown at its start value, and from then on counted as used: the next item at
                 # that level is start + 1 (checked against LibreOffice on real tender documents).
-                value = ref.start
+                value = start_of(index)
                 counters[index] = value
                 flags.append("numbering_parent_unused")
             fmt = "decimal" if level.is_lgl and ref.fmt not in ("none",) else ref.fmt

@@ -73,9 +73,16 @@ class NumberingTest(unittest.TestCase):
     def test_shared_counter_and_start_override(self) -> None:
         nums = [num(1, 0), num(2, 0), num(3, 0, starts={0: 1})]
         n = Numbering.parse(numbering_xml([abstract_num(0, [lvl(0), lvl(1)])], nums))
-        # numId 2 continues numId 1's list; numId 3 restarts it once, then continues.
-        steps = [(1, 0), (1, 0), (2, 0), (3, 0), (3, 1), (3, 0), (1, 0)]
-        self.assertEqual(labels(n, steps), ["1.", "2.", "3.", "1.", "1.1.", "2.", "3."])
+        # numId 2 continues numId 1's list; numId 3 is a restarted list of its own, and the
+        # shared list continues around it.
+        steps = [(1, 0), (1, 0), (2, 0), (3, 0), (3, 1), (3, 0), (1, 0), (3, 0)]
+        self.assertEqual(labels(n, steps), ["1.", "2.", "3.", "1.", "1.1.", "2.", "4.", "3."])
+
+    def test_start_override_on_every_level_leaves_the_shared_list_alone(self) -> None:
+        nums = [num(1, 0), num(2, 0, starts={0: 1, 1: 1, 2: 1})]
+        n = Numbering.parse(numbering_xml([abstract_num(0, [lvl(0), lvl(1), lvl(2)])], nums))
+        steps = [(1, 0), (1, 0), (1, 1), (2, 2), (1, 2)]
+        self.assertEqual(labels(n, steps), ["1.", "2.", "2.1.", "1.1.1.", "2.1.1."])
 
     def test_level_override_replaces_definition(self) -> None:
         nums = [num(1, 0), num(2, 0, levels={0: lvl(0, "hebrew1", "%1)")})]
