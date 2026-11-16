@@ -33,15 +33,28 @@ class FixtureTest(unittest.TestCase):
 
 
 class T1ReadingTest(unittest.TestCase):
-    def test_exact_lines_in_every_stream_state(self) -> None:
-        for order in ("logical", "visual"):
-            for spaces in (True, False):
-                with self.subTest(order=order, spaces=spaces):
-                    page = PdfPage(lines=lines_block(LINES), stream_order=order, real_spaces=spaces)
-                    doc = heocr.extract(make_pdf([page]))
-                    self.assertEqual(lines_of(doc), LINES)
-                    self.assertEqual(doc.pages[0].page_class, "T1")
-                    self.assertEqual(doc.pages[0].coverage["status"], "read")
+    def test_exact_lines_from_a_logical_layer(self) -> None:
+        for spaces in (True, False):
+            with self.subTest(spaces=spaces):
+                doc = heocr.extract(make_pdf([PdfPage(lines=lines_block(LINES), real_spaces=spaces)]))
+                self.assertEqual(lines_of(doc), LINES)
+                self.assertEqual(doc.pages[0].page_class, "T1")
+                self.assertEqual(doc.pages[0].coverage["status"], "read")
+                self.assertTrue(doc.pages[0].coverage["selection_safe"])
+
+    def test_geometry_reads_a_visual_order_layer_exactly(self) -> None:
+        # Such pages are T2 and unread in D1; the line building that D2 will use already reads them.
+        import pypdfium2 as pdfium
+
+        from heocr.pdf.lines import build_lines
+        from heocr.pdf.reader import page_text
+
+        for spaces in (True, False):
+            with self.subTest(spaces=spaces):
+                pdf = pdfium.PdfDocument(make_pdf([PdfPage(lines=lines_block(LINES), stream_order="visual", real_spaces=spaces)]))
+                built = build_lines(page_text(pdf[0]).atoms)
+                self.assertEqual([line.text for line in built.lines], LINES)
+                pdf.close()
 
     def test_record_and_views(self) -> None:
         doc = heocr.extract(make_pdf([PdfPage(lines=lines_block(LINES[:2]))]))
