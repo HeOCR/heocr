@@ -86,6 +86,20 @@ def _run(cmd: list[str], timeout: float) -> subprocess.CompletedProcess:
         raise OcrUnavailable("tesseract timed out") from exc
 
 
+def _private_tessdata(installation: Path, model_path: Path, name: str) -> Path:
+    """A temporary tessdata folder: the model, plus the installation's ``configs`` for TSV output."""
+    import atexit
+
+    configs = installation / "configs"
+    if not (configs / "tsv").is_file():
+        raise OcrUnavailable("the Tesseract installation has no configs/tsv, needed for TSV output")
+    folder = Path(tempfile.mkdtemp(prefix="heocr-tessdata-"))
+    atexit.register(shutil.rmtree, folder, True)
+    shutil.copyfile(model_path, folder / f"{name}.traineddata")
+    shutil.copytree(configs, folder / "configs")
+    return folder
+
+
 def check_settings(lang: str, psm: int) -> None:
     """Reject a malformed language list or an unsupported page segmentation mode early."""
     if not isinstance(lang, str) or not _LANG.fullmatch(lang) or len(set(lang.split("+"))) != len(lang.split("+")):
@@ -104,6 +118,7 @@ class Tesseract:
     executable_sha256: str
     models: dict[str, str]  # language -> sha256 of its traineddata
     timeout: float = TIMEOUT
+    released: object = None  # the heocr.models.ReleasedModel in use, if any
 
     @classmethod
     def find(
@@ -114,7 +129,15 @@ class Tesseract:
         psm: int = DEFAULT_PSM,
         tessdata: str | os.PathLike[str] | None = None,
         timeout: float = TIMEOUT,
+        model: str | None = None,
     ) -> "Tesseract":
+        """Find Tesseract, and the models for ``lang``.
+
+        With ``model`` (a released HeOCR model's name, or a ``.traineddata`` path), that model
+        replaces ``lang``. It runs from a private tessdata folder holding the model and a copy of
+        the installation's ``configs`` folder, which Tesseract needs for TSV output once
+        ``--tessdata-dir`` points elsewhere (the R8b card's note).
+        """
         check_settings(lang, psm)
         if cmd is None:
             cmd = os.environ.get("HEOCR_TESSERACT") or shutil.which("tesseract")
@@ -135,6 +158,15 @@ class Tesseract:
                 raise OcrUnavailable("tesseract did not report its tessdata folder")
             tessdata = match.group(1)
         folder = Path(tessdata)
+        released = None
+        if model is not None:
+            from heocr.models import ModelError, resolve
+
+            try:
+                model_path, lang, released = resolve(model)
+            except ModelError as exc:
+                raise OcrUnavailable(str(exc)) from exc
+            folder = _private_tessdata(folder, model_path, lang)
         models = {}
         for language in lang.split("+"):
             model = folder / f"{language}.traineddata"
@@ -143,7 +175,7 @@ class Tesseract:
             models[language] = _sha256(model)
         executable = shutil.which(argv[0]) or argv[0]
         executable_sha256 = _sha256(Path(executable)) if Path(executable).is_file() else "unknown"
-        return cls(argv, folder, lang, psm, version, executable_sha256, models, timeout)
+        return cls(argv, folder, lang, psm, version, executable_sha256, models, timeout, released)
 
     def provenance(self) -> dict[str, str]:
         """Record components: versions and hashes only, no paths."""
@@ -155,6 +187,9 @@ class Tesseract:
         }
         for language, sha in self.models.items():
             out[f"tesseract:{language}.traineddata"] = f"sha256:{sha}"
+        if self.released is not None:
+            out[f"tesseract:{self.released.name}.doi"] = self.released.doi
+            out[f"tesseract:{self.released.name}.licence"] = self.released.licence
         return out
 
     def recognize(self, image, dpi: int = RENDER_DPI) -> OcrResult:

@@ -33,6 +33,7 @@ def extract(
     ocr_lang: str = DEFAULT_LANG,
     ocr_psm: int = DEFAULT_PSM,
     tesseract: str | Sequence[str] | None = None,
+    ocr_model: str | None = None,
 ) -> Document:
     """Read a document and return its ``heocr_document.v1`` record.
 
@@ -45,6 +46,8 @@ def extract(
     ``ocr`` runs the OCR route on pages and regions that need it, through stock Tesseract
     when it is installed (``heocr.ocr.tesseract``): ``ocr_lang`` is ``heb`` by default,
     ``ocr_psm`` is 3, and ``tesseract`` names the program when it is not on the PATH.
+    ``ocr_model`` runs a HeOCR traineddata instead of ``ocr_lang``: a released model's name
+    (downloaded on purpose first, ``heocr.models.download``) or a ``.traineddata`` path.
     Without Tesseract, or with ``ocr=False``, those pages are recorded as unread.
     """
     if ocr:
@@ -68,10 +71,12 @@ def extract(
         format_evidence=kind.evidence,
         options={
             "repairs": bool(repairs),
-            "ocr": {"engine": "tesseract", "lang": ocr_lang, "psm": ocr_psm} if ocr else False,
+            "ocr": {"engine": "tesseract", "lang": ocr_lang, "psm": ocr_psm, **({"model": Path(ocr_model).name if ocr_model else None} if ocr_model else {})}
+            if ocr
+            else False,
         },
     )
-    doc._ocr_settings = {"cmd": tesseract, "lang": ocr_lang, "psm": ocr_psm} if ocr else None
+    doc._ocr_settings = {"cmd": tesseract, "lang": ocr_lang, "psm": ocr_psm, "model": ocr_model} if ocr else None
     reader = _readers().get(kind.format)
     if reader is None:
         doc.unread.append(

@@ -22,7 +22,9 @@ def engine_for(doc: "Document") -> Tesseract | None:
         return None
     if doc._ocr_engine is None and doc._ocr_error is None:
         try:
-            doc._ocr_engine = Tesseract.find(settings["cmd"], lang=settings["lang"], psm=settings["psm"])
+            doc._ocr_engine = Tesseract.find(
+                settings["cmd"], lang=settings["lang"], psm=settings["psm"], model=settings.get("model")
+            )
             doc.components.update(doc._ocr_engine.provenance())
         except OcrUnavailable as exc:
             doc._ocr_error = str(exc)

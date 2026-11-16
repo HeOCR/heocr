@@ -18,7 +18,7 @@ def _parser() -> argparse.ArgumentParser:
         prog="heocr",
         description="Extract the Hebrew text of a document through the best open pipeline for it.",
     )
-    parser.add_argument("file", type=Path, help="input document (PDF, DOCX, ...)")
+    parser.add_argument("file", type=Path, nargs="?", help="input document (PDF, DOCX, ...)")
     parser.add_argument("-o", "--output", type=Path, help="write here instead of standard output")
     parser.add_argument(
         "-f",
@@ -35,13 +35,35 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--ocr-lang", default="heb", help="Tesseract language list (default: heb; e.g. heb+eng)")
     parser.add_argument("--psm", type=int, default=3, help="Tesseract page segmentation mode (default: 3)")
     parser.add_argument("--tesseract", help="the tesseract program, when it is not on the PATH")
+    parser.add_argument(
+        "--ocr-model",
+        help="a HeOCR traineddata for OCR instead of stock heb: a released name (e.g. heocr_r8b) or a path",
+    )
+    parser.add_argument(
+        "--download-model",
+        metavar="NAME",
+        help="download a released HeOCR model on purpose, check its pinned sha256, and exit",
+    )
     parser.add_argument("-q", "--quiet", action="store_true", help="do not report unread parts on stderr")
     parser.add_argument("--version", action="version", version=f"heocr {__version__}")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = _parser().parse_args(argv)
+    parser = _parser()
+    args = parser.parse_args(argv)
+    if args.download_model:
+        from heocr.models import ModelError, download
+
+        try:
+            path = download(args.download_model)
+        except (ModelError, OSError) as exc:
+            print(f"heocr: {exc}", file=sys.stderr)
+            return 1
+        print(f"heocr: {args.download_model} is ready ({path.name}, sha256 checked)", file=sys.stderr)
+        return 0
+    if args.file is None:
+        parser.error("a file is required (or --download-model NAME)")
     fmt = args.format or (_BY_SUFFIX.get(args.output.suffix.lower(), "text") if args.output else "text")
     try:
         doc = extract(
@@ -51,6 +73,7 @@ def main(argv: list[str] | None = None) -> int:
             ocr_lang=args.ocr_lang,
             ocr_psm=args.psm,
             tesseract=args.tesseract,
+            ocr_model=args.ocr_model,
         )
     except (OSError, ValueError) as exc:
         print(f"heocr: {exc}", file=sys.stderr)
