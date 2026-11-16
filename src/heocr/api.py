@@ -24,11 +24,14 @@ def _readers() -> dict[str, Reader]:
     return {"docx": read_docx, "pdf": read_pdf}
 
 
-def extract(source: str | os.PathLike[str] | bytes) -> Document:
+def extract(source: str | os.PathLike[str] | bytes, *, repairs: bool = True) -> Document:
     """Read a document and return its ``heocr_document.v1`` record.
 
     ``source`` is a file path or the file's bytes. The format is decided from the
     content, never from the file name, and the file name is not recorded.
+
+    ``repairs=False`` turns every repair rule off (``heocr.repairs``): the output is then
+    the extracted text, byte for byte.
     """
     if isinstance(source, (bytes, bytearray, memoryview)):
         body = bytes(source)
@@ -47,6 +50,7 @@ def extract(source: str | os.PathLike[str] | bytes) -> Document:
         size=len(body),
         format=kind.format,
         format_evidence=kind.evidence,
+        options={"repairs": bool(repairs)},
     )
     reader = _readers().get(kind.format)
     if reader is None:

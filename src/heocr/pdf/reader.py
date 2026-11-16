@@ -8,14 +8,16 @@ and that is the step this package owns.
 from __future__ import annotations
 
 import ctypes
+from collections import Counter
 import math
 import unicodedata
 from dataclasses import dataclass, field
 
+from heocr import repairs
 from heocr.contract import Block, Document, Line, Page, Unread
 from heocr.pdf.classify import classify, object_stats, stream_signals, text_signals
 from heocr.pdf.lines import Atom, PageLines, build_lines, paragraphs
-from heocr.textflags import is_private_use, text_flags
+from heocr.textflags import text_flags
 
 TOOL = "heocr.pdf"
 # Characters whose baseline angle has a sine above this are rotated text.
@@ -128,18 +130,17 @@ def read_t1(doc: Document, page_index: int, built: PageLines) -> int:
     read = 0
     for group in paragraphs(built):
         lines: list[Line] = []
-        bullets: dict[str, int] = {}
+        bullets: Counter = Counter()
         for line in group:
             text = line.text
-            if text and is_private_use(text[0]) and (len(text) == 1 or text[1].isspace()):
-                # A symbol-font bullet (U+F0B7 and the like) at line start has no meaning outside its font.
-                code = f"U+{ord(text[0]):04X}"
-                bullets[code] = bullets.get(code, 0) + 1
-                text = "•" + text[1:]
-                line.flags.append("bullet_symbol_mapped")
+            if doc.options.get("repairs", True):
+                text, changes = repairs.symbol_font_bullet(text)
+                if changes:
+                    bullets.update(changes)
+                    line.flags.append("bullet_symbol_mapped")
             lines.append(Line(text, line.bbox, line.direction))
         flags = sorted({flag for line in group for flag in line.flags})
-        repairs = [{"rule": "symbol_font_bullet", "from": code, "to": "•", "count": n} for code, n in sorted(bullets.items())]
+        block_repairs = repairs.record(repairs.SYMBOL_FONT_BULLET, bullets)
         bbox = [
             min(line.bbox[0] for line in group),
             min(line.bbox[1] for line in group),
@@ -158,7 +159,7 @@ def read_t1(doc: Document, page_index: int, built: PageLines) -> int:
                 tool=TOOL,
                 direction=group[0].direction,
                 lines=lines,
-                repairs=repairs,
+                repairs=block_repairs,
                 flags=flags + text_flags(block_text),
             )
         )

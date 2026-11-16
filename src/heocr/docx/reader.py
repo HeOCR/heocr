@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 import defusedxml
 from defusedxml import ElementTree
 
+from heocr import repairs
 from heocr.contract import Block, Cell, Document, Unread
 from heocr.docx.numbering import W, Numbering
 from heocr.docx.styles import Styles, toggle
@@ -292,11 +293,18 @@ class _Reader:
         )
         if text or label is not None:
             flags = list(para.flags)
+            block_repairs: list[dict] = []
+            label_text = label.text if label is not None else ""
+            if label is not None and label.fmt == "bullet" and self.doc.options.get("repairs", True):
+                label_text, changes = repairs.symbol_font_bullet(label_text)
+                if changes:
+                    block_repairs = repairs.record(repairs.SYMBOL_FONT_BULLET, changes)
+                    flags.append("bullet_symbol_mapped")
             if label is not None:
                 flags.extend(label.flags)
                 if label.suffix == "nothing":
                     flags.append("label_suffix_nothing")
-            kind = "heading" if heading else ("list_item" if label is not None and label.text else "text")
+            kind = "heading" if heading else ("list_item" if label_text else "text")
             out.append(
                 Block(
                     kind=kind,
@@ -305,9 +313,10 @@ class _Reader:
                     source="office_xml",
                     tool=TOOL,
                     level=(outline + 1) if heading else None,
-                    label=label.text if label is not None and label.text else None,
+                    label=label_text or None,
                     note_id=note_id,
                     direction=direction,
+                    repairs=block_repairs,
                     flags=flags,
                 )
             )

@@ -118,7 +118,8 @@ class NumberingTest(unittest.TestCase):
         levels = [lvl(0, "bullet", "", suff="space"), lvl(1, "bullet", "o")]
         n = Numbering.parse(numbering_xml([abstract_num(0, levels)], [num(1, 0)]))
         first = n.next_label("1", 0)
-        self.assertEqual((first.text, first.suffix, first.flags), ("•", "space", ("bullet_symbol_mapped",)))
+        # The renderer keeps the bullet as written; the reader's repairs map symbol-font codes.
+        self.assertEqual((first.text, first.suffix, first.fmt, first.flags), ("\uf0b7", "space", "bullet", ()))
         self.assertEqual(n.next_label("1", 1).text, "o")
 
     def test_missing_start_is_zero(self) -> None:

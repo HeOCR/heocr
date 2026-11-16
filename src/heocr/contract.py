@@ -156,6 +156,7 @@ class Document:
     unread: list[Unread] = field(default_factory=list)
     flags: list[str] = field(default_factory=list)
     components: dict[str, str] = field(default_factory=dict)
+    options: dict[str, Any] = field(default_factory=lambda: {"repairs": True})
 
     # -- views -------------------------------------------------------------
     @property
@@ -190,6 +191,7 @@ class Document:
                 "components": dict(sorted(self.components.items())),
             },
             "document": document,
+            "options": dict(self.options),
             "pages": [page.to_dict() for page in self.pages],
             "blocks": [block.to_dict(i) for i, block in enumerate(self.blocks)],
             "unread": [item.to_dict() for item in self.unread],
@@ -264,6 +266,10 @@ def validate(payload: Any) -> list[str]:
     for key in ("name", "path", "filename", "file"):
         if key in document:
             errors.append(f"document.{key} is not allowed: records carry no file names or paths")
+
+    options = payload.get("options", {})
+    if not isinstance(options, dict) or not isinstance(options.get("repairs", True), bool):
+        errors.append("options must be an object, with a boolean repairs")
 
     pages = payload.get("pages")
     if not isinstance(pages, list):

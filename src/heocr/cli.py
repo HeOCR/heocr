@@ -26,6 +26,11 @@ def _parser() -> argparse.ArgumentParser:
         choices=_FORMATS,
         help="output format (default: from the output suffix, else text)",
     )
+    parser.add_argument(
+        "--no-repairs",
+        action="store_true",
+        help="turn every repair rule off: output the extracted text byte for byte",
+    )
     parser.add_argument("-q", "--quiet", action="store_true", help="do not report unread parts on stderr")
     parser.add_argument("--version", action="version", version=f"heocr {__version__}")
     return parser
@@ -35,7 +40,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     fmt = args.format or (_BY_SUFFIX.get(args.output.suffix.lower(), "text") if args.output else "text")
     try:
-        doc = extract(args.file)
+        doc = extract(args.file, repairs=not args.no_repairs)
     except (OSError, ValueError) as exc:
         print(f"heocr: {exc}", file=sys.stderr)
         return 1
