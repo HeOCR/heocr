@@ -112,6 +112,7 @@ class _Package:
 @dataclass
 class _Paragraph:
     text: list[str] = field(default_factory=list)
+    note_refs: list[tuple[str, str, int]] = field(default_factory=list)  # (kind, id, offset in visible text)
     flags: list[str] = field(default_factory=list)
     visible_chars: int = 0
     hidden_chars: int = 0
@@ -233,6 +234,10 @@ class _Reader:
                 self._drawing(child, para)
             elif tag in (W + "footnoteReference", W + "endnoteReference"):
                 para.flags.append("has_note_reference")
+                if not hidden:
+                    kind = "footnote" if tag == W + "footnoteReference" else "endnote"
+                    offset = sum(len(t) for t in para.text) + len("".join(pieces))
+                    para.note_refs.append((kind, child.get(W + "id", ""), offset))
         text = "".join(pieces)
         if not text:
             return
@@ -326,9 +331,14 @@ class _Reader:
         if text or label is not None:
             flags = list(para.flags)
             block_repairs: list[dict] = []
+            refs = list(para.note_refs)
             if self.doc.options.get("repairs", True):
+                original = text
                 text, marks = repairs.direction_marks(text)
                 block_repairs += repairs.record(repairs.DIRECTION_MARKS, marks)
+                if marks:
+                    # Offsets move back by the marks removed before them.
+                    refs = [(k, i, o - sum(1 for ch in original[:o] if ch in "\u200e\u200f\u061c")) for k, i, o in refs]
             label_text = label.text if label is not None else ""
             if label is not None and label.fmt == "bullet" and self.doc.options.get("repairs", True):
                 label_text, changes = repairs.symbol_font_bullet(label_text)
@@ -355,6 +365,7 @@ class _Reader:
                     label=label_text or None,
                     note_id=note_id,
                     direction=direction,
+                    note_refs=[{"kind": k, "id": i, "offset": o} for k, i, o in refs] or None,
                     repairs=block_repairs,
                     flags=flags,
                 )

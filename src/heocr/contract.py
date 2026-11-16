@@ -76,6 +76,7 @@ class Block:
     cells: list[list[Cell]] | None = None
     lines: list[Line] | None = None
     ocr: dict[str, Any] | None = None  # for source "ocr": engine, settings, status "unverified", confidence
+    note_refs: list[dict[str, Any]] | None = None  # footnote/endnote references: kind, id, offset in text
     repairs: list[dict[str, Any]] = field(default_factory=list)
     flags: list[str] = field(default_factory=list)
 
@@ -95,6 +96,8 @@ class Block:
             out["lines"] = [line.to_dict() for line in self.lines]
         if self.ocr is not None:
             out["ocr"] = dict(self.ocr)
+        if self.note_refs:
+            out["note_refs"] = [dict(r) for r in self.note_refs]
         out["source"] = self.source
         out["tool"] = self.tool
         out["repairs"] = list(self.repairs)
@@ -346,6 +349,15 @@ def validate(payload: Any) -> list[str]:
                 break
         if block.get("source") == "ocr" and not (isinstance(block.get("ocr"), dict) and block["ocr"].get("status") == "unverified"):
             errors.append(f"{where}.ocr must be an object with status 'unverified' for OCR text")
+        for ref in block.get("note_refs", []) or []:
+            if not (
+                isinstance(ref, dict)
+                and ref.get("kind") in ("footnote", "endnote")
+                and isinstance(ref.get("offset"), int)
+                and 0 <= ref["offset"] <= len(block.get("text", ""))
+            ):
+                errors.append(f"{where}.note_refs must have a kind and an offset inside the text")
+                break
         if not isinstance(block.get("repairs"), list):
             errors.append(f"{where}.repairs must be a list")
         if not _strings(block.get("flags")):
