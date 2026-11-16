@@ -58,6 +58,7 @@ class Atom:
     y1: float
     size: float
     index: int
+    repaired: str | None = None  # the repair rule that changed this character, if any
 
     @property
     def cx(self) -> float:

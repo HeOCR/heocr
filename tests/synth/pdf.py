@@ -120,6 +120,7 @@ class PdfPage:
     remap: dict[str, str] = field(default_factory=dict)  # displayed char -> char in the ToUnicode map
     images: list[tuple[float, float, float, float]] = field(default_factory=list)  # x, y, w, h
     image_gray: int = 0x80  # grey level of every image (0xFF: a blank background)
+    font_name: str = ""  # the Type3 font's /Name (and BaseFont), for per-font evidence
     paths: int = 0
     rotate: int = 0
     unit_font_size: bool = False  # "Tf 1" with the size in the text matrix, as many producers write
@@ -222,7 +223,9 @@ def make_pdf(pages: list[PdfPage]) -> bytes:
             diffs = " ".join(f"/g{code}" for code in codes.values())
             font_id = new(
                 (
-                    f"<< /Type /Font /Subtype /Type3 /FontBBox [0 0 1000 1000] /FontMatrix [0.001 0 0 0.001 0 0] "
+                    "<< /Type /Font /Subtype /Type3 "
+                    + (f"/Name /{page.font_name} /BaseFont /{page.font_name} " if page.font_name else "")
+                    + "/FontBBox [0 0 1000 1000] /FontMatrix [0.001 0 0 0.001 0 0] "
                     f"/CharProcs << {' '.join(procs)} >> /Encoding << /Type /Encoding /Differences [1 {diffs}] >> "
                     f"/FirstChar 1 /LastChar {len(codes)} /Widths [{widths}] /ToUnicode {tounicode} 0 R /Resources << >> >>"
                 ).encode()
