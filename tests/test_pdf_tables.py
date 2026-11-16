@@ -198,5 +198,38 @@ class RowsAndBordersTest(unittest.TestCase):
         self.assertIn("ספק א", doc.text)
 
 
+BRACKETED = ["סעיף (א) קובע את התנאים", "המציע (להלן: הספק) יגיש", "על פי ההוראות (ראו נספח ב)", "והכול כמפורט (בכפוף לדין)"]
+
+
+class CellRepairsTest(unittest.TestCase):
+    """Text in table cells gets the repairs a paragraph gets, logged on the table block."""
+
+    def page(self, **kwargs):
+        rows = [["סכום", "תפקיד", "שם"], ["100 ₪", "\uf0b7 מנהל", "ספק (א)"], ["200 ₪", "עובד", "ספק נוסף"]]
+        extra = [TextLine(t, 545, 800 - 14 * i) for i, t in enumerate(BRACKETED)]  # the document's bracket evidence
+        page = table_page(rows, extra=extra)
+        for key, value in kwargs.items():
+            setattr(page, key, value)
+        return page
+
+    def test_bullets_brackets_and_eth_in_cells_are_repaired_and_logged(self) -> None:
+        doc = heocr.extract(make_pdf([self.page(remap={"נ": "ð"}, font_name="Broken")]), ocr=False)
+        (table,) = tables_of(doc)
+        cells = [[c.text for c in row] for row in table.cells]
+        self.assertEqual(cells[1], ["ספק (א)", "• מנהל", "100 ₪"])
+        self.assertEqual(cells[2][0], "ספק נוסף")
+        rules = {r["rule"] for r in table.repairs}
+        self.assertEqual(rules, {"symbol_font_bullet", "rtl_bracket_order", "latin1_eth_nun"})
+        self.assertIn("brackets_mirrored", table.flags)
+        eth = [r for r in table.repairs if r["rule"] == "latin1_eth_nun"]
+        self.assertEqual(eth[0]["count"], 2)  # מנהל and נוסף, in two cells
+
+    def test_repairs_off_leaves_cells_as_extracted(self) -> None:
+        doc = heocr.extract(make_pdf([self.page()]), ocr=False, repairs=False)
+        (table,) = tables_of(doc)
+        self.assertEqual([c.text for c in table.cells[1]], ["ספק )א(", "\uf0b7 מנהל", "100 ₪"])
+        self.assertEqual(table.repairs, [])
+
+
 if __name__ == "__main__":
     unittest.main()

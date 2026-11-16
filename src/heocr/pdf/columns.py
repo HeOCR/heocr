@@ -41,6 +41,7 @@ from dataclasses import dataclass, field
 
 from heocr.contract import Block, Cell
 from heocr.pdf.lines import COLUMN_GAP_HEIGHTS, COLUMN_GAP_MIN, Atom, BuiltLine, build_lines
+from heocr.pdf.tables import CellRepairs
 
 TOOL = "heocr.pdf"
 MIN_TABLE_ROWS = 3
@@ -99,6 +100,7 @@ def arrange(
     rtl: bool,
     page_index: int,
     ruled: list[tuple[Block, list[float]]],
+    repairs_on: bool = True,
 ) -> tuple[list[Segment], list[Block], int]:
     """Split a page's body characters into segments in reading order.
 
@@ -129,7 +131,7 @@ def arrange(
             pending.extend(rows[i].atoms)
             i += 1
             continue
-        segment = _decide(rows, run, consumed, median_height, gap_limit, rtl, page_index)
+        segment = _decide(rows, run, consumed, median_height, gap_limit, rtl, page_index, repairs_on)
         if segment.kind == "lines":
             pending.extend(segment.atoms)
         else:
@@ -206,7 +208,9 @@ def _extend_ruled(rows, ruled, median_height, consumed, page_index) -> tuple[lis
                 continue
         if not taken and follower is None:
             continue
-        new_rows = _ruled_rows([rows[i] for i in taken], xs, block.direction == "rtl", median_height)
+        if block._cell_repairs is None:
+            block._cell_repairs = CellRepairs()
+        new_rows = _ruled_rows([rows[i] for i in taken], xs, block.direction == "rtl", median_height, block._cell_repairs)
         block.cells = list(block.cells or []) + new_rows
         moved += sum(_ink(rows[i].atoms) for i in taken)
         consumed.update(taken)
@@ -217,13 +221,18 @@ def _extend_ruled(rows, ruled, median_height, consumed, page_index) -> tuple[lis
             block.cells = block.cells + list(other.cells or [])
             block.bbox = [min(block.bbox[0], other.bbox[0]), block.bbox[1], max(block.bbox[2], other.bbox[2]), max(block.bbox[3], other.bbox[3])]
             block.flags = sorted(set(block.flags) | set(other.flags))
+            if other._cell_repairs is not None:
+                mine = block._cell_repairs
+                mine.bullets.update(other._cell_repairs.bullets)
+                mine.eth += other._cell_repairs.eth
+                mine.pua.update(other._cell_repairs.pua)
             merged_into[follower] = t
         if "table_rows_unruled" not in block.flags:
             block.flags.append("table_rows_unruled")
     return [b for u, b in enumerate(blocks) if u not in merged_into], moved
 
 
-def _ruled_rows(rows: list[_Row], xs: list[float], rtl: bool, median_height: float) -> list[list[Cell]]:
+def _ruled_rows(rows: list[_Row], xs: list[float], rtl: bool, median_height: float, ledger: CellRepairs) -> list[list[Cell]]:
     """Table rows from visual rows that continue a ruled table, padded to its columns. A line
     over several columns gives a spanned cell; a lone line close to the row above continues it."""
     columns = len(xs) - 1
@@ -243,7 +252,7 @@ def _ruled_rows(rows: list[_Row], xs: list[float], rtl: bool, median_height: flo
         c = 0
         for first, last, atoms in merged:
             cells.extend(Cell("") for _ in range(first - c))
-            text = "\n".join(line.text for line in build_lines(atoms, rtl=rtl).lines)
+            text = ledger.text(atoms, rtl)
             cells.append(Cell(text, colspan=last - first + 1))
             c = last + 1
         cells.extend(Cell("") for _ in range(columns - c))
@@ -293,7 +302,7 @@ def _band(line: BuiltLine, gutters: list[tuple[float, float]]) -> int:
     return sum(1 for g in gutters if (g[0] + g[1]) / 2 < centre)
 
 
-def _decide(rows, run, consumed, median_height, gap_limit, rtl, page_index) -> Segment:
+def _decide(rows, run, consumed, median_height, gap_limit, rtl, page_index, repairs_on=True) -> Segment:
     members = [rows[i] for i in run]
     atoms = [a for row in members for a in row.atoms]
     gutters = _gutters(members, gap_limit)
@@ -327,8 +336,9 @@ def _decide(rows, run, consumed, median_height, gap_limit, rtl, page_index) -> S
         groups = _table_rows(members, bands_of)
         cells = []
         placed = 0
+        ledger = CellRepairs(repairs_on)
         for group in groups:
-            texts = _cell_texts(group, count, rtl)
+            texts = _cell_texts(group, count, rtl, ledger)
             cells.append([Cell(text) for text in (reversed(texts) if rtl else texts)])
         placed = _ink(atoms)
         bbox = [
@@ -346,6 +356,7 @@ def _decide(rows, run, consumed, median_height, gap_limit, rtl, page_index) -> S
             tool=TOOL,
             direction="rtl" if rtl else "ltr",
             flags=["unruled_table"],
+            _cell_repairs=ledger,
         )
         return Segment("table", atoms, block=block, chars=placed)
     return unresolved
@@ -384,11 +395,11 @@ def _table_rows(members: list[_Row], bands_of: list[list[int]]) -> list[list[tup
     return groups
 
 
-def _cell_texts(group: list[tuple[_Row, list[int]]], count: int, rtl: bool) -> list[str]:
+def _cell_texts(group: list[tuple[_Row, list[int]]], count: int, rtl: bool, ledger: CellRepairs) -> list[str]:
     """Cell texts of one table row, left to right."""
     per_band: list[list[Atom]] = [[] for _ in range(count)]
     for row, bands in group:
         for line, band in zip(row.lines, bands):
             if 0 <= band < count:
                 per_band[band].extend(line.atoms)
-    return ["\n".join(line.text for line in build_lines(atoms, rtl=rtl).lines) if atoms else "" for atoms in per_band]
+    return [ledger.text(atoms, rtl) if atoms else "" for atoms in per_band]

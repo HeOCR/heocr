@@ -30,7 +30,7 @@ from heocr.ocr.regions import (  # noqa: F401  (re-exported for callers of the P
     short_for_ink,
 )
 from heocr.pdf.classify import FIGURE_IMAGE, classify, object_stats, stream_signals, text_signals
-from heocr.pdf.lines import Atom, PageLines, build_lines, paragraphs
+from heocr.pdf.lines import Atom, PageLines, build_lines, line_is_rtl, paragraphs
 from heocr.pdf.columns import UNRESOLVED, Segment, arrange
 from heocr.pdf.ocrtables import cell_crop, cell_has_ink, cell_psm, tables_in
 from heocr.pdf.tables import find_tables, rulings, table_blocks
@@ -268,11 +268,7 @@ def read_t1(doc: Document, page_index: int, built: PageLines) -> int:
                     line.flags.append("bullet_symbol_mapped")
             lines.append(Line(text, line.bbox, line.direction))
         flags = sorted({flag for line in group for flag in line.flags})
-        block_repairs = repairs.record(repairs.SYMBOL_FONT_BULLET, bullets)
-        if eths:
-            block_repairs += repairs.record(repairs.LATIN1_ETH_NUN, Counter({("U+00F0", "נ"): eths}))
-        if by_ocr:
-            block_repairs += repairs.record(repairs.FONT_PRIVATE_USE_BY_OCR, by_ocr)
+        block_repairs = _logged(bullets, eths, by_ocr)
         bbox = [
             min(line.bbox[0] for line in group),
             min(line.bbox[1] for line in group),
@@ -296,6 +292,26 @@ def read_t1(doc: Document, page_index: int, built: PageLines) -> int:
             )
         )
     return read
+
+
+def _logged(bullets: Counter, eths: int, by_ocr: Counter) -> list[dict]:
+    """The repair log of a block read from the layer: bullets, ð per font, codes learned by OCR."""
+    out = repairs.record(repairs.SYMBOL_FONT_BULLET, bullets)
+    if eths:
+        out += repairs.record(repairs.LATIN1_ETH_NUN, Counter({("U+00F0", "נ"): eths}))
+    if by_ocr:
+        out += repairs.record(repairs.FONT_PRIVATE_USE_BY_OCR, by_ocr)
+    return out
+
+
+def _log_cell_repairs(doc: Document, table: Block) -> None:
+    """A table logs the repairs made in its cells, as a paragraph logs its own."""
+    ledger = table._cell_repairs
+    if ledger is None:
+        return
+    by_ocr = Counter({(f"U+{ord(doc._font_codes[(font, letter)]):04X}", letter): n for (font, letter), n in ledger.pua.items()})
+    table.repairs += _logged(ledger.bullets, ledger.eth, by_ocr)
+    table._cell_repairs = None
 
 
 def read_pdf(body: bytes, doc: Document) -> None:
@@ -474,6 +490,26 @@ def _repair_rtl_brackets(doc: Document) -> None:
     lines = [line.text for b in blocks for line in b.lines if line.direction == "rtl"]
     if not repairs.brackets_mirrored_in(lines):
         return
+    # Table cells read from the layer follow the same document decision, cell by cell (D3).
+    for table in (b for b in doc.blocks if b.kind == "table" and b.source == "text_layer" and b.direction == "rtl"):
+        changes: Counter = Counter()
+        for row in table.cells or []:
+            for cell in row:
+                flat = cell.text.replace("\n", " ")
+                if not any(ch in flat for ch in "()[]{}"):
+                    continue
+                if repairs.bracket_order_valid(flat) and not repairs.bracket_order_valid(flat.translate(repairs.MIRROR)):
+                    continue  # the cell's own evidence wins, as for a paragraph
+                parts = []
+                for part in cell.text.split("\n"):
+                    if line_is_rtl(part, True):
+                        part, changed = repairs.rtl_bracket_order(part)
+                        changes.update(changed)
+                    parts.append(part)
+                cell.text = "\n".join(parts)
+        if changes:
+            table.repairs += repairs.record(repairs.RTL_BRACKET_ORDER, changes)
+            table.flags.append("brackets_mirrored")
     for block in blocks:
         flat = block.text.replace("\n", " ")
         if repairs.bracket_order_valid(flat) and not repairs.bracket_order_valid(flat.translate(repairs.MIRROR)):
@@ -555,12 +591,13 @@ def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = froz
     # Ruled tables first: their characters go to cells, the rest to lines (D3b).
     tables = find_tables(*rulings(page)) if stats.paths else []
     table_flags = sorted({f for t in tables if not t.rows for f in t.flags if f == "table_grid_unresolved"})
-    t_blocks, body_atoms, in_tables, rejected, grids = table_blocks(index, text.atoms, tables, doc._rtl)
+    repairs_on = doc.options.get("repairs", True)
+    t_blocks, body_atoms, in_tables, rejected, grids = table_blocks(index, text.atoms, tables, doc._rtl, repairs_on)
     if rejected:
         table_flags.append("table_rejected_crosses_text")
     # Side-by-side rows: rows of a ruled table, unruled tables, column flows (D3c).
     if t_blocks or built.has_columns:
-        segments, t_blocks, moved = arrange(body_atoms, doc._rtl, index, list(zip(t_blocks, grids)))
+        segments, t_blocks, moved = arrange(body_atoms, doc._rtl, index, list(zip(t_blocks, grids)), repairs_on)
         in_tables += moved
     else:
         segments = [Segment("lines", body_atoms)]
@@ -572,6 +609,7 @@ def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = froz
     unruled = False
     for segment in segments:
         if segment.kind == "table":
+            _log_cell_repairs(doc, segment.block)
             doc.blocks.append(segment.block)
             in_tables += segment.chars
             unruled = True
@@ -587,6 +625,8 @@ def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = froz
             selection_safe = selection_safe and lines_built.selection_safe and segment.kind == "lines"
         if segment.kind == "flow" and "reading_order_column_major_unverified" not in body_flags:
             body_flags.append("reading_order_column_major_unverified")
+    for table in t_blocks:
+        _log_cell_repairs(doc, table)
     _place_tables(doc, first, t_blocks)
     read = in_lines + in_tables
     # Silent loss check: every layer character ends up in a cell or in a line, never in neither.

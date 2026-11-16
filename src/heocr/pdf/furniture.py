@@ -76,13 +76,19 @@ def mark_furniture(doc: Document) -> int:
             blocks.append(block)
             continue
         body = [line for i, line in enumerate(block.lines) if i not in marks]
+        parts = []
         for role in ("header", "footer"):
             lines = [line for i, line in enumerate(block.lines) if marks.get(i) == role]
             if lines:
                 moved += len(lines)
-                blocks.append(_sub_block(block, lines, role))
+                parts.append(_sub_block(block, lines, role))
         if body:
-            blocks.append(_sub_block(block, body, "body"))
+            parts.append(_sub_block(block, body, "body"))
+        # The block's repair log is kept whole, on its body part, or on its only part: lines do
+        # not carry their own repairs, and a log split by guess would be wrong.
+        keeper = parts[-1] if body else parts[0]
+        keeper.repairs = list(block.repairs)
+        blocks.extend(parts)
     doc.blocks[:] = _ordered(blocks)
     _clear_furniture_columns(doc)
     return moved
@@ -101,7 +107,6 @@ def _sub_block(block: Block, lines, role: str) -> Block:
         bbox=bbox,
         direction=block.direction,
         lines=list(lines),
-        repairs=list(block.repairs) if role == "body" else [],
         flags=flags,
     )
 

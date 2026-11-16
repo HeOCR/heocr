@@ -29,8 +29,10 @@ cell shifts column.
 from __future__ import annotations
 
 import ctypes
+from collections import Counter
 from dataclasses import dataclass, field
 
+from heocr import repairs
 from heocr.contract import Block, Cell
 from heocr.pdf.lines import Atom, build_lines
 
@@ -59,6 +61,36 @@ class Table:
     rows: list[list[dict]]  # per row, cells: {"box": [...], "colspan", "rowspan", "placeholder"}
     flags: list[str] = field(default_factory=list)
     xs: list[float] = field(default_factory=list)  # the grid's column positions, left to right
+
+
+@dataclass
+class CellRepairs:
+    """Repairs made in one table's cells, logged on the table block by the reader.
+
+    A cell's text gets the same line repairs as a paragraph read from the layer (the
+    symbol-font bullet), and its characters' own repairs (ð per font, private-use codes learned
+    by OCR) are counted, so a table logs what a paragraph would have.
+    """
+
+    on: bool = True
+    bullets: Counter = field(default_factory=Counter)
+    eth: int = 0
+    pua: Counter = field(default_factory=Counter)  # (font, letter)
+
+    def text(self, atoms: list[Atom], rtl: bool) -> str:
+        texts = []
+        for line in build_lines(atoms, rtl=rtl).lines:
+            text = line.text
+            if self.on:
+                text, changes = repairs.symbol_font_bullet(text)
+                self.bullets.update(changes)
+            texts.append(text)
+        for atom in atoms:
+            if atom.repaired == repairs.LATIN1_ETH_NUN.rule_id:
+                self.eth += 1
+            elif atom.repaired == repairs.FONT_PRIVATE_USE_BY_OCR.rule_id:
+                self.pua[(atom.font, atom.text)] += 1
+        return "\n".join(texts)
 
 
 def rulings(page) -> tuple[list[Rule], list[Rule]]:
@@ -278,7 +310,7 @@ def _rows_independent(hs: list[Rule], vs: list[Rule], xs: list[float], ys: list[
     return Table([left, ys[0], right, ys[-1]], rows, ["table_rows_independent"], list(xs))
 
 
-def table_blocks(page_index: int, atoms: list[Atom], tables: list[Table], rtl: bool) -> tuple[list[Block], list[Atom], int, int, list[list[float]]]:
+def table_blocks(page_index: int, atoms: list[Atom], tables: list[Table], rtl: bool, repairs_on: bool = True) -> tuple[list[Block], list[Atom], int, int, list[list[float]]]:
     """(table blocks, the atoms left for lines, characters placed in cells, grids rejected, each block's column positions)."""
     remaining = list(atoms)
     blocks: list[Block] = []
@@ -297,6 +329,7 @@ def table_blocks(page_index: int, atoms: list[Atom], tables: list[Table], rtl: b
             rejected.append(table)
             continue
         taken: set[int] = set()
+        ledger = CellRepairs(repairs_on)
         cells_out: list[list[Cell]] = []
         for row in table.rows:
             ordered = sorted(row, key=lambda cell: -cell["col"] if rtl else cell["col"])
@@ -307,7 +340,7 @@ def table_blocks(page_index: int, atoms: list[Atom], tables: list[Table], rtl: b
                     continue
                 mine = [a for a in inside if id(a) not in taken and _within(a, cell["box"], INSIDE)]
                 taken.update(id(a) for a in mine)
-                text = "\n".join(line.text for line in build_lines(mine, rtl=rtl).lines)
+                text = ledger.text(mine, rtl)
                 placed += sum(1 for a in mine if not a.is_space)
                 narrow = cell["box"][2] - cell["box"][0] < NARROW_CELL and cell["rowspan"] == 1 and not mine
                 if narrow and out_row and "merged_above" not in out_row[-1].flags:
@@ -334,6 +367,7 @@ def table_blocks(page_index: int, atoms: list[Atom], tables: list[Table], rtl: b
                 tool=TOOL,
                 direction="rtl" if rtl else "ltr",
                 flags=["ruled_table", *table.flags],
+                _cell_repairs=ledger,
             )
         )
         grids.append(list(table.xs))
