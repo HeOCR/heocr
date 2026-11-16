@@ -38,6 +38,9 @@ def _parser() -> argparse.ArgumentParser:
         default="suspect",
         help="read numbers a second time by OCR: suspect digit groups only (default), also every table cell, all amounts and dates, or off",
     )
+    parser.add_argument("--no-convert", action="store_true", help="do not convert DOC, RTF or ODT with LibreOffice; they are reported unread")
+    parser.add_argument("--soffice", help="the LibreOffice program (soffice), when it is not on the PATH")
+    parser.add_argument("--convert-timeout", type=float, metavar="SECONDS", help="time limit for one LibreOffice conversion (default: 180)")
     parser.add_argument("--ocr-lang", default="heb", help="Tesseract language list (default: heb; e.g. heb+eng)")
     parser.add_argument("--psm", type=int, default=3, help="Tesseract page segmentation mode (default: 3)")
     parser.add_argument("--tesseract", help="the tesseract program, when it is not on the PATH")
@@ -81,6 +84,9 @@ def main(argv: list[str] | None = None) -> int:
             tesseract=args.tesseract,
             ocr_model=args.ocr_model,
             check_numbers=False if args.check_numbers == "off" else args.check_numbers,
+            convert=not args.no_convert,
+            soffice=args.soffice,
+            convert_timeout=args.convert_timeout,
         )
     except (OSError, ValueError) as exc:
         print(f"heocr: {exc}", file=sys.stderr)
