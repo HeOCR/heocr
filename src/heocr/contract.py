@@ -215,6 +215,7 @@ class Document:
     _number_error: str | None = field(default=None, repr=False, compare=False)
     _font_codes: dict = field(default_factory=dict, repr=False, compare=False)  # (font, letter) -> code
     _shifted_fonts: dict = field(default_factory=dict, repr=False, compare=False)  # font -> "latin1" | "pua" (cp1255_shifted_font)
+    _regions_read: dict = field(default_factory=dict, repr=False, compare=False)  # image digest -> its first region OCR (repeated images)
     _rtl: bool = field(default=True, repr=False, compare=False)  # the document's direction (PDF tables)
     # font_private_use_by_ocr: the maps learned for this document, with their evidence (no text).
     font_maps: list[dict[str, Any]] = field(default_factory=list)

@@ -108,6 +108,14 @@ Each limit, when reached, gives an `unread` entry or a flag:
 - **cell spans:** 1,000;
 - **renders for OCR:** 300 dpi, capped at 40M pixels.
 
+What is not detected:
+
+- **A partial OCR layer:** a scanned page under someone else's OCR layer that heocr keeps is flagged `ocr_short_for_ink` when at least 10% of the scan's ink lies away from the layer's lines and rulings. A line or two missing from a full page's layer stays under that, and is not detected.
+
+Read once:
+
+- **A repeated image:** an image drawn again in the same document (a letterhead, a logo, a stamp) is read by region OCR where it first appears. Each later page gets a copy of that reading in its own box, flagged `repeated_image_text` and pointing to the first page (`checks.repeated_image`), with no OCR: every page keeps its text, as running headers do. A first reading that was empty or unsure repeats as counts (`image_regions_repeated`), not as new `unread` entries.
+
 ## Optional tools
 
 The core runs without them. Without them, the parts that need them are reported in `unread`, never guessed.

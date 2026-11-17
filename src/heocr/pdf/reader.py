@@ -7,6 +7,7 @@ and that is the step this package owns.
 
 from __future__ import annotations
 
+import copy
 import ctypes
 from collections import Counter
 import math
@@ -912,7 +913,7 @@ def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = froz
     # region OCR; otherwise they are logos and icons, counted in coverage.
     ocr_wanted = stats.image_coverage >= FIGURE_IMAGE
     regions = _ocr_regions(doc, index, page, width, height, stats.image_boxes, text.drawn_boxes, ocr_wanted,
-                           layer_is_ocr="text_layer_is_ocr" in flags)
+                           layer_is_ocr="text_layer_is_ocr" in flags, digests=stats.image_digests)
     if regions.pop("layer_scan_short_for_ink", 0):
         flags = flags + ["ocr_short_for_ink"]
     status = "read" if read >= text.chars_total and not regions["image_regions_unread"] else "partial"
@@ -1441,9 +1442,35 @@ def _layer_line_boxes(boxes) -> list[list[float]]:
     return lines
 
 
+def _repeat_region(doc: Document, index: int, box, record: dict, digest: str) -> int:
+    """Copies of a repeated image's first reading, placed in this occurrence's box (``box``), flagged
+    ``repeated_image_text`` and pointing to the first one. Returns the characters emitted."""
+    fx0, fy0, fx1, fy1 = record["box"]
+    sx = (box[2] - box[0]) / max(fx1 - fx0, 1e-6)
+    sy = (box[3] - box[1]) / max(fy1 - fy0, 1e-6)
+
+    def moved(b):
+        return [box[0] + (b[0] - fx0) * sx, box[1] + (b[1] - fy0) * sy, box[0] + (b[2] - fx0) * sx, box[1] + (b[3] - fy0) * sy]
+
+    chars = 0
+    for original in record["blocks"]:
+        block = copy.deepcopy(original)
+        block.page = index
+        if block.bbox:
+            block.bbox = moved(block.bbox)
+        for line in block.lines or []:
+            line.bbox = moved(line.bbox)
+        block.flags = [f for f in block.flags if f != "repeated_image_text"] + ["repeated_image_text"]
+        block.checks = {**(block.checks or {}), "repeated_image": {"first_page": record["page"], "image": digest}}
+        chars += sum(1 for ch in block.text if not ch.isspace())
+        doc.blocks.append(block)
+    return chars
+
+
 def _ocr_regions(
     doc: Document, index: int, page, width: float, height: float, boxes: list[list[float]], drawn_boxes, ocr_wanted: bool = True,
     layer_is_ocr: bool = False,
+    digests: list[str] | None = None,
 ) -> dict:
     """Region OCR for the image regions of a page read from its text layer. Returns coverage counts.
 
@@ -1466,6 +1493,7 @@ def _ocr_regions(
     }
     if not boxes:
         return counts
+    digest_of = {id(b): d for b, d in zip(boxes, digests or [])}
     large = [b for b in boxes if ocr_wanted and (b[2] - b[0]) * (b[3] - b[1]) >= REGION_MIN_PAGE_SHARE * width * height]
     counts["image_regions_small"] = len(boxes) - len(large)
     if layer_is_ocr:
@@ -1494,6 +1522,21 @@ def _ocr_regions(
                 counts["layer_scan_short_for_ink"] = 1
                 doc.unread.append(Unread(scope="page", reason="ocr_short_for_ink", page=index, bbox=scans[0],
                                          detail=f"{share:.0%} of the scan's ink lies outside every layer character"))
+    # The same image drawn again in the document (a letterhead, a logo, a stamp on every page) is read
+    # once, where it first appears. Each later occurrence gets a copy of that reading, placed in its own
+    # box and flagged repeated_image_text, with no OCR: every page keeps its text, as running headers do.
+    # A first reading that was empty or unsure repeats as counts, never as new unread entries.
+    repeated = [b for b in large if digest_of.get(id(b)) and digest_of[id(b)] in doc._regions_read]
+    if repeated:
+        counts["image_regions_repeated"] = len(repeated)
+        counts["image_regions_no_ocr_needed"] += len(repeated)
+        for box in repeated:
+            copied = _repeat_region(doc, index, box, doc._regions_read[digest_of[id(box)]], digest_of[id(box)])
+            counts["chars_repeated_image"] = counts.get("chars_repeated_image", 0) + copied
+        large = [b for b in large if not any(b is r for r in repeated)]
+    for box in large:
+        if digest_of.get(id(box)):
+            doc._regions_read.setdefault(digest_of[id(box)], {"page": index, "box": box, "blocks": []})
     if not large:
         return counts
 
@@ -1508,11 +1551,12 @@ def _ocr_regions(
             unread("image_region_not_read", box, reason)
         return counts
     image, scale = _render(page, frame_of(page))
-    for box in large:
+
+    def read_region(box) -> None:
         crop = [int(box[0] * scale), int(box[1] * scale), int(box[2] * scale + 0.999), int(box[3] * scale + 0.999)]
         if crop[2] - crop[0] < MIN_REGION_PX or crop[3] - crop[1] < MIN_REGION_PX:
             unread("image_region_too_small", box)
-            continue
+            return
         inside = [b for b in drawn_boxes if b[0] < box[2] and b[2] > box[0] and b[1] < box[3] and b[3] > box[1]]
         region, masked = mask_layer_text(image.crop(crop), (crop[0] / scale, crop[1] / scale), scale, inside)
         if not has_ink(region):
@@ -1520,7 +1564,7 @@ def _ocr_regions(
             reason = "image_region_text_in_layer" if masked else "image_region_blank"
             doc.unread.append(Unread(scope="page", reason=reason, page=index, bbox=box, detail=f"{masked} layer characters masked"))
             counts["image_regions_no_ocr_needed"] += 1
-            continue
+            return
         offset = (crop[0] / scale, crop[1] / scale)
         tables, in_cells = _region_tables(doc, index, engine, region, scale, offset)
         if tables:
@@ -1531,23 +1575,23 @@ def _ocr_regions(
             region = _without(region, scale, [[b.bbox[0] - offset[0], b.bbox[1] - offset[1], b.bbox[2] - offset[0], b.bbox[3] - offset[1]] for b in tables])
             if not has_ink(region):
                 counts["image_regions_ocr"] += 1
-                continue
+                return
         try:
             result = engine.recognize(region, dpi=round(scale * 72))
         except OcrUnavailable as exc:
             unread("ocr_failed", box, str(exc))
-            continue
+            return
         if not result.lines:
             if tables:
                 counts["image_regions_ocr"] += 1  # its tables were read; the rest held no text
-                continue
+                return
             unread("image_region_no_text_found", box)
-            continue
+            return
         confidence = result.mean_confidence
         if confidence is not None and confidence < REGION_MIN_CONFIDENCE:
             # Logos and drawings yield stray marks at low confidence; they are reported, not emitted.
             unread("image_region_ocr_low_confidence", box, f"mean confidence {confidence}")
-            continue
+            return
         # Region text follows the page's text-layer blocks; its place in the reading order is not resolved.
         flags = ("from_image_region", "reading_order_region_appended") + (("layer_text_masked",) if masked else ())
         short, share = short_for_ink(region, result)
@@ -1573,6 +1617,13 @@ def _ocr_regions(
                        detail=f"{paragraphs - (len(doc.blocks) - first)} of {paragraphs} paragraphs below confidence {REGION_MIN_CONFIDENCE:g}")
             )
         counts["image_regions_ocr"] += 1
+
+    for box in large:
+        mark = len(doc.blocks)
+        read_region(box)
+        record = doc._regions_read.get(digest_of.get(id(box), ""))
+        if record is not None and record["box"] is box:
+            record["blocks"] = [copy.deepcopy(b) for b in doc.blocks[mark:]]
     return counts
 
 
