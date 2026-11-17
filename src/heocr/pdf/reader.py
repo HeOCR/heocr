@@ -408,7 +408,7 @@ def _learn_font_maps(doc: Document, pdf) -> dict[str, dict[str, str]]:
     def render(index: int):
         page = pdf[index]
         try:
-            return _render(page)
+            return _render(page, layer_frame=True)
         finally:
             page.close()
 
@@ -460,7 +460,7 @@ def _check_numbers(doc: Document, pdf, scope: str = "suspect") -> None:
     for index, items in sorted(candidates.items()):
         page = pdf[index]
         try:
-            image, scale = _render(page)
+            image, scale = _render(page, layer_frame=True)
         finally:
             page.close()
         for block, cell, line in items:
@@ -614,6 +614,12 @@ def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = froz
     if needs_ocr:
         _ocr_page(doc, index, page, width, height, page_class, signals, text, flags)
         return
+    # From here the page is read from its text layer, whose positions are in the unrotated visible
+    # box: the page's size is that box's, so its blocks' boxes and its size share one frame.
+    from heocr.pdf.frame import frame_of
+
+    layer = frame_of(page)
+    width, height = layer.width, layer.height
     if page_class not in READ_CLASSES:
         doc.pages.append(
             Page(
@@ -803,16 +809,24 @@ def _place_tables(doc: Document, first: int, tables: list[Block]) -> None:
         doc.blocks.insert(at, table)
 
 
-def _render(page) -> tuple[object, float]:
+def _render(page, layer_frame: bool = False) -> tuple[object, float]:
     """The page as a PIL image at RENDER_DPI, or lower when that would pass MAX_RENDER_PIXELS.
 
     Returns the image and the scale used (pixels per point). A huge or hostile page size
     cannot allocate billions of pixels.
+
+    ``layer_frame`` renders the page **unrotated**, in the frame its text layer is read in (the
+    visible box, ignoring ``/Rotate``): region crops, masks of layer characters and number and
+    font checks place layer boxes on it. Without it, the page is rendered as displayed, the frame
+    of a page read wholly by OCR.
     """
     width, height = page.get_size()
     scale = RENDER_DPI / 72
     if width * height * scale * scale > MAX_RENDER_PIXELS:
         scale = (MAX_RENDER_PIXELS / (width * height)) ** 0.5
+    rotation = (360 - page.get_rotation()) % 360 if layer_frame else 0
+    if rotation:
+        return page.render(scale=scale, rotation=rotation).to_pil(), scale
     return page.render(scale=scale).to_pil(), scale
 
 
@@ -1085,7 +1099,7 @@ def _ocr_regions(
         for box in large:
             unread("image_region_not_read", box, reason)
         return counts
-    image, scale = _render(page)
+    image, scale = _render(page, layer_frame=True)
     for box in large:
         crop = [int(box[0] * scale), int(box[1] * scale), int(box[2] * scale + 0.999), int(box[3] * scale + 0.999)]
         if crop[2] - crop[0] < MIN_REGION_PX or crop[3] - crop[1] < MIN_REGION_PX:

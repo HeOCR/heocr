@@ -88,3 +88,9 @@ Dev split, 30 PDFs (2,242 pages), aggregate counts only, end of D2 → end of D3
 - **Open, carried past D4:**
   - the remaining unresolved-columns pages;
   - tables in image regions on text-layer pages (27 grids in 19 regions on dev).
+
+**After D4 (2026-11-18):**
+
+- **Unresolved-columns pages:** 340 → 157 (#45) → 138 (#46) → 134 (#47). #45 narrowed the neighbour guard; #46 kept text in columns flagged and made unruled-table pages never selection-safe; #47 sent text outside the visible box to unread.
+- **T6 (#48), ruled tables inside image regions on text-layer pages:** dev has 22 candidate grids, and all 3 real tables among them are kept. A first, looser guard (any text in most inked cells) kept 14 grids, 11 of them chart frames, chart panels or pictures. That is why the guard asks for records: at least two rows with two cells of text each, and few solid cells.
+- **Cost, for D5's timing:** every candidate grid is OCR'd cell by cell before the records check. If T6 time shows up, a cheap pre-check (the two widest rows, or text-like cells by ink) can come first.

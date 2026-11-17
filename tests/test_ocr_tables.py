@@ -188,6 +188,25 @@ class OcrTableTest(unittest.TestCase):
         self.assertEqual(page.coverage["image_region_tables"], 1)
         self.assertIn("המציע יגיש", doc.text)  # the layer text is read as before
 
+    def test_a_table_in_an_image_region_reads_the_same_on_a_rotated_page(self) -> None:
+        # /Rotate turns the shown page; the layer and the region are read in the unrotated frame,
+        # so the table is the same table at every rotation (on main: none at 90, transposed at 270).
+        from tests.synth.pdf import TextLine, lines_block
+
+        def text_cells(draw, x0, y0, x1, y1, r, c):
+            draw.rectangle([x0 + px(30), y0 + px(15), x0 + px(100), y0 + px(30)], fill=LEVELS[r][2 - c])
+
+        image = self.region_image(text_cells)
+        expected = [[TEXTS[g] for g in row] for row in LEVELS]
+        for rotate in (0, 90, 180, 270):
+            with self.subTest(rotate=rotate):
+                text = lines_block(["המציע יגיש את הצעתו עד המועד הקבוע", "במסמכי המכרז ולא יאוחר מן המועד"], top=800)
+                body = make_pdf([PdfPage(lines=text + [TextLine("סוף העמוד", 545, 60)], rasters=[(50, 150, 495, 560, image)], rotate=rotate)])
+                doc = heocr.extract(body, tesseract=FAKE)
+                (table,) = [b for b in doc.blocks if b.kind == "table"]
+                self.assertEqual([[c.text for c in row] for row in table.cells], expected)
+                self.assertAlmostEqual(table.bbox[0], 50 + 20, delta=2)
+
     def test_a_chart_with_gridlines_is_not_a_table(self) -> None:
         def bars(draw, x0, y0, x1, y1, r, c):
             draw.rectangle([x0 + px(10), y0 + px(10), x1 - px(10), y1 - px(5)], fill=85)  # bars: a grey the fake reads as no text
