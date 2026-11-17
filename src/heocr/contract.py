@@ -28,6 +28,18 @@ UNREAD_SCOPES = ("document", "page", "block")
 LOCAL_PATH = re.compile(r"(\A(/|~/|[A-Za-z]:[\\/]|\\\\|file:))|(/(Users|home|tmp|private|var)/)")
 
 
+def json_schema() -> dict[str, Any]:
+    """``heocr_document.v1`` as a JSON Schema (draft 2020-12), shipped with the package.
+
+    It describes every field a record may carry; objects are open, as a later v1 may add fields
+    (docs/contract-v1.md). Rules that need the whole record, such as a page's index being its
+    position, are checked by :func:`validate`, which a record passes before it is returned.
+    """
+    from importlib.resources import files
+
+    return json.loads(files("heocr").joinpath("schemas", "heocr_document.v1.schema.json").read_text(encoding="utf-8"))
+
+
 class ContractError(ValueError):
     """A record does not satisfy ``heocr_document.v1``."""
 
