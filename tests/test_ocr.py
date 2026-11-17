@@ -213,22 +213,29 @@ class OcrRouteTest(unittest.TestCase):
         self.assertIn("ocr_layer_unchecked", page.flags)
         self.assertIn(HEBREW[1], doc.text)
 
-    def test_an_image_repeated_on_every_page_is_read_once(self) -> None:
+    def test_a_letterhead_on_every_page_is_read_once_and_kept_on_every_page(self) -> None:
         # Word PDFs on dev: a letterhead or logo drawn on every page went to region OCR on each one
-        # (72% of region blocks repeated text read on another page), flagging every page.
+        # (72% of region blocks repeated text read on another page), flagging every page. It is read
+        # once; every page keeps its text, as running headers do, with no silent loss by construction.
         page = PdfPage(lines=lines_block(HEBREW), images=[(50, 100, 495, 300)])
-        doc = heocr.extract(make_pdf([page, page, page]), tesseract=FAKE)
+        moved = PdfPage(lines=lines_block(HEBREW), images=[(60, 140, 495, 300)])  # drawn 40 points higher on page 3
+        doc = heocr.extract(make_pdf([page, page, moved]), tesseract=FAKE)
         region_calls = [c for c in self.calls() if "--psm" in c and c[c.index("--psm") + 1] == "3"]
-        self.assertEqual(len(region_calls), 1)
-        first, *later = doc.pages
-        self.assertEqual(first.coverage["image_regions_ocr"], 1)
-        for record in later:
-            self.assertEqual((record.coverage["image_regions_repeated"], record.coverage["image_regions_no_ocr_needed"]), (1, 1))
-            self.assertEqual([u for u in doc.unread if u.page == record.index], [])
+        self.assertEqual(len(region_calls), 1)  # OCR runs once
+        by_page = {n: [b for b in doc.blocks if b.source == "ocr" and b.page == n] for n in range(3)}
+        self.assertTrue(by_page[0] and all(by_page[n] for n in (1, 2)))
+        for n in (1, 2):  # the same reading, kind and role, flagged and pointing to page 0
+            self.assertEqual([(b.text, b.kind, b.role) for b in by_page[n]], [(b.text, b.kind, b.role) for b in by_page[0]])
+            self.assertTrue(all("repeated_image_text" in b.flags and b.checks["repeated_image"]["first_page"] == 0 for b in by_page[n]))
+            self.assertEqual(doc.pages[n].coverage["image_regions_repeated"], 1)
+            self.assertEqual([u for u in doc.unread if u.page == n and u.reason.startswith("image_region")], [])
+        self.assertFalse(any("repeated_image_text" in b.flags for b in by_page[0]))
+        # each copy sits in its own occurrence's box: page 3's image is 40 points higher
+        self.assertAlmostEqual(by_page[2][0].bbox[1] - by_page[0][0].bbox[1], -40.0, delta=0.5)
         for record in doc.pages:  # every region lands in exactly one count
             c = record.coverage
             self.assertEqual(c["image_regions"], c["image_regions_ocr"] + c["image_regions_small"] + c["image_regions_unread"] + c["image_regions_no_ocr_needed"])
-        self.assertEqual(len([b for b in doc.blocks if b.source == "ocr"]), len([b for b in doc.blocks if b.source == "ocr" and b.page == 0]))
+        self.assertEqual(heocr.validate(doc.to_dict()), [])
 
     def test_different_images_are_each_read(self) -> None:
         from PIL import Image, ImageDraw

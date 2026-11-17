@@ -114,7 +114,7 @@ What is not detected:
 
 Read once:
 
-- **A repeated image:** an image drawn again in the same document (a letterhead, a logo, a stamp) is read by region OCR where it first appears. Later pages count it in `image_regions_repeated`, with no OCR and no `unread` entry.
+- **A repeated image:** an image drawn again in the same document (a letterhead, a logo, a stamp) is read by region OCR where it first appears. Each later page gets a copy of that reading in its own box, flagged `repeated_image_text` and pointing to the first page (`checks.repeated_image`), with no OCR: every page keeps its text, as running headers do. A first reading that was empty or unsure repeats as counts (`image_regions_repeated`), not as new `unread` entries.
 
 ## Optional tools
 
