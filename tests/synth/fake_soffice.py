@@ -1,7 +1,7 @@
 """A stand-in for LibreOffice's soffice, for offline tests of the converter (D4a).
 
-It answers --version. A conversion (--convert-to ... --outdir DIR INPUT) copies $FAKE_SOFFICE_DOCX
-to DIR/<input stem>.docx. Every call's arguments are appended to $FAKE_SOFFICE_LOG when it is set.
+It answers --version. A conversion (--convert-to EXT:filter --outdir DIR INPUT) copies
+$FAKE_SOFFICE_<EXT> ($FAKE_SOFFICE_DOCX, _XLSX, _PPTX) to DIR/<input stem>.<ext>. Every call's arguments are appended to $FAKE_SOFFICE_LOG when it is set.
 $FAKE_SOFFICE_HANG=1 starts a child that sleeps (its pid written to $FAKE_SOFFICE_PIDFILE) and then
 sleeps itself, as a stuck soffice and its soffice.bin would; $FAKE_SOFFICE_FAIL=1 fails without
 output; $FAKE_SOFFICE_GARBAGE=1 writes a file that is not a DOCX.
@@ -36,12 +36,13 @@ def main(argv: list[str]) -> int:
         return 1
     outdir = Path(argv[argv.index("--outdir") + 1])
     source = Path(argv[-1])
-    target = outdir / (source.stem + ".docx")
+    ext = argv[argv.index("--convert-to") + 1].split(":")[0]
+    target = outdir / (source.stem + "." + ext)
     if os.environ.get("FAKE_SOFFICE_GARBAGE") == "1":
-        target.write_bytes(b"not a docx at all")
+        target.write_bytes(b"not an office file at all")
         return 0
-    shutil.copyfile(os.environ["FAKE_SOFFICE_DOCX"], target)
-    print(f"convert {source} as a Writer document -> {target} using filter : MS Word 2007 XML")
+    shutil.copyfile(os.environ["FAKE_SOFFICE_" + ext.upper()], target)
+    print(f"convert {source} -> {target} using filter : {argv[argv.index('--convert-to') + 1]}")
     return 0
 
 

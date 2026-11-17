@@ -8,7 +8,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from heocr.contract import MAX_PAGES, Document, Unread
-from heocr.convert import CONVERT_TIMEOUT, TO_DOCX
+from heocr.convert import CONVERSIONS, CONVERT_TIMEOUT
 from heocr.identify import identify
 from heocr.ocr.tesseract import DEFAULT_LANG, DEFAULT_PSM, check_settings
 
@@ -21,7 +21,7 @@ Reader = Callable[[bytes, Document], None]
 
 def _readers() -> dict[str, Reader]:
     """Formats with a route, mapped to the reader that fills a Document in place."""
-    from heocr.convert import TO_DOCX, read_converted
+    from heocr.convert import CONVERSIONS, read_converted
     from heocr.docx.reader import read_docx
     from heocr.htmlread import read_html
     from heocr.images import read_image
@@ -29,7 +29,7 @@ def _readers() -> dict[str, Reader]:
     from heocr.pptx import read_pptx
     from heocr.xlsx import read_xlsx
 
-    return {"docx": read_docx, "pdf": read_pdf, "html": read_html, "xlsx": read_xlsx, "pptx": read_pptx, **{fmt: read_converted for fmt in TO_DOCX}, **{fmt: read_image for fmt in IMAGE_FORMATS}}
+    return {"docx": read_docx, "pdf": read_pdf, "html": read_html, "xlsx": read_xlsx, "pptx": read_pptx, **{fmt: read_converted for fmt in CONVERSIONS}, **{fmt: read_image for fmt in IMAGE_FORMATS}}
 
 
 def extract(
@@ -113,8 +113,8 @@ def extract(
     doc._max_pages = max_pages
     doc.options["max_pages"] = max_pages
     doc._ocr_settings = {"cmd": tesseract, "lang": ocr_lang, "psm": ocr_psm, "model": ocr_model} if ocr else None
-    if kind.format in TO_DOCX:
-        doc.options["convert"] = {"engine": "libreoffice", "to": "docx"} if convert else False
+    if kind.format in CONVERSIONS:
+        doc.options["convert"] = {"engine": "libreoffice", "to": CONVERSIONS[kind.format][1]} if convert else False
         doc._convert_settings = {"cmd": soffice, "timeout": convert_timeout or CONVERT_TIMEOUT} if convert else None
     reader = _readers().get(kind.format)
     if reader is None:
