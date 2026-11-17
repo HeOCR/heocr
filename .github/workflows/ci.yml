@@ -19,3 +19,30 @@ jobs:
       - run: python -m pip install .
       # Offline fixture tests only: no downloads, no services, no external programs.
       - run: python -m unittest discover -s tests -t .
+  package:
+    # D5a: the built package, not the source tree. Build the sdist and wheel, check their metadata,
+    # install each into a fresh venv, and run the CLI on the synthetic fixtures (no OCR, no LibreOffice).
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install build twine
+      - run: python -m build
+      - shell: bash
+        run: python -m twine check --strict dist/*
+      - name: Install the wheel, then the sdist, into fresh venvs and smoke-test each
+        shell: bash
+        run: |
+          for kind in whl tar.gz; do
+            rm -rf smoke
+            python -m venv smoke
+            if [ -d smoke/Scripts ]; then BIN=smoke/Scripts; else BIN=smoke/bin; fi
+            "$BIN/python" -m pip install --quiet dist/*.$kind
+            PATH="$PWD/$BIN:$PATH" "$BIN/python" scripts/package_smoke.py
+          done
