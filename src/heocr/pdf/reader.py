@@ -1152,9 +1152,9 @@ _LABEL_ONE_LEVEL = re.compile(r"^\d{1,2}\.?$")
 _LABEL_DEEPER = re.compile(r"^\d{1,2}(\.\d{1,2})+\.?$")
 
 
-def _number_reading(numbers, image, bbox, dpi: int) -> tuple[str, float] | None:
+def _number_reading(numbers, image, bbox, dpi: int, min_confidence: float = NUMBER_WORD_MIN_CONFIDENCE) -> tuple[str, float] | None:
     """The number model's reading of one word box and its confidence, when it is one number-shaped
-    word with confidence at least ``NUMBER_WORD_MIN_CONFIDENCE``; else None."""
+    word with confidence at least ``min_confidence``; else None."""
     x0, y0, x1, y1 = bbox
     crop = (max(0, int(x0) - NUMBER_WORD_PAD), max(0, int(y0) - NUMBER_WORD_PAD),
             min(image.size[0], int(x1) + NUMBER_WORD_PAD), min(image.size[1], int(y1) + NUMBER_WORD_PAD))
@@ -1162,7 +1162,7 @@ def _number_reading(numbers, image, bbox, dpi: int) -> tuple[str, float] | None:
         return None
     second = numbers.recognize(image.crop(crop), dpi=dpi, psm=NUMBER_WORD_PSM)
     words = [w for l in second.lines for w in l.words]
-    if len(words) != 1 or words[0].confidence < NUMBER_WORD_MIN_CONFIDENCE or not _NUMBER_WORD.match(words[0].text):
+    if len(words) != 1 or words[0].confidence < min_confidence or not _NUMBER_WORD.match(words[0].text):
         return None
     return words[0].text, words[0].confidence
 
@@ -1375,12 +1375,21 @@ def _reread_number_words(numbers, image, result, dpi: int) -> tuple[int, int]:
         for word in line.words:
             if id(word) in done or not any(ch.isdigit() for ch in word.text) or _HEBREW_LETTER.search(word.text):
                 continue
-            wider = False
+            wider = levels = False
+            at_start = word is max(line.words, key=lambda w: w.bbox[2])
+            label = at_start and bool(_LABEL_ONE_LEVEL.match(word.text)) and word.text.endswith(".")  # "4.", not a bare "4"
             try:
-                found = _number_reading(numbers, image, word.bbox, dpi)
+                found = _number_reading(numbers, image, word.bbox, dpi, min_confidence=0.0 if label else NUMBER_WORD_MIN_CONFIDENCE)
                 reread += 1
                 reading, confidence = found if found is not None else (None, None)
-                if reading is not None and _LABEL_ONE_LEVEL.match(reading) and word is max(line.words, key=lambda w: w.bbox[2]):
+                if reading is not None and confidence < NUMBER_WORD_MIN_CONFIDENCE:
+                    # heb cuts a deeper label at a line's (RTL) start to its last level ("2.2.4." as "4.");
+                    # the number model reads it whole, often with a low confidence on such short crops. Below
+                    # the floor its reading is kept only when it is a deeper label ending with heb's level.
+                    levels = bool(_LABEL_DEEPER.match(reading)) and reading.rstrip(".").endswith("." + word.text.rstrip("."))
+                    if not levels:
+                        reading = confidence = None
+                if reading is not None and _LABEL_ONE_LEVEL.match(reading) and at_start:
                     # A one-level label at a line's (RTL) start: heb's box often covers only the part of a
                     # deeper label it read ("1." of "1.1.1."). One more reading reaches into the blank
                     # beside it, up to the next word, and is used only when it is a deeper label.
@@ -1402,7 +1411,8 @@ def _reread_number_words(numbers, image, result, dpi: int) -> tuple[int, int]:
                 # Every replacement is logged with both readings (decision 0002), as a cell's are: a
                 # reviewer can audit it, a consumer can revert it.
                 line.number_readings.append({"first": word.text, "second": reading, "first_confidence": word.confidence,
-                                             "second_confidence": confidence, "model": numbers.lang, "wider": wider})
+                                             "second_confidence": confidence, "model": numbers.lang, "wider": wider,
+                                             **({"label_levels": True} if levels else {})})
                 word.text = reading
                 line.numbers_replaced += 1
                 replaced += 1

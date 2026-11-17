@@ -102,6 +102,23 @@ class NumberWordsTest(unittest.TestCase):
         [logged] = doc.blocks[0].checks["number_readings"]
         self.assertEqual((logged["first"], logged["second"], logged["wider"]), ("1.", "3.2.1.", True))
 
+    def test_a_cut_label_read_whole_with_low_confidence_is_used(self) -> None:
+        # set C pdf_t3_pua_font: heb reads "2.2.4." at a line's start as "4."; eng reads the same crop
+        # "2.2.4" but with confidence 8. A deeper label that ends with heb's level is used anyway.
+        doc = self.read(["4.", "דיווח", "עיתי"], "2.2.4", "8.0")
+        self.assertEqual(doc.blocks[0].text, "2.2.4. דיווח עיתי")
+        [logged] = doc.blocks[0].checks["number_readings"]
+        self.assertEqual((logged["first"], logged["second"], logged["label_levels"]), ("4.", "2.2.4.", True))
+        self.assertEqual(heocr.validate(doc.to_dict()), [])
+
+    def test_a_low_confidence_reading_is_used_only_as_the_same_label_deeper(self) -> None:
+        for words, second in ((["4.", "דיווח"], "2.2.5"), (["4.", "דיווח"], "12,000"), (["4.", "דיווח"], "4"),
+                              (["סעיף", "4."], "2.2.4"), (["4", "דיווח"], "2.4")):
+            with self.subTest(words=words, second=second):
+                doc = self.read(words, second, "8.0")
+                self.assertEqual(doc.blocks[0].text, " ".join(words))
+                self.assertIsNone(doc.blocks[0].checks)
+
     def test_a_wider_reading_that_is_not_the_same_label_deeper_is_not_used(self) -> None:
         state = str(Path(self.tmp.name) / "seq")
         for wider in ("3.2.4.", "12,000"):
