@@ -251,6 +251,36 @@ class OcrTableTest(unittest.TestCase):
         for got, want in zip(rows[0].bbox, [XS[0], YS[1], XS[-1], YS[2]]):
             self.assertAlmostEqual(got, want, delta=1.5)  # pixel rounding
 
+    def test_a_skewed_scan_is_deskewed_and_its_table_found(self) -> None:
+        # set C office_scan_heavy: at a degree or more of skew a ruling leaves its pixel row before it
+        # is long enough to count, and no table was found. The page is turned straight first.
+        from PIL import Image
+
+        skewed = scan(LEVELS).rotate(-2.5, resample=Image.NEAREST, fillcolor=255)
+        doc = heocr.extract(scanned_pdf(skewed), tesseract=FAKE)
+        page = doc.pages[0]
+        self.assertIn("deskewed", page.flags)
+        self.assertAlmostEqual(page.signals["deskew_degrees"], 2.5, delta=0.15)
+        (table,) = [b for b in doc.blocks if b.kind == "table"]
+        self.assertEqual([[c.text for c in row] for row in table.cells], [["שם", "תפקיד", "סכום"], ["ספק א", "מנהל", "100"], ["ספק ב", "עובד", "200"]])
+        # Its box is in the page's own coordinates: the skewed table's corners, enclosed.
+        self.assertLess(abs(table.bbox[0] - XS[0]), 15)
+        self.assertLess(abs(table.bbox[3] - YS[-1]), 15)
+        self.assertEqual(heocr.validate(doc.to_dict()), [])
+
+    def test_a_skew_at_the_edge_of_the_search_is_not_trusted(self) -> None:
+        from PIL import Image
+
+        from heocr.ocr.regions import SKEW_MAX_DEG, skew_angle
+
+        # Turned beyond the search range: the best angle sits on its edge, which says no peak was found.
+        self.assertEqual(skew_angle(scan(LEVELS).rotate(SKEW_MAX_DEG + 2, resample=Image.NEAREST, fillcolor=255)), 0.0)
+        self.assertAlmostEqual(skew_angle(scan(LEVELS).rotate(-1.5, resample=Image.NEAREST, fillcolor=255)), 1.5, delta=0.15)
+
+    def test_a_straight_scan_is_not_turned(self) -> None:
+        doc = heocr.extract(scanned_pdf(scan(LEVELS)), tesseract=FAKE)
+        self.assertNotIn("deskewed", doc.pages[0].flags)
+
     def test_a_scan_without_rulings_has_no_table(self) -> None:
         from PIL import Image
 
