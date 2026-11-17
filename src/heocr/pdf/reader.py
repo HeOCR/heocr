@@ -1169,22 +1169,40 @@ def _number_reading(numbers, image, bbox, dpi: int) -> tuple[str, float] | None:
 
 NUMBER_SEGMENT_MIN_CONFIDENCE = 50.0
 _SEGMENT_WORD = re.compile(r"^[^\u05d0-\u05ea₪A-Za-z]+$")  # no Hebrew or Latin letter, no ₪: digits, punctuation, stray marks
+_SEGMENT_DATE = re.compile(r"^\d{1,2}[./]\d{1,2}[./](?:\d{2}|\d{4})$")
+SEGMENT_MAX_LETTERS = 2  # a word with a digit and at most this many Hebrew letters is a misread number piece ("0ך", "2ךד")
+
+
+def _segment_piece(text: str) -> bool:
+    """Whether an OCR word can be part of a number segment: digits, punctuation and marks; a ₪ alone
+    (heb reads part of a date as one: "05.2024. ₪"); or a digit with at most SEGMENT_MAX_LETTERS Hebrew
+    letters, one of them a final form, a misread number ("0ך", "2ךד"). "2ב" and "ו-3" are real and
+    never are; nor are words of letters only ("של" in "בהיקף של 1,620")."""
+    if re.search(r"[A-Za-z]", text):
+        return False
+    if _SEGMENT_WORD.match(text) or text.strip("()") == "₪":
+        return True
+    letters = _HEBREW_LETTER.findall(text)
+    # A final form beside digits is no Hebrew: "2ב" (a sub-section) and "ו-3" are real, "0ך" is not.
+    return (len(letters) <= SEGMENT_MAX_LETTERS and any(ch in "ךםןףץ" for ch in letters)
+            and any(ch.isdigit() for ch in text) and "₪" not in text)
 _SEGMENT_TOKEN = re.compile(r"^(?:\d{1,2}[./]\d{1,2}[./](?:\d{2}|\d{4})|\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?%?|\d+(?:\.\d{1,2})?%?)$")
 
 
 def _reread_number_segments(numbers, image, line, dpi: int) -> tuple[int, int, set]:
     """A line's number segments read again by the number model as one line (``--psm 7``). A segment
-    is a stretch of consecutive words with no letter and no ₪ (digits, number punctuation, stray
-    marks), holding a digit: the numeric cells at a table row's end, or an amount in a sentence. heb
+    is a stretch of consecutive number pieces (``_segment_piece``: digits, number punctuation, stray
+    marks, a lone ₪, a digit misread with a final-form letter), holding a digit: the numeric cells at a table row's end, or an amount in a sentence. heb
     breaks dates there into word-sized pieces and marks ("01.12.2022" as "2022 >"), which neither a
-    word nor a run read alone can restore. The number model's tokens replace the segment's words only
-    when every token is a whole number shape (a date, a grouped amount, a plain number, optionally
-    with %), its mean confidence is at least ``NUMBER_SEGMENT_MIN_CONFIDENCE``, and no digit is lost.
-    Its tokens stay separate words, so numbers in neighbouring columns are never joined.
+    word nor a run read alone can restore. Each of heb's words goes to the number model's token over
+    it; a token replaces the words it covers only when it is a whole number shape (a date, a grouped
+    amount, a plain number, optionally with %), its confidence is at least
+    ``NUMBER_SEGMENT_MIN_CONFIDENCE`` and it keeps their digits. Other words stay as heb read them.
+    Tokens stay separate words, so numbers in neighbouring columns are never joined.
     Returns (segments read, segments replaced, ids of the words replaced)."""
     segments, current = [], []
     for word in line.words:
-        if _SEGMENT_WORD.match(word.text):
+        if _segment_piece(word.text):
             current.append(word)
         else:
             if current:
@@ -1206,26 +1224,45 @@ def _reread_number_segments(numbers, image, line, dpi: int) -> tuple[int, int, s
         result = numbers.recognize(image.crop(crop), dpi=dpi, psm=7)
         read += 1
         tokens = [w for l in result.lines for w in l.words if w.text.strip("|")]
-        if not tokens or not all(_SEGMENT_TOKEN.match(t.text) for t in tokens):
+        for t in tokens:  # into the line image's coordinates
+            t.bbox = [t.bbox[0] + crop[0], t.bbox[1] + crop[1], t.bbox[2] + crop[0], t.bbox[3] + crop[1]]
+        # Each of heb's words goes to the token over it (most overlap across); a token that is a whole
+        # number shape, confident, and keeps the digits of the words it covers replaces them. A token
+        # that is not (a mark, a misread digit at low confidence) leaves its words as heb read them.
+        cover: dict[int, list] = {}
+        for w in segment:
+            best = max(tokens, key=lambda t: min(w.bbox[2], t.bbox[2]) - max(w.bbox[0], t.bbox[0]), default=None)
+            if best is not None and min(w.bbox[2], best.bbox[2]) - max(w.bbox[0], best.bbox[0]) > 0:
+                cover.setdefault(id(best), []).append(w)
+        changes = []
+        for t in tokens:
+            covered = cover.get(id(t), [])
+            if not covered or not _SEGMENT_TOKEN.match(t.text) or t.confidence < NUMBER_SEGMENT_MIN_CONFIDENCE:
+                continue
+            if sum(ch.isdigit() for ch in t.text) < sum(ch.isdigit() for w in covered for ch in w.text):
+                continue
+            if any("₪" in w.text for w in covered) and not _SEGMENT_DATE.match(t.text):
+                continue  # only a date may take a ₪'s place: an amount keeps its currency
+            if [w.text for w in covered] == [t.text]:
+                done.update(id(w) for w in covered)
+                continue
+            changes.append((t, covered))
+        if not changes:
             continue
-        confidence = sum(t.confidence for t in tokens) / len(tokens)
-        if confidence < NUMBER_SEGMENT_MIN_CONFIDENCE or sum(ch.isdigit() for t in tokens for ch in t.text) < digits:
-            continue
-        # The number model reads left to right; the line's words are in heb's (right to left) order.
-        ordered = sorted(tokens, key=lambda t: -t.bbox[0]) if _rtl_order(line.words) else sorted(tokens, key=lambda t: t.bbox[0])
-        texts = [t.text for t in ordered]
-        if texts == [w.text for w in segment]:
-            done.update(id(w) for w in segment)
-            continue
-        line.number_readings.append({"first": " ".join(w.text for w in segment), "second": " ".join(texts),
-                                     "first_confidence": min(w.confidence for w in segment), "second_confidence": round(confidence, 2),
-                                     "model": numbers.lang, "wider": False, "segment": len(segment)})
-        new_words = [type(segment[0])(t.text, [t.bbox[0] + crop[0], t.bbox[1] + crop[1], t.bbox[2] + crop[0], t.bbox[3] + crop[1]], t.confidence)
-                     for t in ordered]
-        at = line.words.index(segment[0])
-        line.words[:] = [w for w in line.words if not any(w is x for x in segment)]
-        line.words[at:at] = new_words
-        done.update(id(w) for w in new_words)
+        first = " ".join(w.text for w in segment)
+        for t, covered in changes:
+            at = next((i for i, w in enumerate(line.words) if w is covered[0]), None)
+            if at is None:
+                continue
+            new_word = type(covered[0])(t.text, t.bbox, t.confidence)
+            line.words[:] = [w for w in line.words if not any(w is c for c in covered)]
+            line.words.insert(at, new_word)
+            done.add(id(new_word))
+        line.number_readings.append({"first": first, "second": " ".join(t.text for t, _ in changes),
+                                     "first_confidence": min(w.confidence for w in segment),
+                                     "second_confidence": round(sum(t.confidence for t, _ in changes) / len(changes), 2),
+                                     "model": numbers.lang, "wider": False, "segment": len(segment),
+                                     "replaced": [[" ".join(w.text for w in covered), t.text] for t, covered in changes]})
         line.numbers_replaced += 1
         replaced += 1
     if replaced:
