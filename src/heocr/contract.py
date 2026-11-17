@@ -142,6 +142,19 @@ class Page:
         }
 
 
+# A cell spans at most this many columns or rows. Larger declared spans (hostile or broken input)
+# are capped, and the cell is flagged span_capped; renderers clamp to it too.
+MAX_SPAN = 1000
+
+
+def cap_span(value: int, flags: list[str]) -> int:
+    """``value`` within 1..MAX_SPAN; a capped span flags the cell ``span_capped``."""
+    if value > MAX_SPAN:
+        flags.append("span_capped")
+        return MAX_SPAN
+    return max(value, 1)
+
+
 # Pages (PDF pages, image frames) read at most per document. Every page may cost an OCR run of
 # seconds, so a document of tens of thousands of pages, hostile or merely huge, would run for
 # hours. The rest are recorded as unread, in one entry, never dropped silently.

@@ -21,7 +21,7 @@ import defusedxml
 from defusedxml import ElementTree
 
 from heocr import repairs
-from heocr.contract import Block, Cell, Document, Unread
+from heocr.contract import Block, Cell, Document, Unread, cap_span
 from heocr.docx.numbering import W, Numbering
 from heocr.ocr import OcrUnavailable, block_ocr, engine_for, unavailable_reason
 from heocr.ocr.regions import MAX_RENDER_PIXELS, MIN_REGION_PX, REGION_MIN_CONFIDENCE, RENDER_DPI, has_ink, short_for_ink
@@ -503,7 +503,8 @@ class _Reader:
                     span = int(span_el.get(W + "val")) if span_el is not None and (span_el.get(W + "val") or "").isdigit() else 1
                     vmerge = tcpr.find(W + "vMerge") if tcpr is not None else None
                     text, cell_flags = self._cell_text(cell_el, table_repairs)
-                    cell = Cell(text=text, colspan=max(span, 1), flags=cell_flags)
+                    span = cap_span(span, cell_flags)
+                    cell = Cell(text=text, colspan=span, flags=cell_flags)
                     if vmerge is not None and vmerge.get(W + "val", "continue") == "continue" and column in open_merges:
                         open_merges[column].rowspan += 1
                         cell.flags.append("merged_above")

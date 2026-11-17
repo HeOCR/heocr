@@ -261,5 +261,16 @@ class DocxRobustnessTest(unittest.TestCase):
         self.assertEqual(doc.text, "שלום עולם\n")
 
 
+class SpanLimitTest(unittest.TestCase):
+    def test_a_huge_grid_span_is_capped(self) -> None:
+        from heocr.contract import MAX_SPAN
+
+        doc = heocr.extract(Docx(body=[table([[("רחב", {"span": 2000000000}), "א"], ["ב", "ג"]])]).build())
+        cell = doc.blocks[0].cells[0][0]
+        self.assertEqual(cell.colspan, MAX_SPAN)
+        self.assertIn("span_capped", cell.flags)
+        self.assertLess(len(doc.markdown), 20_000)
+
+
 if __name__ == "__main__":
     unittest.main()

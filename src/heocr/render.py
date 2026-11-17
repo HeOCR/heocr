@@ -9,6 +9,8 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
+from heocr.contract import MAX_SPAN
+
 if TYPE_CHECKING:  # pragma: no cover
     from heocr.contract import Block, Document
 
@@ -86,7 +88,7 @@ def _md_table(block: "Block") -> str:
         for cell in row:
             # Keep grid columns aligned: a spanned cell is followed by empty cells.
             out.append(_md_escape_cell(cell.text))
-            out.extend([""] * (cell.colspan - 1))
+            out.extend([""] * (min(max(cell.colspan, 1), MAX_SPAN) - 1))  # clamped: no reader's bug can blow up the view
         rows.append(out)
     if not rows:
         return ""

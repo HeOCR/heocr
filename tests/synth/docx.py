@@ -138,7 +138,7 @@ def table(rows: list[list[str | tuple[str, dict]]], *, bidi: bool = True, border
     """Rows of cells. A cell is text (``\\n`` starts a new paragraph) or (text, {"span": n, "vmerge": "restart"|"continue"})."""
     lines = "".join(f'<w:{side} w:val="single" w:sz="8" w:space="0" w:color="000000"/>' for side in ("top", "left", "bottom", "right", "insideH", "insideV"))
     tblpr = "<w:tblPr>" + ("<w:bidiVisual/>" if bidi else "") + (f"<w:tblBorders>{lines}</w:tblBorders>" if borders else "") + "</w:tblPr>"
-    columns = max((sum((c[1].get("span", 1) if not isinstance(c, str) else 1) for c in row) for row in rows), default=1)
+    columns = max((sum((min(c[1].get("span", 1), 64) if not isinstance(c, str) else 1) for c in row) for row in rows), default=1)  # a hostile span stays a short grid
     grid = "<w:tblGrid>" + '<w:gridCol w:w="2000"/>' * columns + "</w:tblGrid>"
     out = [f"<w:tbl>{tblpr}{grid}"]
     for row in rows:

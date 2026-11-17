@@ -41,7 +41,7 @@ from html.parser import HTMLParser
 from urllib.parse import unquote_to_bytes
 
 from heocr import repairs
-from heocr.contract import Block, Cell, Document, Unread
+from heocr.contract import Block, Cell, Document, Unread, cap_span
 from heocr.docx.numformat import hebrew_numeral, latin_letter, roman
 
 TOOL = "heocr.html"
@@ -50,7 +50,6 @@ MAX_ELEMENTS = 2_000_000
 # Nesting kept as structure. Deeper elements are flattened into the deepest one kept, with all
 # their text: the walk is recursive, and must stay well inside Python's recursion limit.
 MAX_DEPTH = 100
-MAX_SPAN = 1000
 MAX_DATA_URI_BYTES = 32 * 1024**2
 SCRIPT_MIN_LETTERS = 100  # fewer letters than this in the body, with scripts: the page is drawn by script
 MARGIN_MAX_CHARS = 80
@@ -773,7 +772,7 @@ class _Table:
             for cell in row:
                 covered()
                 text, flags = self._cell(cell, table_repairs)
-                colspan = min(max(_int(cell.attrs.get("colspan", ""), 1), 1), MAX_SPAN)
+                colspan = cap_span(_int(cell.attrs.get("colspan", ""), 1), flags)
                 rowspan = _int(cell.attrs.get("rowspan", ""), 1)
                 rowspan = total - r if rowspan == 0 else min(max(rowspan, 1), total - r)
                 out.append(Cell(text, colspan=colspan, rowspan=rowspan, flags=flags))

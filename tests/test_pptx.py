@@ -167,6 +167,43 @@ class AroundTheSlideTest(unittest.TestCase):
         self.assertEqual(doc.blocks[0].repairs, [{"rule": "direction_marks", "from": "U+200F", "to": "", "count": 1}])
 
 
+class LimitsTest(unittest.TestCase):
+    def test_deep_nested_groups_keep_their_text_and_never_crash(self) -> None:
+        for depth in (50, pptx.MAX_GROUP_DEPTH + 5, 600, 5000):
+            with self.subTest(depth=depth):
+                nested = shape([para("טקסט עמוק")], (0, 0, 100, 40))
+                for _ in range(depth):
+                    nested = group([nested], (300, 100, 300, 50), (0, 0, 300, 50))
+                after = shape([para("אחרי הקבוצה")], (50, 300, 300, 40))
+                doc = extract(Deck(slides=[Slide([nested, after])]))
+                self.assertEqual(body(doc), ["טקסט עמוק", "אחרי הקבוצה"])
+                self.assertEqual("group_depth_flattened" in doc.flags, depth >= pptx.MAX_GROUP_DEPTH)
+
+    def test_nested_groups_compose_one_transform(self) -> None:
+        # Each level maps child x 0..100 onto 100..150 (scale 0.5, shift 100): three levels give 175..187.5.
+        inner = shape([para("א")], (0, 0, 100, 40))
+        for _ in range(3):
+            inner = group([inner], (100, 0, 50, 20), (0, 0, 100, 40))
+        built = Deck(slides=[Slide([inner])]).build()
+        doc = heocr.contract.Document(sha256="0" * 64, size=len(built), format="pptx", format_evidence="test")
+        deck = pptx._Deck(built, doc)
+        root = deck.xml(deck.slides[0])
+        item = deck.items(deck.slides[0], root.find(pptx.P + "cSld/" + pptx.P + "spTree"))[0]
+        while item.kind == "grp":
+            item = item.children[0]
+        emu = 12700
+        self.assertEqual([round(v / emu, 3) for v in item.box], [175.0, 0.0, 187.5, 5.0])
+
+    def test_huge_spans_are_capped(self) -> None:
+        rows = [[("רחב", {"gridSpan": 2000000000, "rowSpan": 2000000000}), "א"], ["ב", "ג"]]
+        doc = extract(Deck(slides=[Slide([table(rows)])]))
+        (t,) = [b for b in doc.blocks if b.kind == "table"]
+        cell = t.cells[0][0]
+        self.assertEqual((cell.colspan, cell.rowspan), (heocr.contract.MAX_SPAN, 2))
+        self.assertIn("span_capped", cell.flags)
+        self.assertLess(len(doc.markdown), 20_000)
+
+
 class ContractTest(unittest.TestCase):
     def test_slide_must_be_a_positive_integer(self) -> None:
         doc = extract(Deck(slides=[Slide([shape([para("א")], (50, 50, 300, 40))])]))

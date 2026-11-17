@@ -32,7 +32,7 @@ import defusedxml
 from defusedxml import ElementTree
 
 from heocr import repairs
-from heocr.contract import Block, Cell, Document, Unread, page_limit
+from heocr.contract import Block, Cell, Document, Unread, cap_span, page_limit
 from heocr.docx.numformat import hebrew_letter, hebrew_numeral, latin_letter, roman
 from heocr.docx.reader import DocxError, _Package, image_blocks
 
@@ -50,6 +50,7 @@ _STRICT = (
 _URI_TABLE = "/drawingml/2006/table"
 _URI_CHART = "/drawingml/2006/chart"
 _URI_DIAGRAM = "/drawingml/2006/diagram"
+MAX_GROUP_DEPTH = 100  # nested groups kept as structure; deeper shapes are read flat, with the last transform
 ROW_OVERLAP = 0.5  # shapes are on one row when their vertical extents overlap by this share of the smaller one
 TITLE_TYPES = ("title", "ctrTitle")
 FOOTER_TYPES = ("ftr", "dt", "sldNum")
@@ -85,6 +86,19 @@ class _Item:
     kind: str  # "sp", "grp", "table", "pic", "chart", "diagram", "other"
     children: list["_Item"] = field(default_factory=list)
     placeholder: str | None = None  # the placeholder's type ("body" when it has an index only)
+    flattened: bool = False  # read beyond MAX_GROUP_DEPTH, without the deeper groups' own transforms
+
+
+# A transform from a group's child coordinates to the slide's: x' = sx * x + tx, y' = sy * y + ty.
+# Nested groups compose into one, so no chain of calls grows with the nesting.
+Affine = tuple[float, float, float, float]
+
+
+def _apply(transform: Affine | None, box):
+    if transform is None or box is None:
+        return box
+    sx, sy, tx, ty = transform
+    return (sx * box[0] + tx, sy * box[1] + ty, sx * box[2] + tx, sy * box[3] + ty)
 
 
 def _xfrm(element) -> tuple[float, float, float, float] | None:
@@ -192,57 +206,95 @@ class _Deck:
         return None
 
     # -- one slide -------------------------------------------------------------------------
-    def items(self, slide_part: str, tree, transform=None) -> list[_Item]:
+    def items(self, slide_part: str, tree, transform: Affine | None = None, depth: int = 0) -> list[_Item]:
         out: list[_Item] = []
-        for child in tree:
-            tag = child.tag
-            if tag not in (P + "sp", P + "grpSp", P + "graphicFrame", P + "pic", P + "cxnSp"):
-                if tag == "{http://schemas.openxmlformats.org/markup-compatibility/2006}AlternateContent":
-                    choice = child.find("{http://schemas.openxmlformats.org/markup-compatibility/2006}Choice")
-                    chosen = choice if choice is not None else child.find("{http://schemas.openxmlformats.org/markup-compatibility/2006}Fallback")
-                    if chosen is not None:
-                        out += self.items(slide_part, chosen, transform)
-                continue
-            _, ph = _nv(child)
-            box = _xfrm(child)
-            if box is None and ph is not None:
-                box = self.inherited_box(slide_part, ph)
-            if box is not None and transform is not None:
-                box = transform(box)
-            placeholder = _placeholder_key(ph)[0] if ph is not None else None
-            if tag == P + "grpSp":
-                item = _Item(child, box, "grp")
-                inner = self._group_transform(child, transform)
-                item.children = self.items(slide_part, child, inner)
-            elif tag == P + "graphicFrame":
-                data = child.find(A + "graphic/" + A + "graphicData")
-                uri = data.get("uri", "") if data is not None else ""
-                kind = "table" if uri.endswith(_URI_TABLE) else "chart" if uri.endswith(_URI_CHART) else "diagram" if uri.endswith(_URI_DIAGRAM) else "other"
-                item = _Item(child, box, kind)
-            elif tag == P + "pic":
-                item = _Item(child, box, "pic")
+        for child in _shape_children(tree):
+            out.append(self._item(slide_part, child, transform, depth))
+        return out
+
+    def _item(self, slide_part: str, child, transform: Affine | None, depth: int) -> _Item:
+        tag = child.tag
+        _, ph = _nv(child)
+        box = _xfrm(child)
+        if box is None and ph is not None:
+            box = self.inherited_box(slide_part, ph)
+        box = _apply(transform, box)
+        placeholder = _placeholder_key(ph)[0] if ph is not None else None
+        if tag == P + "grpSp":
+            item = _Item(child, box, "grp")
+            if depth + 1 < MAX_GROUP_DEPTH:
+                item.children = self.items(slide_part, child, _group_transform(child, transform), depth + 1)
             else:
-                item = _Item(child, box, "sp", placeholder=placeholder)
+                item.children = self._flat(slide_part, child, _group_transform(child, transform))
+            return item
+        if tag == P + "graphicFrame":
+            data = child.find(A + "graphic/" + A + "graphicData")
+            uri = data.get("uri", "") if data is not None else ""
+            kind = "table" if uri.endswith(_URI_TABLE) else "chart" if uri.endswith(_URI_CHART) else "diagram" if uri.endswith(_URI_DIAGRAM) else "other"
+            return _Item(child, box, kind)
+        if tag == P + "pic":
+            return _Item(child, box, "pic")
+        return _Item(child, box, "sp", placeholder=placeholder)
+
+    def _flat(self, slide_part: str, group, transform: Affine | None) -> list[_Item]:
+        """Every shape under a group too deep to keep as structure, in document order, without
+        recursion: positioned with the last transform kept, and flagged."""
+        out: list[_Item] = []
+        stack = [iter(_shape_children(group))]
+        while stack:
+            child = next(stack[-1], None)
+            if child is None:
+                stack.pop()
+                continue
+            if child.tag == P + "grpSp":
+                stack.append(iter(_shape_children(child)))
+                continue
+            item = self._item(slide_part, child, transform, MAX_GROUP_DEPTH)
+            item.flattened = True
             out.append(item)
         return out
 
-    @staticmethod
-    def _group_transform(group, outer):
-        xfrm = group.find(P + "grpSpPr/" + A + "xfrm")
-        if xfrm is None:
-            return outer
-        off, ext, ch_off, ch_ext = (xfrm.find(A + n) for n in ("off", "ext", "chOff", "chExt"))
-        if None in (off, ext, ch_off, ch_ext):
-            return outer
-        ox, oy, cx, cy = _num(off.get("x")), _num(off.get("y")), _num(ext.get("cx")), _num(ext.get("cy"))
-        chx, chy, chcx, chcy = _num(ch_off.get("x")), _num(ch_off.get("y")), _num(ch_ext.get("cx")) or 1, _num(ch_ext.get("cy")) or 1
 
-        def inner(box):
-            x0, y0, x1, y1 = box
-            mapped = (ox + (x0 - chx) * cx / chcx, oy + (y0 - chy) * cy / chcy, ox + (x1 - chx) * cx / chcx, oy + (y1 - chy) * cy / chcy)
-            return outer(mapped) if outer is not None else mapped
+_SHAPES = (P + "sp", P + "grpSp", P + "graphicFrame", P + "pic", P + "cxnSp")
+_MC = "{http://schemas.openxmlformats.org/markup-compatibility/2006}"
 
-        return inner
+
+def _shape_children(tree) -> list:
+    """A shape tree's shapes, with markup-compatibility choices resolved (Choice, else Fallback),
+    without recursion however deep the choices nest."""
+    out = []
+    stack = [iter(tree)]
+    while stack:
+        child = next(stack[-1], None)
+        if child is None:
+            stack.pop()
+            continue
+        if child.tag in _SHAPES:
+            out.append(child)
+        elif child.tag == _MC + "AlternateContent":
+            chosen = child.find(_MC + "Choice")
+            chosen = chosen if chosen is not None else child.find(_MC + "Fallback")
+            if chosen is not None:
+                stack.append(iter(chosen))
+    return out
+
+
+def _group_transform(group, outer: Affine | None) -> Affine | None:
+    xfrm = group.find(P + "grpSpPr/" + A + "xfrm")
+    if xfrm is None:
+        return outer
+    off, ext, ch_off, ch_ext = (xfrm.find(A + n) for n in ("off", "ext", "chOff", "chExt"))
+    if None in (off, ext, ch_off, ch_ext):
+        return outer
+    ox, oy, cx, cy = _num(off.get("x")), _num(off.get("y")), _num(ext.get("cx")), _num(ext.get("cy"))
+    chx, chy = _num(ch_off.get("x")), _num(ch_off.get("y"))
+    chcx, chcy = _num(ch_ext.get("cx")) or 1.0, _num(ch_ext.get("cy")) or 1.0
+    sx, sy = cx / chcx, cy / chcy
+    local = (sx, sy, ox - chx * sx, oy - chy * sy)
+    if outer is None:
+        return local
+    osx, osy, otx, oty = outer
+    return (osx * local[0], osy * local[1], osx * local[2] + otx, osy * local[3] + oty)
 
 
 def reading_order(items: list[_Item], rtl: bool) -> list[_Item]:
@@ -392,6 +444,8 @@ class _SlideReader:
             c_nv, _ = _nv(item.element)
             hidden = c_nv is not None and (c_nv.get("hidden") or "").lower() in ("1", "true")
             before = len(out)
+            if item.flattened:
+                self.doc.flags.append("group_depth_flattened")
             if item.kind == "grp":
                 out += self.items(item.children)
             elif item.kind == "sp":
@@ -411,9 +465,11 @@ class _SlideReader:
                 self.doc.unread.append(Unread(scope="block", reason="chart_not_read", detail=f"slide {self.number}"))
             else:
                 self.doc.unread.append(Unread(scope="block", reason="embedded_content_not_read", detail=f"slide {self.number}: an embedded object (OLE or media)"))
-            if hidden:
-                for block in out[before:]:
+            for block in out[before:]:
+                if hidden:
                     block.flags.append("hidden_shape")
+                if item.flattened:
+                    block.flags.append("group_depth_flattened")
         return out
 
     def table(self, frame) -> Block | None:
@@ -424,7 +480,8 @@ class _SlideReader:
         rtl = tblpr is not None and (tblpr.get("rtl") or "").lower() in ("1", "true")
         rows: list[list[Cell]] = []
         table_repairs: Counter = Counter()
-        for tr in tbl.findall(A + "tr"):
+        trs = tbl.findall(A + "tr")
+        for r, tr in enumerate(trs):
             row: list[Cell] = []
             for tc in tr.findall(A + "tc"):
                 if (tc.get("hMerge") or "").lower() in ("1", "true"):
@@ -436,13 +493,14 @@ class _SlideReader:
                         table_repairs[(entry["rule"], entry["from"], entry["to"])] += entry["count"]
                     lines.append(f"{block.label} {block.text}" if block.label else block.text)
                 text = "\n".join(lines)
+                cell_flags: list[str] = []
+                colspan = cap_span(int(tc.get("gridSpan", "1")) if (tc.get("gridSpan") or "1").isdigit() else 1, cell_flags)
                 if (tc.get("vMerge") or "").lower() in ("1", "true"):
-                    span = int(tc.get("gridSpan", "1")) if (tc.get("gridSpan") or "1").isdigit() else 1
-                    row.append(Cell("", colspan=max(span, 1), flags=["merged_above"] + (["merged_cell_has_text"] if text.strip() else [])))
+                    row.append(Cell("", colspan=colspan, flags=["merged_above"] + (["merged_cell_has_text"] if text.strip() else []) + cell_flags))
                     continue
-                colspan = int(tc.get("gridSpan", "1")) if (tc.get("gridSpan") or "1").isdigit() else 1
-                rowspan = int(tc.get("rowSpan", "1")) if (tc.get("rowSpan") or "1").isdigit() else 1
-                row.append(Cell(text, colspan=max(colspan, 1), rowspan=max(rowspan, 1)))
+                rowspan = cap_span(int(tc.get("rowSpan", "1")) if (tc.get("rowSpan") or "1").isdigit() else 1, cell_flags)
+                rowspan = min(rowspan, len(trs) - r)  # never beyond the table's last row
+                row.append(Cell(text, colspan=colspan, rowspan=rowspan, flags=cell_flags))
             rows.append(row)
         if not any(c.text.strip() for row in rows for c in row):
             return None
