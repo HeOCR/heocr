@@ -28,8 +28,21 @@ MIN_REGION_PX = 24
 REGION_MIN_CONFIDENCE = 50.0
 
 
+def paper_level(image) -> int:
+    """The paper's grey level: the most common level in the lighter half of the image.
+
+    Masks painted before OCR use it, never pure white: on a scan whose paper is grey, a white
+    patch is the lightest thing in the image, and a global threshold (Tesseract's Otsu) then puts
+    the whole paper on the ink side, and the text around the patch disappears with it.
+    """
+    histogram = image.convert("L").histogram()
+    if not any(histogram[128:]):
+        return 255  # no paper to match (a dark photo, a solid fill): white, as before
+    return max(range(128, 256), key=lambda v: histogram[v])
+
+
 def mask_layer_text(crop, origin: tuple[float, float], scale: float, boxes) -> tuple[object, int]:
-    """Paint the text layer's character boxes white inside an image crop.
+    """Paint the text layer's character boxes in the paper's grey inside an image crop.
 
     ``origin`` is the crop's top-left corner in page points; ``boxes`` are character boxes in
     points. Returns the masked image and the number of characters masked.
@@ -37,6 +50,7 @@ def mask_layer_text(crop, origin: tuple[float, float], scale: float, boxes) -> t
     from PIL import ImageDraw
 
     image = crop.convert("L")
+    paper = paper_level(image)
     draw = ImageDraw.Draw(image)
     width, height = image.size
     masked = 0
@@ -45,7 +59,7 @@ def mask_layer_text(crop, origin: tuple[float, float], scale: float, boxes) -> t
         right, bottom = (x1 - origin[0]) * scale + 1, (y1 - origin[1]) * scale + 1
         if right <= 0 or bottom <= 0 or left >= width or top >= height:
             continue
-        draw.rectangle([left, top, right, bottom], fill=255)
+        draw.rectangle([left, top, right, bottom], fill=paper)
         masked += 1
     return image, masked
 
@@ -67,7 +81,7 @@ def ink_outside(image, boxes_px, pad: int = 2) -> tuple[int, int]:
     rest = image.copy()
     draw = ImageDraw.Draw(rest)
     for x0, y0, x1, y1 in boxes_px:
-        draw.rectangle([x0 - pad, y0 - pad, x1 + pad, y1 + pad], fill=255)
+        draw.rectangle([x0 - pad, y0 - pad, x1 + pad, y1 + pad], fill=255)  # counting only: never sent to OCR
     return total, sum(rest.histogram()[:INK_LEVEL])
 
 

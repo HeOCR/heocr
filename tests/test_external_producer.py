@@ -152,6 +152,28 @@ class TesseractScanTest(unittest.TestCase):
         self.assertEqual((found.ocr["cells_psm7"], found.ocr["cells_psm6"]), (11, 1))  # the two-line cell is a block
         self.assertIn("טבלת הספקים", doc.text)
 
+    def test_grey_paper_keeps_the_text_around_a_table(self) -> None:
+        # eval's finding: the table was masked in white before page OCR; on grey paper (238) the
+        # whole paper fell on the ink side of Tesseract's threshold, and the text around it was lost.
+        import pypdfium2 as pdfium
+
+        # The mask must cover about a third of the page, as in eval's set C: a quarter of it did not break Tesseract.
+        rows = [["שם", "תפקיד", "סכום"]] + [[f"ספק מספר {n}", "מנהל", "הערה"] for n in range(1, 25)]
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "grey.docx"
+            source.write_bytes(Docx(body=[para("טבלת הספקים במכרז"), table(rows, borders=True), para("נתונים נוספים ניתנים לעיון")]).build())
+            subprocess.run(["soffice", "--headless", "--convert-to", "pdf", "--outdir", tmp, str(source)], check=True, capture_output=True, timeout=180)
+            pdf = pdfium.PdfDocument(str(Path(tmp) / "grey.pdf"))
+            scan = Path(tmp) / "scan.pdf"
+            pdf[0].render(scale=300 / 72).to_pil().convert("L").point(lambda v: min(v, 238)).save(scan, resolution=300)
+            pdf.close()
+            doc = heocr.extract(scan)
+        self.assertEqual([b.kind for b in doc.blocks].count("table"), 1)
+        self.assertIn("טבלת הספקים במכרז", doc.text)
+        self.assertIn("נתונים נוספים ניתנים לעיון", doc.text)
+        self.assertEqual(doc.pages[0].coverage["status"], "ocr")
+        self.assertEqual(doc.unread, [])
+
     def test_amounts_in_a_scanned_table_are_read_by_the_number_model(self) -> None:
         # Stock heb read these cells as "12000", "00" and "1700"; eng reads them.
         import pypdfium2 as pdfium
