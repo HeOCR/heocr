@@ -120,9 +120,7 @@ Neither is bundled. heocr records the version and executable hash of each one it
 
 ## Licence and credits
 
-Apache-2.0. The core depends only on permissive libraries: pypdfium2, Pillow and defusedxml. Copyleft tools are never in a default route.
-
-Parts of heocr are ported from **tendex** (AdanimInstitute/adanim-govil-scraper). Its authors released them for porting into heocr under Apache-2.0 (decision 0020, item 4). See [NOTICE](NOTICE).
+Apache-2.0. The core depends only on permissive libraries: pypdfium2, Pillow and defusedxml. Copyleft tools are never in a default route. See [NOTICE](NOTICE).
 
 ## Project
 

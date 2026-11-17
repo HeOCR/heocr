@@ -1,19 +1,7 @@
 heocr
 Copyright the HeOCR maintainers. Licensed under the Apache License, Version 2.0 (see LICENSE).
 
-This product includes code ported from tendex, part of
-AdanimInstitute/adanim-govil-scraper (https://github.com/AdanimInstitute/adanim-govil-scraper),
-released by its authors for porting into heocr under the Apache License, Version 2.0
-(HeOCR heocr-engine decision 0020, item 4):
-
-- src/heocr/identify.py: file-type identification (tendex_l4/extract.py, identify()),
-  extended with ODF, RTF, HTML, image and text detection and an OLE2 directory reader;
-- src/heocr/textflags.py: warning flags on extracted text (tendex_l4/extract.py, text_flags);
-- src/heocr/pdf/lines.py: right-to-left line building (tendex_l4/layout.py: row clustering,
-  column gaps, the two-column gutter test, the direction test, word joining and the
-  selection_safe rule; tendex_l4/extract.py: word_lines and ordered_words), rewritten to work
-  on characters from pypdfium2 instead of PyMuPDF words;
-- src/heocr/pdf/classify.py: the unmapped-character threshold for broken font mappings.
+This product includes code ported from internal tools of the Adanim Research Institute, with its permission, under the Apache License, Version 2.0.
 
 heocr runs, when they are installed, these separate programs, which it does not bundle:
 - Tesseract OCR (Apache License 2.0);

@@ -26,7 +26,7 @@ VECTOR_TEXT_PATHS = 100
 # of words end with one, so a reversed layer shows many.
 FINAL_START_RATE = 0.15
 MIN_HEBREW_WORDS = 5
-# Broken mapping: tendex counts U+FFFD above max(2, 0.5%) as unmapped.
+# Broken mapping: U+FFFD above max(2, 0.5%) of the characters counts as unmapped.
 BROKEN_MIN = 3
 BROKEN_SHARE = 0.005
 # An OCR layer (invisible text over a page image) is foreign OCR; below this Hebrew share it is garbage.
