@@ -328,17 +328,75 @@ def _close_word(word: list[int], font: str, words: dict, other_words: dict) -> N
 
 LAYER_CHECK_LINES = 6  # lines of a page's OCR layer read again, spread over the page
 LAYER_CHECK_MIN_LETTERS = 8  # a line with fewer letters says too little
-LAYER_CHECK_AGREEMENT = 0.5  # the median letter agreement under which the layer is not this page's text
+LAYER_CHECK_AGREEMENT = 0.5  # the median letter agreement under which the two readings differ
+LAYER_MISSPELT_MIN = 0.15  # the layer's share of misspelt words above which it looks wrong on its own
+LAYER_MISSPELT_MARGIN = 0.10  # ... and by how much it must exceed our reading's share
+MISSPELT_MIN_WORDS = 5  # fewer words say nothing about spelling
+
+_FINALS = frozenset("ךםןףץ")
+_HAS_FINAL = frozenset("כמנפצ")
+_HEBREW_WORD = re.compile(r"^[א-ת]{2,}$")
 
 
-def _ocr_layer_agrees(doc: Document, page, built: PageLines) -> bool | None:
-    """Whether an invisible OCR layer agrees with a second reading of a few of its lines.
+def misspelt_share(text: str) -> float | None:
+    """The share of Hebrew words spelt in a way Hebrew never is: a final form (ך ם ן ף ץ) inside a
+    word, or a word ending in the plain form of a letter that has a final one (כ מ נ פ צ). Words with
+    a geresh, gershayim or quote (abbreviations, foreign words) are left out. A layer that is a
+    scramble of the page's letters breaks this rule in a large share of its words; real text, and
+    Tesseract's reading of it, almost never do. None for fewer than ``MISSPELT_MIN_WORDS`` words."""
+    words = []
+    for token in text.split():
+        token = token.strip(".,;:!?()[]{}-–—")
+        if _HEBREW_WORD.match(token):
+            words.append(token)
+    if len(words) < MISSPELT_MIN_WORDS:
+        return None
+    odd = sum(1 for w in words if any(ch in _FINALS for ch in w[:-1]) or w[-1] in _HAS_FINAL)
+    return odd / len(words)
+
+
+@dataclass
+class LayerCheck:
+    """A second reading of a few lines of an invisible OCR layer (``_check_ocr_layer``)."""
+
+    agreement: float  # the median letter agreement between the layer and our line OCR
+    confidence: float | None  # our line OCR's mean word confidence
+    layer_misspelt: float | None  # the layer's share of misspelt words (``misspelt_share``)
+    ocr_misspelt: float | None  # the same, in our reading of the sampled lines
+
+    @property
+    def disagrees(self) -> bool:
+        return self.agreement < LAYER_CHECK_AGREEMENT
+
+    @property
+    def layer_is_wrong(self) -> bool:
+        """Our reading is the credible one: it disagrees, it is confident, and the layer is misspelt
+        on its own evidence, well beyond our reading. Disagreement alone says nothing of which side is
+        wrong: on a hard scan a good foreign layer can beat our OCR."""
+        if not self.disagrees or self.confidence is None or self.confidence < REGION_MIN_CONFIDENCE:
+            return False
+        if self.layer_misspelt is None or self.layer_misspelt < LAYER_MISSPELT_MIN:
+            return False
+        return self.layer_misspelt >= (self.ocr_misspelt or 0.0) + LAYER_MISSPELT_MARGIN
+
+    def signals(self) -> dict[str, float]:
+        out = {"ocr_layer_agreement": round(self.agreement, 3)}
+        if self.confidence is not None:
+            out["ocr_layer_check_confidence"] = round(self.confidence, 1)
+        if self.layer_misspelt is not None:
+            out["ocr_layer_misspelt_share"] = round(self.layer_misspelt, 3)
+        if self.ocr_misspelt is not None:
+            out["ocr_check_misspelt_share"] = round(self.ocr_misspelt, 3)
+        return out
+
+
+def _check_ocr_layer(doc: Document, page, built: PageLines) -> LayerCheck | None:
+    """A second reading of an invisible OCR layer.
 
     Up to ``LAYER_CHECK_LINES`` lines with at least ``LAYER_CHECK_MIN_LETTERS`` letters, spread over the
-    page, are OCR'd one by one (``--psm 7``) and compared with the layer, letters only. A median
-    agreement under ``LAYER_CHECK_AGREEMENT`` means the layer is not the page's text (a foreign or
-    garbage layer): the page is read by OCR instead (T4). None when there is no OCR engine, or no
-    line to check.
+    page, are OCR'd one by one (``--psm 7``) and compared with the layer, letters only. The result
+    also holds our reading's confidence and both sides' misspelt-word shares, from which
+    ``LayerCheck.layer_is_wrong`` decides. None when there is no OCR engine, or no line to check.
     """
     import difflib
 
@@ -351,7 +409,7 @@ def _ocr_layer_agrees(doc: Document, page, built: PageLines) -> bool | None:
     step = max(1, len(lines) // LAYER_CHECK_LINES)
     sample = lines[::step][:LAYER_CHECK_LINES]
     image, scale = _render(page, frame_of(page))
-    ratios = []
+    ratios, confidences, readings = [], [], []
     for line in sample:
         box = line.bbox
         crop = image.crop((max(0, int((box[0] - 2) * scale)), max(0, int((box[1] - 2) * scale)), int((box[2] + 2) * scale), int((box[3] + 2) * scale)))
@@ -359,11 +417,19 @@ def _ocr_layer_agrees(doc: Document, page, built: PageLines) -> bool | None:
             result = engine.recognize(crop, dpi=round(scale * 72), psm=7)
         except OcrUnavailable:
             return None
-        read = "".join(ch for line_ in result.lines for ch in line_.text if ch.isalpha())
+        text = " ".join(line_.text for line_ in result.lines)
+        readings.append(text)
+        confidences.extend(c for line_ in result.lines for c in line_.confidences)
+        read = "".join(ch for ch in text if ch.isalpha())
         layer = "".join(ch for ch in line.text if ch.isalpha())
         ratios.append(difflib.SequenceMatcher(None, layer, read, autojunk=False).ratio())
     ratios.sort()
-    return ratios[len(ratios) // 2] >= LAYER_CHECK_AGREEMENT
+    return LayerCheck(
+        agreement=ratios[len(ratios) // 2],
+        confidence=sum(confidences) / len(confidences) if confidences else None,
+        layer_misspelt=misspelt_share(" ".join(line.text for line in built.lines)),
+        ocr_misspelt=misspelt_share(" ".join(readings)),
+    )
 
 
 def read_t1(doc: Document, page_index: int, built: PageLines) -> int:
@@ -740,13 +806,18 @@ def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = froz
         # The layer was a cp1255-shifted font (a T3 layer by its state), fully restored: read as T1.
         flags.append("font_cp1255_shifted")
     if "text_layer_is_ocr" in flags and page_class in ("T1", "T2"):
-        # An invisible layer over a full-page image is someone's OCR. Its letters alone cannot show
-        # that it is garbage; a second, independent reading of a few of its lines can.
-        verdict = _ocr_layer_agrees(doc, page, built)
-        if verdict is False:
-            page_class, flags = "T4", flags + ["foreign_ocr_layer", "ocr_layer_disagrees"]
-        elif verdict is None:
+        # An invisible layer over a full-page image is someone's OCR. A second reading of a few of
+        # its lines tells whether the two agree; when they do not, the layer is replaced only when
+        # our reading is the credible one (``LayerCheck.layer_is_wrong``). Otherwise it is kept.
+        check = _check_ocr_layer(doc, page, built)
+        if check is None:
             flags.append("ocr_layer_unchecked")
+        else:
+            signals.update(check.signals())
+            if check.layer_is_wrong:
+                page_class, flags = "T4", flags + ["foreign_ocr_layer", "ocr_layer_disagrees"]
+            elif check.disagrees:
+                flags.append("ocr_layer_disagrees_kept")
     if page.get_rotation():
         flags.append("page_rotated")
     _report_side_losses(doc, index, text, flags)

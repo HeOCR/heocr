@@ -12,10 +12,14 @@ from unittest import mock
 import heocr
 from heocr.cli import main
 from heocr.ocr.tesseract import parse_tsv
+from heocr.pdf.reader import LAYER_MISSPELT_MIN
 from tests.synth.pdf import PdfPage, TextLine, lines_block, make_pdf
 
 FAKE = [sys.executable, str(Path(__file__).parent / "synth" / "fake_tesseract.py")]
 FULL_PAGE = [(0, 0, 595, 842)]
+# HEBREW with letters swapped, as a garbage OCR layer has them (D-bench set B pdf_t4_garbage): final
+# forms inside words, plain forms at their ends, none at a word's start (that would be reversed text).
+SCRAMBLED = ["המץיע יגיש אט הצעטו עד המוםדכ", "הקבוע בםסמכי המכרז ולא יאוחר", "מהשעה הנקובה בהם על פי ההוראוט", "שלהלן ובהטאם לתנאים המפורטימ", "נטונים נוםפים ניתנים לעיונ"]
 HEBREW = ["המציע יגיש את הצעתו עד המועד", "הקבוע במסמכי המכרז ולא יאוחר", "מהשעה הנקובה בהם על פי ההוראות", "שלהלן ובהתאם לתנאים המפורטים", "נתונים נוספים ניתנים לעיון"]
 
 
@@ -101,6 +105,11 @@ class OcrRouteTest(unittest.TestCase):
         """An invisible Hebrew layer over a full-page image: someone's OCR, plausible letters."""
         return make_pdf([PdfPage(lines=lines_block(HEBREW), invisible=True, images=FULL_PAGE)])
 
+    def read_layer(self, layer: list[str], line: str, confidence: str = "95.0") -> heocr.Document:
+        """An invisible layer over a full-page image, every one-line OCR call answered with ``line``."""
+        with mock.patch.dict(os.environ, {"FAKE_LINE": line, "FAKE_CONF": confidence}):
+            return heocr.extract(make_pdf([PdfPage(lines=lines_block(layer), invisible=True, images=FULL_PAGE)]), tesseract=FAKE)
+
     def test_an_ocr_layer_that_a_second_reading_confirms_is_kept(self) -> None:
         # The fake answers every one-line call with the same text, so every layer line is that text.
         with mock.patch.dict(os.environ, {"FAKE_LINE": HEBREW[0]}):
@@ -112,16 +121,44 @@ class OcrRouteTest(unittest.TestCase):
         self.assertIn(HEBREW[0], doc.text)
         self.assertTrue(any(call[call.index("--psm") + 1] == "7" for call in self.calls() if "--psm" in call))  # one-line checks ran
 
-    def test_an_ocr_layer_that_disagrees_with_a_second_reading_is_read_by_ocr(self) -> None:
-        # Plausible Hebrew letters, but not the page's: the second reading finds other words.
-        with mock.patch.dict(os.environ, {"FAKE_LINE": "טקסט אחר לגמרי שאינו בשכבה"}):
-            doc = heocr.extract(self.ocr_layer_page(), tesseract=FAKE)
+    def test_a_scrambled_layer_that_a_confident_reading_contradicts_is_read_by_ocr(self) -> None:
+        # A permutation of the page's letters: final forms inside words, plain forms at their ends.
+        doc = self.read_layer(SCRAMBLED, "המציע יגיש את הצעתו עד המועד")
         page = doc.pages[0]
         self.assertEqual(page.page_class, "T4")
         self.assertIn("ocr_layer_disagrees", page.flags)
         self.assertIn("foreign_ocr_layer", page.flags)
-        self.assertNotIn(HEBREW[1], doc.text)
+        self.assertNotIn(SCRAMBLED[1], doc.text)
         self.assertIn("שלום עולם", doc.text)  # the page OCR (fake's default page)
+        self.assertGreaterEqual(page.signals["ocr_layer_misspelt_share"], LAYER_MISSPELT_MIN)
+        self.assertLess(page.signals["ocr_layer_agreement"], 0.5)
+
+    def test_a_well_spelt_layer_that_our_reading_contradicts_is_kept(self) -> None:
+        # A hard scan with a good foreign layer: our OCR disagrees, but the layer gives no sign of being wrong.
+        doc = self.read_layer(HEBREW, "טקסט אחר לגמרי שאינו בשכבה")
+        page = doc.pages[0]
+        self.assertEqual(page.page_class, "T1")
+        self.assertIn("ocr_layer_disagrees_kept", page.flags)
+        self.assertNotIn("ocr_layer_disagrees", page.flags)
+        self.assertIn(HEBREW[1], doc.text)
+        self.assertEqual(doc.unread, [])
+        self.assertLess(page.signals["ocr_layer_agreement"], 0.5)
+        self.assertEqual(page.signals["ocr_layer_misspelt_share"], 0.0)
+
+    def test_a_scrambled_layer_is_kept_when_our_reading_is_not_confident(self) -> None:
+        doc = self.read_layer(SCRAMBLED, "המציע יגיש את הצעתו עד המועד", confidence="30.0")
+        page = doc.pages[0]
+        self.assertEqual(page.page_class, "T1")
+        self.assertIn("ocr_layer_disagrees_kept", page.flags)
+        self.assertEqual(page.signals["ocr_layer_check_confidence"], 30.0)
+
+    def test_misspelt_share(self) -> None:
+        from heocr.pdf.reader import misspelt_share
+
+        self.assertEqual(misspelt_share(" ".join(HEBREW)), 0.0)
+        self.assertEqual(misspelt_share('צ\'יפס ת"א מס\' אמן שלום ערך כסף חוץ סוף'), 0.0)  # quotes left out
+        self.assertGreaterEqual(misspelt_share(" ".join(SCRAMBLED)), LAYER_MISSPELT_MIN)
+        self.assertIsNone(misspelt_share("שתי מילים"))
 
     def test_without_ocr_the_layer_is_kept_and_marked_unchecked(self) -> None:
         doc = heocr.extract(self.ocr_layer_page(), ocr=False)
