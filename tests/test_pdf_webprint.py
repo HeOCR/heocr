@@ -123,6 +123,40 @@ class WebPrintTest(unittest.TestCase):
         doc = extract([print_page(n, 3, menu=[[("דף הבית", 545)]]) for n in range(1, 4)])
         self.assertEqual(nav(doc), [])
 
+    def last_page_with(self, rows):
+        pages = [print_page(n, 3) for n in range(1, 4)]
+        y = 400
+        for row in rows:
+            pages[-1].lines += [TextLine(text, x, y, 9) for text, x in row]
+            y -= 18
+        return extract(pages)
+
+    def test_the_last_page_footer_menu_is_navigation(self) -> None:
+        footer = [
+            [("מידע שימושי", 545), ("תמיכה", 420), ("מידע נוסף", 300)],
+            [("לכל השירותים", 545), ("התקשרו למוקד", 420), ("אודות האתר", 300)],
+            [("RSS", 545), ("צ'אט", 420), ("הצהרת נגישות", 300)],
+            [("תנאי שימוש", 545), ("מפת האתר", 300)],
+        ]
+        doc = self.last_page_with(footer)
+        moved = [b for b in doc.blocks if "site_footer_menu" in b.flags]
+        self.assertTrue(moved)
+        self.assertTrue(all(b.role == "navigation" and b.page == 2 for b in moved))
+        navigation = "\n".join(b.text if b.kind != "table" else " ".join(c.text for r in b.cells for c in r) for b in moved)
+        for row in footer:
+            for text, _ in row:
+                self.assertIn(text, navigation)
+        self.assertIn("site_footer_menu", doc.pages[2].flags)
+        body = "\n".join(b.text for b in doc.blocks if b.role == "body" and b.page == 2)
+        self.assertIn(BODY[0], body)  # the page's own text stays in the body
+        self.assertNotIn("מפת האתר", body)
+
+    def test_a_signature_at_the_end_is_not_a_footer_menu(self) -> None:
+        signature = [[("בברכה,", 545)], [("ישראל ישראלי", 545)], [("מנהל הרכש", 545)], [("משרד הדוגמה", 545)]]
+        doc = self.last_page_with(signature)
+        self.assertEqual([b for b in doc.blocks if "site_footer_menu" in b.flags], [])
+        self.assertIn("מנהל הרכש", "\n".join(b.text for b in doc.blocks if b.role == "body"))
+
     def test_counter_rule(self) -> None:
         self.assertTrue(webprint._COUNTER.fullmatch("2/8"))
         self.assertTrue(webprint._COUNTER.fullmatch(" 12 / 30 "))
