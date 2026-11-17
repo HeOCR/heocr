@@ -132,6 +132,10 @@ class PdfPage:
     unit_font_size: bool = False  # "Tf 1" with the size in the text matrix, as many producers write
     glyphs: list[tuple[str, float, float]] = field(default_factory=list)  # extra glyphs (char, x, y), drawn as is
     origin: tuple[float, float] = (0.0, 0.0)  # the MediaBox's lower-left corner; all content is moved with it
+    # Turn the page's content counter-clockwise by this many degrees in user space and set /Rotate to
+    # it, so the page shows exactly as it would unturned: an upright page stored the way rotated
+    # pages are. ``glyphs`` are drawn outside the turn (sideways on screen), for mixed pages.
+    turn: int = 0
     crop: tuple[float, float, float, float] | None = None  # a CropBox, in the page's own coordinates (before origin)
 
 
@@ -195,8 +199,7 @@ def make_pdf(pages: list[PdfPage]) -> bytes:
                     content.append(f"BT {mode} Tr /F1 1 Tf {line.size:g} 0 0 {line.size:g} {px:.3f} {line.y:.3f} Tm <{codes[ch]:02X}> Tj ET")
                 else:
                     content.append(f"BT {mode} Tr /F1 {line.size:g} Tf 1 0 0 1 {px:.3f} {line.y:.3f} Tm <{codes[ch]:02X}> Tj ET")
-        for ch, gx, gy in page.glyphs:
-            content.append(f"BT /F1 12 Tf 1 0 0 1 {gx:.3f} {gy:.3f} Tm <{codes[ch]:02X}> Tj ET")
+        unturned = [f"BT /F1 12 Tf 1 0 0 1 {gx:.3f} {gy:.3f} Tm <{codes[ch]:02X}> Tj ET" for ch, gx, gy in page.glyphs]
         for x, y, w, h in page.fills:
             content.append(f"0.9 g {x:.2f} {y:.2f} {w:.2f} {h:.2f} re f 0 g")
         for x0, y0, x1, y1 in page.rules:
@@ -263,10 +266,20 @@ def make_pdf(pages: list[PdfPage]) -> bytes:
         if xobjects:
             resources = f"/XObject << {' '.join(xobjects)} >>"
         ox, oy = page.origin
+        box_w, box_h = page.width, page.height
+        if page.turn:
+            # Counter-clockwise by ``turn`` about the origin, then moved back into the box.
+            w, h = page.width, page.height
+            matrix = {90: f"0 1 -1 0 {h:g} 0", 180: f"-1 0 0 -1 {w:g} {h:g}", 270: f"0 -1 1 0 0 {w:g}"}[page.turn]
+            content = ["q", f"{matrix} cm"] + content + ["Q"]
+            if page.turn in (90, 270):
+                box_w, box_h = h, w
+        content = content + unturned
         if ox or oy:
             content = [f"1 0 0 1 {ox:g} {oy:g} cm"] + content
         contents = new(stream("\n".join(content).encode()))
-        rotate = f" /Rotate {page.rotate}" if page.rotate else ""
+        rotation = page.turn or page.rotate
+        rotate = f" /Rotate {rotation}" if rotation else ""
         crop = ""
         if page.crop is not None:
             cx0, cy0, cx1, cy1 = page.crop
@@ -274,7 +287,7 @@ def make_pdf(pages: list[PdfPage]) -> bytes:
         page_ids.append(
             new(
                 (
-                    f"<< /Type /Page /Parent 2 0 R /MediaBox [{ox:g} {oy:g} {ox + page.width:g} {oy + page.height:g}]{crop}{rotate} "
+                    f"<< /Type /Page /Parent 2 0 R /MediaBox [{ox:g} {oy:g} {ox + box_w:g} {oy + box_h:g}]{crop}{rotate} "
                     f"/Resources << {font} {resources} >> /Contents {contents} 0 R >>"
                 ).encode()
             )
