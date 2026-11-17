@@ -2,7 +2,8 @@
 
 It answers --version and --list-langs, and writes a TSV for a recognition call. The TSV comes
 from $FAKE_TSV (a file) or a built-in two-line Hebrew page; a single-word call (--psm 8)
-answers with $FAKE_WORD when it is set, and a single-line call (--psm 7) with $FAKE_LINE. Every call's arguments are appended
+answers with $FAKE_WORD when it is set (or with the next of $FAKE_WORD_SEQ, "a|b", counted in
+$FAKE_WORD_STATE), and a single-line call (--psm 7) with $FAKE_LINE. Every call's arguments are appended
 to $FAKE_LOG when it is set; $FAKE_FAIL=1 makes recognition fail.
 
 A table-cell call (--psm 6 or 7) with $FAKE_CELLS set (a JSON file mapping grey levels to
@@ -69,6 +70,14 @@ def main(argv: list[str]) -> int:
             stream.write("\n".join(rows) + "\n")
         return 0
     word = os.environ.get("FAKE_WORD")
+    sequence = os.environ.get("FAKE_WORD_SEQ")  # "a|b|c": successive one-word calls answer a, then b, then c (and c after)
+    if psm == "8" and sequence:
+        state = os.environ["FAKE_WORD_STATE"]
+        calls = int(open(state).read()) if os.path.exists(state) else 0
+        answers = sequence.split("|")
+        word = answers[min(calls, len(answers) - 1)]
+        with open(state, "w") as stream:
+            stream.write(str(calls + 1))
     if psm == "7" and os.environ.get("FAKE_LINE") is not None:
         word = os.environ["FAKE_LINE"]
     if psm in ("7", "8") and word is not None:

@@ -1047,6 +1047,83 @@ def _render(page, frame=None) -> tuple[object, float]:
     return page.render(scale=scale).to_pil(), scale
 
 
+NUMBER_WORD_PSM = 8  # one word
+NUMBER_WORD_PAD = 4  # pixels around a word's box
+NUMBER_WORD_REACH = 3.0  # word heights the crop may reach into the blank beside a word
+NUMBER_WORD_MIN_CONFIDENCE = 30.0
+_NUMBER_WORD = re.compile(r"^[\d.,:/%₪()\-–'\"]*\d[\d.,:/%₪()\-–'\"]*$")
+_HEBREW_LETTER = re.compile(r"[\u05d0-\u05ea]")
+
+
+_LABEL_ONE_LEVEL = re.compile(r"^\d{1,2}\.?$")
+_LABEL_DEEPER = re.compile(r"^\d{1,2}(\.\d{1,2})+\.?$")
+
+
+def _number_reading(numbers, image, bbox, dpi: int) -> tuple[str, float] | None:
+    """The number model's reading of one word box and its confidence, when it is one number-shaped
+    word with confidence at least ``NUMBER_WORD_MIN_CONFIDENCE``; else None."""
+    x0, y0, x1, y1 = bbox
+    crop = (max(0, int(x0) - NUMBER_WORD_PAD), max(0, int(y0) - NUMBER_WORD_PAD),
+            min(image.size[0], int(x1) + NUMBER_WORD_PAD), min(image.size[1], int(y1) + NUMBER_WORD_PAD))
+    if crop[2] <= crop[0] or crop[3] <= crop[1]:
+        return None
+    second = numbers.recognize(image.crop(crop), dpi=dpi, psm=NUMBER_WORD_PSM)
+    words = [w for l in second.lines for w in l.words]
+    if len(words) != 1 or words[0].confidence < NUMBER_WORD_MIN_CONFIDENCE or not _NUMBER_WORD.match(words[0].text):
+        return None
+    return words[0].text, words[0].confidence
+
+
+def _reread_number_words(numbers, image, result, dpi: int) -> tuple[int, int]:
+    """A second reading of the words of an OCR result that hold digits and no Hebrew letter, each on
+    its own crop, by the number model (``eng``): stock ``heb`` misreads digits, drops the levels of a
+    label ("1.1." as "1.") and splits amounts. A word is replaced when the second reading is itself
+    number-shaped (digits and number punctuation only) with confidence at least
+    ``NUMBER_WORD_MIN_CONFIDENCE``. Words with Hebrew letters ("2ב", "ו-3") keep their first reading.
+    ``result``'s lines are updated in place. Returns (words read again, words replaced)."""
+    reread = replaced = 0
+    for line in result.lines:
+        changed = False
+        for word in line.words:
+            if not any(ch.isdigit() for ch in word.text) or _HEBREW_LETTER.search(word.text):
+                continue
+            wider = False
+            try:
+                found = _number_reading(numbers, image, word.bbox, dpi)
+                reread += 1
+                reading, confidence = found if found is not None else (None, None)
+                if reading is not None and _LABEL_ONE_LEVEL.match(reading) and word is max(line.words, key=lambda w: w.bbox[2]):
+                    # A one-level label at a line's (RTL) start: heb's box often covers only the part of a
+                    # deeper label it read ("1." of "1.1.1."). One more reading reaches into the blank
+                    # beside it, up to the next word, and is used only when it is a deeper label.
+                    reach = NUMBER_WORD_REACH * (word.bbox[3] - word.bbox[1])
+                    left = max((w.bbox[2] for w in line.words if w is not word and w.bbox[2] <= word.bbox[0]), default=word.bbox[0] - reach)
+                    wide = [max(word.bbox[0] - reach, left + NUMBER_WORD_PAD), word.bbox[1], word.bbox[2] + reach, word.bbox[3]]
+                    deeper = _number_reading(numbers, image, wide, dpi)
+                    # heb keeps a label's last level ("1." of "3.2.1."): the deeper reading must end with it.
+                    if deeper is not None and _LABEL_DEEPER.match(deeper[0]) and deeper[0].rstrip(".").endswith(reading.rstrip(".")):
+                        reading, confidence = deeper
+                        wider = True
+            except OcrUnavailable:
+                return reread, replaced
+            if reading is None:
+                continue
+            if word.text[-1] in ".:" and reading[-1].isdigit():
+                reading += word.text[-1]  # eng drops a label's closing stop more often than heb invents one
+            if reading != word.text:
+                # Every replacement is logged with both readings (decision 0002), as a cell's are: a
+                # reviewer can audit it, a consumer can revert it.
+                line.number_readings.append({"first": word.text, "second": reading, "first_confidence": word.confidence,
+                                             "second_confidence": confidence, "model": numbers.lang, "wider": wider})
+                word.text = reading
+                line.numbers_replaced += 1
+                replaced += 1
+                changed = True
+        if changed:
+            line.text = " ".join(w.text for w in line.words)
+    return reread, replaced
+
+
 def _ocr_blocks(
     doc: Document, index: int, engine, result, render_scale: float, *, offset=(0.0, 0.0), flags=(), min_confidence: float | None = None
 ) -> int:
@@ -1072,6 +1149,7 @@ def _ocr_blocks(
         ]
         text = "\n".join(line.text for line in lines)
         read += sum(1 for ch in text if not ch.isspace())
+        replaced = sum(line.numbers_replaced for line in group)
         doc.blocks.append(
             Block(
                 kind="text",
@@ -1082,8 +1160,10 @@ def _ocr_blocks(
                 tool=engine.version,
                 direction="rtl",
                 lines=lines,
-                ocr={**block_ocr(engine, group), "dpi": dpi},
-                flags=["ocr_unverified", *flags] + (["render_dpi_reduced"] if dpi < RENDER_DPI else []) + text_flags(text),
+                ocr={**block_ocr(engine, group), "dpi": dpi, **({"number_words_replaced": replaced} if replaced else {})},
+                checks={"number_readings": [r for line in group for r in line.number_readings]} if replaced else None,
+                flags=["ocr_unverified", *flags] + (["render_dpi_reduced"] if dpi < RENDER_DPI else [])
+                + (["numbers_from_second_reading"] if replaced else []) + text_flags(text),
             )
         )
     return read
@@ -1118,9 +1198,10 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
         doc.unread.append(Unread(scope="page", reason="ocr_failed", page=index, detail=str(exc)))
         return
     first = len(doc.blocks)
+    numbers = number_engine_for(doc) if doc.options.get("check_numbers", "suspect") else None
+    number_words = _reread_number_words(numbers, page_image, result, round(scale * 72)) if numbers is not None and numbers is not engine else None
     read = _ocr_blocks(doc, index, engine, result, scale)
     if grids:
-        numbers = number_engine_for(doc) if doc.options.get("check_numbers", "suspect") else None
         t_blocks, in_cells = _ocr_tables(doc, index, engine, image, scale, grids, None if numbers is engine else numbers)
         _place_tables(doc, first, t_blocks)
         read += in_cells
@@ -1144,6 +1225,7 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
         Page(index, width, height, page_class, "ocr", signals,
              {"chars_total": text.chars_total, "chars_read": 0, "chars_ocr": read,
               "ink_outside_ocr_share": outside_share,
+              **({"number_words_reread": number_words[0], "number_words_replaced": number_words[1]} if number_words else {}),
               "status": "ocr" if found and not short else "partial" if found else "unread"}, flags)
     )
 
@@ -1364,6 +1446,12 @@ def _ocr_regions(
             # In a region, ink beyond the text is often the drawing itself: flagged on the block, for review.
             flags += ("ocr_short_for_ink",)
         first = len(doc.blocks)
+        numbers = number_engine_for(doc) if doc.options.get("check_numbers", "suspect") else None
+        if numbers is not None and numbers is not engine:
+            reread, replaced = _reread_number_words(numbers, region, result, round(scale * 72))
+            if reread:
+                counts["number_words_reread"] = counts.get("number_words_reread", 0) + reread
+                counts["number_words_replaced"] = counts.get("number_words_replaced", 0) + replaced
         counts["chars_ocr"] += _ocr_blocks(
             doc, index, engine, result, scale, offset=(crop[0] / scale, crop[1] / scale), flags=flags, min_confidence=REGION_MIN_CONFIDENCE
         )
