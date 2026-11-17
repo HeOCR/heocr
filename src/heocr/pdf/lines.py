@@ -300,6 +300,11 @@ def logical_text(component: list[Atom], page_rtl: bool = True) -> tuple[str, str
             # "1.2. 1", as "1 .1.2"). Numbers act as R on neutrals (UAX #9 N1), so they are two runs.
             # Punctuation that touches the left number ("1, 2" drawn left to right) keeps one run.
             side = base
+        elif rtl and i > 0 and j < n and types[i - 1] == "EN" and types[j] == "EN" and any(texts[k] in _BRACKETS for k in range(i, j)):
+            # A bracket between two numbers in an RTL line: "11(5)" is shown as "(5)11". A bracket pair
+            # takes the paragraph's direction when it holds a number (UAX #9 N0, numbers counting as R),
+            # so the brackets are not part of either number's run.
+            side = base
         for k in range(i, j):
             resolved[k] = side
         i = j

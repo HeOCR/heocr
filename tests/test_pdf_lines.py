@@ -69,6 +69,17 @@ class NumbersApartInRtlTest(unittest.TestCase):
         # A full stop clearly closer to one side still hugs it.
         self.assertEqual(text(visual("1", WORD_SPACE, ".", 2.0, "1.2")), "1.2. 1")
 
+    def test_a_number_in_brackets_after_a_number(self) -> None:
+        # set A synth-039: "סעיף 11(5)" in an RTL line is shown as "(5)11 ףיעס", the brackets drawn
+        # mirrored; it was read back "5(11)". The brackets take the paragraph's direction, not a
+        # number's: line building gives "11)5(", and the document's rtl_bracket_order repair mirrors it.
+        self.assertEqual(text(visual("(", HUG, "5", HUG, ")", HUG, "11")), "11)5(")
+        self.assertEqual(text(visual("(", HUG, "5", HUG, ")", HUG, "11", WORD_SPACE, "ףיעס")), "סעיף 11)5(")
+
+    def test_brackets_drawn_left_to_right_after_a_number_keep_their_run(self) -> None:
+        # In an LTR line nothing changes: "11(5)" drawn left to right reads as drawn.
+        self.assertEqual(text(visual("11", HUG, "(", HUG, "5", HUG, ")"), rtl=False), "11(5)")
+
     def test_numbers_drawn_left_to_right_keep_one_run(self) -> None:
         # The comma touches the left number: drawn in reading order, left to right.
         self.assertEqual(text(visual("1", HUG, ",", WORD_SPACE, "2")), "1, 2")
