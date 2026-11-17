@@ -87,6 +87,33 @@ class ConverterTest(unittest.TestCase):
                 self.assertEqual(doc.format, fmt)
                 self.assertEqual([b.text for b in doc.blocks if b.role == "body"], LINES)
 
+    def made_from(self, body: bytes, source_ext: str, fmt: str, tmp: str) -> bytes:
+        source = Path(tmp) / f"source.{source_ext}"
+        source.write_bytes(body)
+        subprocess.run(["soffice", f"-env:UserInstallation=file://{tmp}/profile", "--headless", "--convert-to", fmt, "--outdir", tmp, str(source)], check=True, capture_output=True, timeout=180)
+        return (Path(tmp) / f"source.{fmt}").read_bytes()
+
+    def test_ods_xls_odp_and_ppt(self) -> None:
+        # D4h: made by LibreOffice from synthetic XLSX and PPTX, converted back, and read by our readers.
+        from tests.synth.pptx import Deck, Slide, shape
+        from tests.synth.pptx import para as slide_para
+        from tests.synth.xlsx import Sheet, Workbook, c, row
+
+        book = Workbook(sheets=[Sheet("נתונים", rows=[row(1, [c("A1", inline="שם"), c("B1", inline="כמות")]), row(2, [c("A2", inline="עט"), c("B2", 5)])])]).build()
+        deck = Deck(rtl=True, slides=[Slide([shape([slide_para("כותרת המצגת")], (50, 30, 600, 50), ph="title"), shape([slide_para("נקודה ראשונה")], (50, 120, 600, 60))], notes=[slide_para("הערת דובר")])]).build()
+        for fmt, body, source_ext in (("ods", book, "xlsx"), ("xls", book, "xlsx"), ("odp", deck, "pptx"), ("ppt", deck, "pptx")):
+            with self.subTest(fmt), tempfile.TemporaryDirectory() as tmp:
+                doc = heocr.extract(self.made_from(body, source_ext, fmt, tmp))
+                self.assertEqual(doc.format, fmt)
+                self.assertEqual(doc.unread, [])
+                if source_ext == "xlsx":
+                    (table,) = [b for b in doc.blocks if b.kind == "table"]
+                    self.assertEqual([[x.text for x in r] for r in table.cells], [["שם", "כמות"], ["עט", "5"]])
+                    self.assertEqual(table.source, "converted_xlsx")
+                else:
+                    self.assertEqual([b.text for b in doc.blocks if b.role == "body"], ["כותרת המצגת", "נקודה ראשונה"])
+                    self.assertEqual([b.text for b in doc.blocks if b.role == "notes"], ["הערת דובר"])
+
 
 @unittest.skipUnless(
     os.environ.get("HEOCR_TEST_TESSERACT") and shutil.which("tesseract") and shutil.which("soffice"),

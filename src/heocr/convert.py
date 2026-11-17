@@ -1,7 +1,12 @@
-"""DOC, RTF and ODT through LibreOffice, converted to DOCX and read by our own DOCX reader (D4a).
+"""Formats read through LibreOffice: converted to an Office Open XML format we read ourselves.
+
+- D4a: DOC, RTF and ODT to **DOCX**, read by our DOCX reader;
+- D4h: ODS and XLS to **XLSX**, read by our XLSX reader; ODP and PPT to **PPTX**, read by our PPTX
+  reader. The blocks' ``source`` names the conversion (``converted_docx``, ``converted_xlsx``,
+  ``converted_pptx``).
 
 LibreOffice (MPL-2.0) is an optional external program, found on the machine and never
-bundled, like Tesseract. Its output is **DOCX, never text**: the text export hangs on a body
+bundled, like Tesseract. Its output is **an OOXML file, never text**: the text export hangs on a body
 that ends with a table and drops footnotes (eval's findings), and it would bypass the DOCX
 reader's numbering, notes, hidden text and repairs.
 
@@ -30,8 +35,18 @@ from pathlib import Path
 
 CONVERT_TIMEOUT = 180.0  # seconds for one conversion, a cold start of a fresh profile included
 VERSION_TIMEOUT = 60.0
-# Formats converted to DOCX, with the input extension LibreOffice is given.
-TO_DOCX = {"doc": "doc", "rtf": "rtf", "odt": "odt"}
+# Formats converted, with the input extension LibreOffice is given, the target, and its export filter.
+CONVERSIONS = {
+    "doc": ("doc", "docx"),
+    "rtf": ("rtf", "docx"),
+    "odt": ("odt", "docx"),
+    "ods": ("ods", "xlsx"),
+    "xls": ("xls", "xlsx"),
+    "odp": ("odp", "pptx"),
+    "ppt": ("ppt", "pptx"),
+}
+FILTERS = {"docx": "docx:MS Word 2007 XML", "xlsx": "xlsx:Calc MS Excel 2007 XML", "pptx": "pptx:Impress MS PowerPoint 2007 XML"}
+TO_DOCX = {fmt: ext for fmt, (ext, target) in CONVERSIONS.items() if target == "docx"}
 _MAC_APP = "/Applications/LibreOffice.app/Contents/MacOS/soffice"
 
 
@@ -68,7 +83,11 @@ class LibreOffice:
 
     def to_docx(self, body: bytes, fmt: str) -> bytes:
         """Convert a DOC, RTF or ODT file's bytes to DOCX bytes."""
-        extension = TO_DOCX[fmt]
+        return self.convert(body, fmt)
+
+    def convert(self, body: bytes, fmt: str) -> bytes:
+        """Convert a file's bytes to its target format (``CONVERSIONS``): DOCX, XLSX or PPTX bytes."""
+        extension, target = CONVERSIONS[fmt]
         with tempfile.TemporaryDirectory(prefix="heocr-lo-") as temp:
             source = Path(temp) / f"input.{extension}"
             source.write_bytes(body)
@@ -83,16 +102,16 @@ class LibreOffice:
                 "--nodefault",
                 "--nolockcheck",
                 "--convert-to",
-                "docx:MS Word 2007 XML",
+                FILTERS[target],
                 "--outdir",
                 str(out),
                 str(source),
             ]
             code, output = _run(argv, self.timeout, temp)
-            result = out / "input.docx"
+            result = out / f"input.{target}"
             if not result.is_file() or result.stat().st_size == 0:
                 tail = output.decode("utf-8", "replace").strip().splitlines()[-1:] or [f"exit code {code}"]
-                raise ConversionError("conversion_failed", f"LibreOffice produced no DOCX ({tail[0][:200]})")
+                raise ConversionError("conversion_failed", f"LibreOffice produced no {target.upper()} ({tail[0][:200]})")
             return result.read_bytes()
 
 
@@ -156,11 +175,14 @@ def _sha256(path: Path) -> str:
 
 
 def read_converted(body: bytes, doc) -> None:
-    """The reader for DOC, RTF and ODT: convert to DOCX, then read with our own DOCX reader."""
+    """The reader for converted formats: convert with LibreOffice, then read with our own reader."""
     from heocr.contract import Unread
     from heocr.docx.reader import read_docx
     from heocr.identify import identify
+    from heocr.pptx import read_pptx
+    from heocr.xlsx import read_xlsx
 
+    target = CONVERSIONS[doc.format][1]
     settings = doc._convert_settings
     if settings is None:
         doc.unread.append(Unread(scope="document", reason="converter_unavailable", detail=f"format {doc.format}; conversion turned off"))
@@ -169,17 +191,17 @@ def read_converted(body: bytes, doc) -> None:
     try:
         office = LibreOffice.find(settings["cmd"], timeout=settings["timeout"])
         doc.components.update(office.provenance())
-        docx = office.to_docx(body, doc.format)
+        converted = office.convert(body, doc.format)
     except ConversionError as exc:
         doc.unread.append(Unread(scope="document", reason=exc.reason, detail=f"format {doc.format}; {exc.detail}"))
         doc.flags.append("not_read")
         return
-    if identify(docx).format != "docx":
-        doc.unread.append(Unread(scope="document", reason="conversion_failed", detail=f"format {doc.format}; LibreOffice's output is not a DOCX file"))
+    if identify(converted).format != target:
+        doc.unread.append(Unread(scope="document", reason="conversion_failed", detail=f"format {doc.format}; LibreOffice's output is not the expected {target.upper()} file"))
         doc.flags.append("not_read")
         return
-    read_docx(docx, doc)
+    {"docx": read_docx, "xlsx": read_xlsx, "pptx": read_pptx}[target](converted, doc)
     for block in doc.blocks:
         if block.source == "office_xml":
-            block.source = "converted_docx"
+            block.source = f"converted_{target}"
     doc.flags.append("converted_by_libreoffice")
