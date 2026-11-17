@@ -9,6 +9,8 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
+from heocr.contract import MAX_SPAN
+
 if TYPE_CHECKING:  # pragma: no cover
     from heocr.contract import Block, Document
 
@@ -20,6 +22,7 @@ _SECTIONS = (
     ("comment", "Comments"),
     ("header", "Headers"),
     ("footer", "Footers"),
+    ("notes", "Speaker notes"),
     ("navigation", "Navigation"),
 )
 _MD_LIST_MARKER = re.compile(r"\A(\d+)([.)])\Z")
@@ -57,9 +60,10 @@ def to_text(doc: "Document") -> str:
     for block in doc.blocks:
         if block.role not in _INLINE_ROLES:
             continue
-        if previous_page is not None and block.page is not None and block.page != previous_page:
+        where = block.page if block.page is not None else block.slide
+        if previous_page is not None and where is not None and where != previous_page:
             parts.append("\f")
-        previous_page = block.page if block.page is not None else previous_page
+        previous_page = where if where is not None else previous_page
         text = _block_text(block)
         if text:
             parts.append(text)
@@ -84,7 +88,7 @@ def _md_table(block: "Block") -> str:
         for cell in row:
             # Keep grid columns aligned: a spanned cell is followed by empty cells.
             out.append(_md_escape_cell(cell.text))
-            out.extend([""] * (cell.colspan - 1))
+            out.extend([""] * (min(max(cell.colspan, 1), MAX_SPAN) - 1))  # clamped: no reader's bug can blow up the view
         rows.append(out)
     if not rows:
         return ""
@@ -127,6 +131,9 @@ def to_markdown(doc: "Document") -> str:
         if block.page is not None and block.page != previous_page:
             parts.append(f"<!-- page {block.page + 1} -->")
             previous_page = block.page
+        elif block.page is None and block.slide is not None and block.slide != previous_page:
+            parts.append(f"<!-- slide {block.slide} -->")
+            previous_page = block.slide
         md = _md_block(block)
         if md:
             parts.append(md)

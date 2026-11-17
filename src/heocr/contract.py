@@ -16,7 +16,8 @@ SCHEMA_ID = "heocr_document.v1"
 
 BLOCK_KINDS = ("text", "heading", "list_item", "table", "figure")
 # "navigation": site menus, breadcrumbs and "skip to content" links (D4f); kept, out of the body flow.
-ROLES = ("body", "header", "footer", "footnote", "endnote", "comment", "textbox", "navigation")
+# "notes": a slide's speaker notes (D4e).
+ROLES = ("body", "header", "footer", "footnote", "endnote", "comment", "textbox", "navigation", "notes")
 SOURCES = ("text_layer", "office_xml", "converted_docx", "html", "ocr", "none")
 PAGE_CLASSES = ("T1", "T2", "T3", "T4", "T5", "T6", "empty")
 DIRECTIONS = ("rtl", "ltr")
@@ -87,6 +88,7 @@ class Block:
     repairs: list[dict[str, Any]] = field(default_factory=list)
     flags: list[str] = field(default_factory=list)
     half: str | None = None  # a PDF spread split in two (D4c): "right" or "left", the page it belongs to
+    slide: int | None = None  # PPTX (D4e): the slide's number as shown, from 1
     _cell_repairs: Any = field(default=None, repr=False, compare=False)  # PDF tables: repairs made in cells, logged by the reader
 
     def to_dict(self, index: int) -> dict[str, Any]:
@@ -95,7 +97,7 @@ class Block:
             out["cells"] = [[cell.to_dict() for cell in row] for row in (self.cells or [])]
         else:
             out["text"] = self.text
-        for key in ("level", "label", "note_id", "direction", "page", "half"):
+        for key in ("level", "label", "note_id", "direction", "page", "half", "slide"):
             value = getattr(self, key)
             if value is not None:
                 out[key] = value
@@ -138,6 +140,19 @@ class Page:
             "coverage": dict(self.coverage),
             "flags": sorted(set(self.flags)),
         }
+
+
+# A cell spans at most this many columns or rows. Larger declared spans (hostile or broken input)
+# are capped, and the cell is flagged span_capped; renderers clamp to it too.
+MAX_SPAN = 1000
+
+
+def cap_span(value: int, flags: list[str]) -> int:
+    """``value`` within 1..MAX_SPAN; a capped span flags the cell ``span_capped``."""
+    if value > MAX_SPAN:
+        flags.append("span_capped")
+        return MAX_SPAN
+    return max(value, 1)
 
 
 # Pages (PDF pages, image frames) read at most per document. Every page may cost an OCR run of
@@ -383,6 +398,8 @@ def validate(payload: Any) -> list[str]:
                         errors.append(f"{where}.cells readings must be objects with a model and a text")
         elif not isinstance(block.get("text"), str):
             errors.append(f"{where}.text must be a string")
+        if "slide" in block and not (isinstance(block["slide"], int) and not isinstance(block["slide"], bool) and block["slide"] >= 1):
+            errors.append(f"{where}.slide must be a positive integer")
         if "half" in block and block["half"] not in ("right", "left"):
             errors.append(f"{where}.half must be 'right' or 'left'")
         if "direction" in block and block["direction"] not in DIRECTIONS:

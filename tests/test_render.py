@@ -43,5 +43,14 @@ class RenderTest(unittest.TestCase):
         self.assertIn("<!-- heocr: unread page 2 (class_T5_no_route) -->", md)
 
 
+class SpanClampTest(unittest.TestCase):
+    def test_markdown_clamps_a_huge_colspan(self) -> None:
+        from heocr.contract import MAX_SPAN, Block, Cell, Document
+
+        doc = Document(sha256="0" * 64, size=1, format="docx", format_evidence="test")
+        doc.blocks.append(Block(kind="table", cells=[[Cell("א", colspan=2_000_000_000)]], source="office_xml"))
+        self.assertLess(len(doc.markdown), 10 * MAX_SPAN)
+
+
 if __name__ == "__main__":
     unittest.main()

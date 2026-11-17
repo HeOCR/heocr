@@ -117,6 +117,12 @@ class TableTest(unittest.TestCase):
             [("סיכום", 3, 1, [])],
         ])
 
+    def test_a_huge_colspan_is_capped(self) -> None:
+        doc = read('<table><tr><td colspan="2000000000">רחב</td><td>א</td></tr></table>')
+        cell = doc.blocks[0].cells[0][0]
+        self.assertEqual(cell.colspan, heocr.contract.MAX_SPAN)
+        self.assertIn("span_capped", cell.flags)
+
     def test_a_span_beyond_the_row_is_still_placed(self) -> None:
         doc = read('<table><tr><td>א</td><td rowspan="2">ב</td></tr><tr><td>ג</td></tr><tr><td>ד</td><td>ה</td></tr></table>')
         self.assertEqual([[c.text for c in row] for row in doc.blocks[0].cells], [["א", "ב"], ["ג", ""], ["ד", "ה"]])
