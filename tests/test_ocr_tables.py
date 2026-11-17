@@ -202,6 +202,12 @@ class OcrTableTest(unittest.TestCase):
             with self.subTest(rotate=rotate):
                 text = lines_block(["המציע יגיש את הצעתו עד המועד הקבוע", "במסמכי המכרז ולא יאוחר מן המועד"], top=800)
                 body = make_pdf([PdfPage(lines=text + [TextLine("סוף העמוד", 545, 60)], rasters=[(50, 150, 495, 560, image)], rotate=rotate)])
+                turned = make_pdf([PdfPage(lines=text + [TextLine("סוף העמוד", 545, 60)], rasters=[(50, 150, 495, 560, image)], turn=rotate)])
+                for variant in (body, turned):  # sideways on screen (user frame), and upright on screen (displayed frame)
+                    doc = heocr.extract(variant, tesseract=FAKE)
+                    (table,) = [b for b in doc.blocks if b.kind == "table"]
+                    self.assertEqual([[c.text for c in row] for row in table.cells], expected)
+                    self.assertAlmostEqual(table.bbox[0], 50 + 20, delta=2)
                 doc = heocr.extract(body, tesseract=FAKE)
                 (table,) = [b for b in doc.blocks if b.kind == "table"]
                 self.assertEqual([[c.text for c in row] for row in table.cells], expected)
