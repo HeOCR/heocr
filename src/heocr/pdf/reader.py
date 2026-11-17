@@ -34,6 +34,7 @@ from heocr.ocr.regions import (  # noqa: F401  (re-exported for callers of the P
     paper_level,
     short_for_ink,
     skew_angle,
+    text_rows,
     unrotate_box,
 )
 from heocr.pdf.classify import FIGURE_IMAGE, PAGE_IMAGE, classify, object_stats, stream_signals, text_signals
@@ -1867,7 +1868,27 @@ def _ocr_regions(
     if not boxes:
         return counts
     digest_of = {id(b): d for b, d in zip(boxes, digests or [])}
-    large = [b for b in boxes if ocr_wanted and (b[2] - b[0]) * (b[3] - b[1]) >= REGION_MIN_PAGE_SHARE * width * height]
+    sized = [b for b in boxes if (b[2] - b[0]) * (b[3] - b[1]) >= REGION_MIN_PAGE_SHARE * width * height]
+    if ocr_wanted:
+        large = sized
+    else:
+        # Images under a T6 share of the page are mostly logos and icons, counted and not read. A
+        # region that holds lines of text is read all the same (set B pdf_t6_region: a table drawn as
+        # an image, 3-9% of the page, was skipped and lost with no flag): the layer's own characters
+        # are masked out first, and the rest must look like text rows (text_rows).
+        large = []
+        if sized:
+            image, scale = _render(page, frame_of(page))
+            for box in sized:
+                crop = [int(box[0] * scale), int(box[1] * scale), int(box[2] * scale + 0.999), int(box[3] * scale + 0.999)]
+                if crop[2] - crop[0] < MIN_REGION_PX or crop[3] - crop[1] < MIN_REGION_PX:
+                    continue
+                inside = [d for d in drawn_boxes if d[0] < box[2] and d[2] > box[0] and d[1] < box[3] and d[3] > box[1]]
+                region, _ = mask_layer_text(image.crop(crop), (crop[0] / scale, crop[1] / scale), scale, inside)
+                if text_rows(region):
+                    large.append(box)
+            if large:
+                counts["image_regions_text_below_figure_share"] = len(large)
     counts["image_regions_small"] = len(boxes) - len(large)
     if layer_is_ocr:
         scans = [b for b in large if (b[2] - b[0]) * (b[3] - b[1]) >= PAGE_IMAGE * width * height]

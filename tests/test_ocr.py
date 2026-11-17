@@ -249,6 +249,27 @@ class OcrRouteTest(unittest.TestCase):
         self.assertTrue(all("image_regions_repeated" not in p.coverage for p in doc.pages))
         self.assertEqual(sum(p.coverage["image_regions_ocr"] + p.coverage["image_regions_unread"] for p in doc.pages), 2)
 
+    def test_a_small_image_of_text_is_read_and_a_small_logo_is_not(self) -> None:
+        # set B pdf_t6_region: a table drawn as an image, 3-9% of the page, sat under the T6 image share
+        # and was counted as a logo, never read and never flagged. A small region that holds lines of
+        # text is read; one that is a blob is still only counted.
+        from PIL import Image, ImageDraw
+
+        table = Image.new("L", (800, 200), 255)
+        draw = ImageDraw.Draw(table)
+        for y in (20, 80, 140):
+            draw.rectangle([20, y, 760, y + 30], fill=40)  # three lines of "text"
+        logo = Image.new("L", (300, 300), 255)
+        ImageDraw.Draw(logo).ellipse([20, 20, 280, 280], fill=40)  # one blob
+        for picture, read in ((table, True), (logo, False)):
+            with self.subTest(read=read):
+                page = PdfPage(lines=lines_block(HEBREW), rasters=[(50, 400, 300, 75 if read else 100, picture)])
+                doc = heocr.extract(make_pdf([page]), tesseract=FAKE)
+                c = doc.pages[0].coverage
+                self.assertEqual(c["image_regions_ocr"] + c["image_regions_unread"], 1 if read else 0)
+                self.assertEqual(c["image_regions_small"], 0 if read else 1)
+                self.assertEqual(c.get("image_regions_text_below_figure_share", 0), 1 if read else 0)
+
     def test_t6_regions_go_to_region_ocr(self) -> None:
         page = PdfPage(lines=lines_block(HEBREW), images=[(50, 100, 495, 300), (500, 20, 4, 4)])
         doc = heocr.extract(make_pdf([page]), tesseract=FAKE)
