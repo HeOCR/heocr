@@ -34,15 +34,20 @@ class NumberWordsTest(unittest.TestCase):
         self.addCleanup(patcher.stop)
         os.environ.pop("TESSDATA_PREFIX", None)
 
-    def page(self, words: list[str]) -> str:
-        """A one-line page OCR, right to left: word n at x = 2000 - 300 n."""
-        rows = [HEADER] + [f"5\t1\t1\t1\t1\t{n}\t{2000 - 300 * n}\t200\t250\t60\t90.0\t{w}" for n, w in enumerate(words, 1)]
+    def page(self, words: list[str], gaps: list[int] | None = None) -> str:
+        """A one-line page OCR, right to left: words 250 px wide, 50 px apart (or ``gaps``, px)."""
+        gaps = gaps or [50] * len(words)
+        rows, right = [HEADER], 2250
+        for n, w in enumerate(words, 1):
+            left = right - 250
+            rows.append(f"5\t1\t1\t1\t1\t{n}\t{left}\t200\t250\t60\t90.0\t{w}")
+            right = left - gaps[n - 1]
         path = Path(self.tmp.name) / "page.tsv"
         path.write_text("\n".join(rows) + "\n", encoding="utf-8")
         return str(path)
 
-    def read(self, words: list[str], second: str, confidence: str = "90.0", **kwargs) -> heocr.Document:
-        with mock.patch.dict(os.environ, {"FAKE_TSV": self.page(words), "FAKE_WORD": second, "FAKE_CONF": confidence}):
+    def read(self, words: list[str], second: str, confidence: str = "90.0", gaps: list[int] | None = None, **kwargs) -> heocr.Document:
+        with mock.patch.dict(os.environ, {"FAKE_TSV": self.page(words, gaps), "FAKE_WORD": second, "FAKE_CONF": confidence}):
             return heocr.extract(make_pdf([PdfPage(images=[(0, 0, 595, 842)])]), tesseract=FAKE, **kwargs)
 
     def second_readings(self) -> list[str]:
@@ -104,6 +109,72 @@ class NumberWordsTest(unittest.TestCase):
                 Path(state).unlink(missing_ok=True)
                 doc = self.read(["1.", "תאגיד"], "")
                 self.assertEqual(doc.blocks[0].text, "1. תאגיד")
+
+    def test_a_number_split_into_pieces_is_read_again_whole(self) -> None:
+        # set C office scans: heb split "25.10.2022" into "2022" and "25."; each piece alone cannot be
+        # restored. Adjacent pieces of digits and number punctuation are read again as one crop.
+        doc = self.read(["מועד", "2022", "25."], "25.10.2022", gaps=[60, 8, 60])  # the pieces 8 px apart
+        block = doc.blocks[0]
+        self.assertEqual(block.text, "מועד 25.10.2022")
+        (logged,) = block.checks["number_readings"]
+        self.assertEqual((logged["first"], logged["second"], logged["segment"]), ("2022 25.", "25.10.2022", 2))
+        self.assertEqual(self.second_readings(), [])  # read once as a line (psm 7), not piece by piece (psm 8)
+
+    def test_a_run_reading_that_drops_digits_is_not_used(self) -> None:
+        state = str(Path(self.tmp.name) / "seq")
+        # The run's reading loses digits ("25.10" for "2022 25."): its pieces are read one by one instead.
+        with mock.patch.dict(os.environ, {"FAKE_WORD_SEQ": "25.10|2022|25.", "FAKE_WORD_STATE": state}):
+            doc = self.read(["מועד", "2022", "25."], "", gaps=[60, 8, 60])
+        self.assertEqual(doc.blocks[0].text, "מועד 2022 25.")
+        self.assertEqual(self.second_readings(), ["eng", "eng", "eng"])
+
+    def test_two_numbers_in_neighbouring_columns_stay_two(self) -> None:
+        # An unruled table on whole-page OCR: "120,960" and "26.09.2023" a column gap apart are two
+        # numbers, never joined, whatever the number model would read over both.
+        # Each word read alone gives itself back; a (wrong) joined read would take the first answer,
+        # an amount, and replace both words with it.
+        state = str(Path(self.tmp.name) / "seq")
+        with mock.patch.dict(os.environ, {"FAKE_WORD_SEQ": "120,960|26.09.2023", "FAKE_WORD_STATE": state}):
+            doc = self.read(["פריט", "120,960", "26.09.2023"], "", gaps=[20, 200, 20])
+        self.assertEqual(doc.blocks[0].text, "פריט 120,960 26.09.2023")
+        self.assertFalse(any((r.get("run") or 0) > 1 for r in (doc.blocks[0].checks or {}).get("number_readings", [])))
+
+    def test_a_joined_reading_that_is_not_a_date_or_amount_is_not_used(self) -> None:
+        # Close pieces read as "1234": not a date or a grouped amount, so the pieces stay apart.
+        state = str(Path(self.tmp.name) / "seq")
+        with mock.patch.dict(os.environ, {"FAKE_WORD_SEQ": "1234|12|34", "FAKE_WORD_STATE": state}):
+            doc = self.read(["סעיף", "12", "34"], "", gaps=[60, 8, 60])
+        self.assertEqual(doc.blocks[0].text, "סעיף 12 34")
+
+    def segment(self, words, line, gaps=None):
+        with mock.patch.dict(os.environ, {"FAKE_LINE": line}):
+            return self.read(words, "", gaps=gaps)
+
+    def test_a_table_rows_date_broken_into_marks_is_read_again_as_a_segment(self) -> None:
+        # set C office_numbers: heb reads a row's last cell "01.12.2022" as "2022 >": the day and month
+        # turned into a mark. The row's number segment is read again by the number model as one line.
+        doc = self.segment(["הסעות", "21", "5,990", "2022", ">"], "21 5,990 01.12.2022")
+        block = doc.blocks[0]
+        self.assertEqual(block.text, "הסעות 21 5,990 01.12.2022")
+        (logged,) = block.checks["number_readings"]
+        self.assertEqual((logged["first"], logged["second"], logged["segment"]), ("21 5,990 2022 >", "21 5,990 01.12.2022", 4))
+
+    def test_a_segments_numbers_stay_separate_words(self) -> None:
+        # Numbers in neighbouring columns come back as separate tokens: never joined into one.
+        doc = self.segment(["פריט", "120,960", "26", "09.2023"], "120,960 26.09.2023", gaps=[60, 200, 8, 60])
+        self.assertEqual(doc.blocks[0].text.split()[1:], ["120,960", "26.09.2023"])
+
+    def test_a_segment_reading_that_is_not_all_numbers_is_not_used(self) -> None:
+        doc = self.segment(["הסעות", "2022", ">"], "2022 Tf")
+        self.assertEqual(doc.blocks[0].text, "הסעות 2022 >")
+
+    def test_a_currency_sign_ends_a_segment(self) -> None:
+        doc = self.segment(["סכום", "20000", "₪"], "256,000 ₪")
+        self.assertEqual(doc.blocks[0].text, "סכום 20000 ₪")  # one word: left to its own reading (FAKE_WORD empty)
+
+    def test_a_currency_sign_is_not_taken_into_a_run(self) -> None:
+        doc = self.read(["סכום", "20000", "₪"], "256,000")
+        self.assertEqual(doc.blocks[0].text, "סכום 256,000 ₪")
 
     def test_no_second_reading_when_number_checks_are_off(self) -> None:
         doc = self.read(["1.", "תאגיד"], "1.1.", check_numbers=False)
