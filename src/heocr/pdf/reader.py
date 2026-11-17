@@ -30,7 +30,7 @@ from heocr.ocr.regions import (  # noqa: F401  (re-exported for callers of the P
     paper_level,
     short_for_ink,
 )
-from heocr.pdf.classify import FIGURE_IMAGE, classify, object_stats, stream_signals, text_signals
+from heocr.pdf.classify import FIGURE_IMAGE, PAGE_IMAGE, classify, object_stats, stream_signals, text_signals
 from heocr.pdf.frame import frame_of
 from heocr.pdf.lines import Atom, PageLines, build_lines, line_is_rtl, paragraphs
 from heocr.pdf.columns import UNRESOLVED, Segment, arrange
@@ -896,7 +896,8 @@ def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = froz
     # images cover a T6 share of the page, whatever the class (a T2 page can too), they go to
     # region OCR; otherwise they are logos and icons, counted in coverage.
     ocr_wanted = stats.image_coverage >= FIGURE_IMAGE
-    regions = _ocr_regions(doc, index, page, width, height, stats.image_boxes, text.drawn_boxes, ocr_wanted)
+    regions = _ocr_regions(doc, index, page, width, height, stats.image_boxes, text.drawn_boxes, ocr_wanted,
+                           layer_is_ocr="text_layer_is_ocr" in flags)
     status = "read" if read >= text.chars_total and not regions["image_regions_unread"] else "partial"
     route = "text_layer+ocr_regions" if regions["image_regions_ocr"] else "text_layer"
     doc.pages.append(
@@ -1407,13 +1408,18 @@ def _second_number_reading(numbers, crop, dpi: int, psm: int, first: dict, cell_
 
 
 def _ocr_regions(
-    doc: Document, index: int, page, width: float, height: float, boxes: list[list[float]], drawn_boxes, ocr_wanted: bool = True
+    doc: Document, index: int, page, width: float, height: float, boxes: list[list[float]], drawn_boxes, ocr_wanted: bool = True,
+    layer_is_ocr: bool = False,
 ) -> dict:
     """Region OCR for the image regions of a page read from its text layer. Returns coverage counts.
 
     The layer's own characters are masked out of each region first, so text already read from
     the layer (labels over a diagram, text on a background image) is not read again by OCR.
     Regions under REGION_MIN_PAGE_SHARE of the page (logos, icons) are counted, not recognized.
+    On a page whose layer is an OCR layer that was kept (``layer_is_ocr``), an image covering the
+    page (``PAGE_IMAGE``) is that layer's own scan: it is counted as needing no OCR. Masking the
+    layer out of a scan leaves residue that OCR reads as noise at low confidence, which was
+    reported as unread although the layer holds the scan's text.
     """
     # Every region lands in exactly one count: ocr + small + unread + no_ocr_needed == image_regions.
     counts = {
@@ -1428,6 +1434,11 @@ def _ocr_regions(
         return counts
     large = [b for b in boxes if ocr_wanted and (b[2] - b[0]) * (b[3] - b[1]) >= REGION_MIN_PAGE_SHARE * width * height]
     counts["image_regions_small"] = len(boxes) - len(large)
+    if layer_is_ocr:
+        scans = [b for b in large if (b[2] - b[0]) * (b[3] - b[1]) >= PAGE_IMAGE * width * height]
+        counts["image_regions_no_ocr_needed"] += len(scans)
+        counts["image_regions_layer_scan"] = len(scans)
+        large = [b for b in large if b not in scans]
     if not large:
         return counts
 

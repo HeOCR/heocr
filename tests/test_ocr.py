@@ -121,6 +121,20 @@ class OcrRouteTest(unittest.TestCase):
         self.assertIn(HEBREW[0], doc.text)
         self.assertTrue(any(call[call.index("--psm") + 1] == "7" for call in self.calls() if "--psm" in call))  # one-line checks ran
 
+    def test_a_kept_ocr_layer_is_not_read_again_from_its_own_scan(self) -> None:
+        # set C pdf_t1_ocr_layer: masking the layer out of its scan left residue that region OCR read
+        # as noise at low confidence, reported as unread although the layer holds the scan's text.
+        with mock.patch.dict(os.environ, {"FAKE_LINE": HEBREW[0]}):
+            doc = heocr.extract(make_pdf([PdfPage(lines=lines_block([HEBREW[0]] * 5), invisible=True, images=FULL_PAGE)]), tesseract=FAKE)
+        page = doc.pages[0]
+        self.assertEqual(page.page_class, "T1")
+        self.assertEqual(doc.unread, [])
+        self.assertEqual((page.coverage["image_regions_layer_scan"], page.coverage["image_regions_no_ocr_needed"]), (1, 1))
+        self.assertEqual(page.coverage["image_regions_unread"], 0)
+        self.assertFalse([b for b in doc.blocks if b.source == "ocr"])
+        recognitions = [c for c in self.calls() if c[:1] not in (["--version"], ["--list-langs"])]
+        self.assertTrue(recognitions and all("--psm" in c and c[c.index("--psm") + 1] == "7" for c in recognitions))  # only the layer check
+
     def test_a_scrambled_layer_that_a_confident_reading_contradicts_is_read_by_ocr(self) -> None:
         # A permutation of the page's letters: final forms inside words, plain forms at their ends.
         doc = self.read_layer(SCRAMBLED, "המציע יגיש את הצעתו עד המועד")
