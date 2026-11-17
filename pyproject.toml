@@ -9,14 +9,24 @@ description = "The best open pipeline for getting Hebrew text out of any documen
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
-license-files = ["LICENSE", "NOTICE"]
+license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_LICENSES.md"]
 authors = [
   { name = "HeOCR maintainers" },
 ]
+keywords = ["hebrew", "ocr", "pdf", "docx", "text extraction", "document"]
 classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
   "Natural Language :: Hebrew",
+  "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Topic :: Text Processing",
+  "Topic :: Text Processing :: Linguistic",
 ]
 # The core stays permissive (decision 0020): no copyleft dependency in the default install.
 dependencies = [
@@ -30,6 +40,8 @@ heocr = "heocr.cli:main"
 
 [project.urls]
 Source = "https://github.com/HeOCR/heocr"
+Issues = "https://github.com/HeOCR/heocr/issues"
+Documentation = "https://github.com/HeOCR/heocr#readme"
 
 [tool.setuptools.packages.find]
 where = ["src"]
