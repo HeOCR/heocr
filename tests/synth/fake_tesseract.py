@@ -10,7 +10,7 @@ A table-cell call (--psm 6 or 7) with $FAKE_CELLS set (a JSON file mapping grey 
 text) "reads" the image: the most common grey level darker than paper (0 excluded, being the
 rulings) is looked up, within 4 levels, and its text is the answer. A level not in the map is
 ink that could not be read: the answer is empty. A call in ``eng`` (the number model) uses
-$FAKE_CELLS_ENG instead, when it is set, at confidence $FAKE_CELLS_CONF (default 90).
+$FAKE_CELLS_ENG instead, when it is set, at confidence $FAKE_CELLS_CONF (default 90; heb cells at $FAKE_CELLS_CONF_HEB).
 """
 
 import json
@@ -65,7 +65,7 @@ def main(argv: list[str]) -> int:
             text = mapping[near[0]] if near else ""
         rows = ["level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext"]
         for n, token in enumerate(text.split(), 1):
-            rows.append(f"5\t1\t1\t1\t1\t{n}\t2\t2\t40\t20\t{os.environ.get('FAKE_CELLS_CONF', '90.0') if lang == 'eng' else '90.0'}\t{token}")
+            rows.append(f"5\t1\t1\t1\t1\t{n}\t2\t2\t40\t20\t{os.environ.get('FAKE_CELLS_CONF', '90.0') if lang == 'eng' else os.environ.get('FAKE_CELLS_CONF_HEB', '90.0')}\t{token}")
         with open(base + ".tsv", "w", encoding="utf-8") as stream:
             stream.write("\n".join(rows) + "\n")
         return 0

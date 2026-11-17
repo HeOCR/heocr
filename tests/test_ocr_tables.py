@@ -317,6 +317,35 @@ class OcrTableTest(unittest.TestCase):
                 (table,) = [b for b in doc.blocks if b.kind == "table"]
                 self.assertEqual(table.cells[1][2].text, second if taken else "₪11.22")
 
+    def unconfirmed_case(self, heb: str, eng: str, heb_conf: str, eng_conf: str):
+        texts = {**TEXTS, 70: heb}
+        cells = Path(self.tmp.name) / "cells.json"
+        cells.write_text(json.dumps({str(k): v for k, v in texts.items()}), encoding="utf-8")
+        self.numbers_setup({70: eng, 100: "200"})
+        with mock.patch.dict(os.environ, {"FAKE_CELLS_CONF": eng_conf, "FAKE_CELLS_CONF_HEB": heb_conf}):
+            doc = heocr.extract(scanned_pdf(scan(LEVELS)), tesseract=FAKE)
+        (table,) = [b for b in doc.blocks if b.kind == "table"]
+        return doc, table.cells[1][2]
+
+    def test_a_cell_whose_two_readings_differ_and_neither_is_confident_is_unconfirmed(self) -> None:
+        doc, cell = self.unconfirmed_case("752.25", "1409", "60.0", "40.0")
+        self.assertEqual(cell.text, "752.25")  # nothing chosen: the first reading stays
+        self.assertIn("table_cell_unconfirmed", cell.flags)
+        self.assertEqual([(r["model"], r["text"], r["confidence"]) for r in cell.readings], [("heb", "752.25", 60.0), ("eng", "1409", 40.0)])
+        (entry,) = [u for u in doc.unread if u.reason == "table_cell_unconfirmed"]
+        self.assertEqual((entry.scope, entry.page), ("block", 0))
+        self.assertEqual(entry.detail, "row 1, column 2: two readings differ and neither is confident")
+        self.assertEqual(len(entry.bbox), 4)
+        self.assertEqual(heocr.validate(doc.to_dict()), [])
+
+    def test_a_confident_reading_or_agreeing_readings_are_not_unconfirmed(self) -> None:
+        for heb, eng, heb_conf, eng_conf in (("752.25", "1409", "90.0", "40.0"), ("752.25", "752.25", "60.0", "40.0"),
+                                             ("12׳", "12'", "60.0", "40.0")):
+            with self.subTest(heb=heb, eng=eng, heb_conf=heb_conf):
+                doc, cell = self.unconfirmed_case(heb, eng, heb_conf, eng_conf)
+                self.assertNotIn("table_cell_unconfirmed", cell.flags)
+                self.assertFalse([u for u in doc.unread if u.reason == "table_cell_unconfirmed"])
+
     def test_a_cell_with_a_hebrew_word_is_not_numeric(self) -> None:
         texts = {**TEXTS, 70: "סכום 5"}
         cells = Path(self.tmp.name) / "cells.json"
