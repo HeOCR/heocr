@@ -1,6 +1,11 @@
 """The visible box of a PDF page: offset boxes read normally; text outside the box is unread."""
 
+import os
+import sys
+import tempfile
 import unittest
+from pathlib import Path
+from unittest import mock
 
 import heocr
 from tests.synth.pdf import PdfPage, TextLine, lines_block, make_pdf
@@ -65,6 +70,56 @@ class OutsideTest(unittest.TestCase):
         doc = read(PdfPage(lines=[TextLine("שלום", 22, 700)]))  # four 6-pt letters: the last one spans x -2..4
         self.assertEqual(doc.unread, [])
         self.assertIn("שלום", doc.text)
+
+
+FAKE_TESSERACT = [sys.executable, str(Path(__file__).parent / "synth" / "fake_tesseract.py")]
+
+
+class RotatedPageTest(unittest.TestCase):
+    """/Rotate turns the shown page; a text layer's boxes stay in the unrotated box. Anything that
+    places layer boxes on a rendered image (region crops, masks of layer characters, number and
+    font checks) must render the page in that same, unrotated frame."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        tessdata = Path(self.tmp.name) / "tessdata"
+        tessdata.mkdir()
+        (tessdata / "heb.traineddata").write_bytes(b"fake heb model")
+        patcher = mock.patch.dict(os.environ, {"FAKE_TESSDATA": str(tessdata)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        os.environ.pop("TESSDATA_PREFIX", None)
+
+    def page(self, rotate: int) -> bytes:
+        """A word of the text layer over an image region whose only ink lies exactly under the word."""
+        from PIL import Image, ImageDraw
+
+        word = TextLine("מכרזים", 300, 200, 20)  # its loose box: x 240..300, y 200..220 (user space)
+        k = 4  # raster pixels per point
+        image = Image.new("L", (300 * k, 200 * k), 255)
+        ImageDraw.Draw(image).rectangle([(240 - 50) * k + 2, (300 - 220) * k + 2, (300 - 50) * k - 2, (300 - 200) * k - 2], fill=0)
+        text = [TextLine("שורה ראשונה של טקסט רגיל בעמוד", 545, 800), TextLine("שורה שנייה של טקסט רגיל בעמוד", 545, 780)]
+        return make_pdf([PdfPage(lines=[word] + text, rasters=[(50, 100, 300, 200, image)], rotate=rotate)])
+
+    def test_layer_text_masks_its_image_on_a_rotated_page(self) -> None:
+        for rotate in (0, 90, 180, 270):
+            with self.subTest(rotate=rotate):
+                doc = heocr.extract(self.page(rotate), tesseract=FAKE_TESSERACT)
+                self.assertEqual(doc.pages[0].page_class, "T6")
+                # The mask covers the word's ink: nothing is left to OCR, and nothing is read twice.
+                self.assertEqual([u.reason for u in doc.unread], ["image_region_text_in_layer"])
+                self.assertEqual([b for b in doc.blocks if "from_image_region" in b.flags], [])
+                self.assertIn("מכרזים", doc.text)
+
+    def test_a_rotated_text_layer_page_reports_the_frame_of_its_boxes(self) -> None:
+        doc = heocr.extract(self.page(90), ocr=False)
+        page = doc.pages[0]
+        self.assertEqual((page.width, page.height), (595.0, 842.0))  # the unrotated box, as the blocks are
+        self.assertIn("page_rotated", page.flags)
+        for block in doc.blocks:
+            self.assertLessEqual(block.bbox[2], page.width)
+            self.assertLessEqual(block.bbox[3], page.height)
 
 
 if __name__ == "__main__":
