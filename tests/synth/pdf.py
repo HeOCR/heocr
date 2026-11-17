@@ -131,6 +131,8 @@ class PdfPage:
     rotate: int = 0
     unit_font_size: bool = False  # "Tf 1" with the size in the text matrix, as many producers write
     glyphs: list[tuple[str, float, float]] = field(default_factory=list)  # extra glyphs (char, x, y), drawn as is
+    origin: tuple[float, float] = (0.0, 0.0)  # the MediaBox's lower-left corner; all content is moved with it
+    crop: tuple[float, float, float, float] | None = None  # a CropBox, in the page's own coordinates (before origin)
 
 
 def lines_block(texts: list[str], *, right: float = 545.0, top: float = 780.0, leading: float = 18.0, size: float = 12.0) -> list[TextLine]:
@@ -260,12 +262,19 @@ def make_pdf(pages: list[PdfPage]) -> bytes:
             font = f"/Font << /F1 {font_id} 0 R >>"
         if xobjects:
             resources = f"/XObject << {' '.join(xobjects)} >>"
+        ox, oy = page.origin
+        if ox or oy:
+            content = [f"1 0 0 1 {ox:g} {oy:g} cm"] + content
         contents = new(stream("\n".join(content).encode()))
         rotate = f" /Rotate {page.rotate}" if page.rotate else ""
+        crop = ""
+        if page.crop is not None:
+            cx0, cy0, cx1, cy1 = page.crop
+            crop = f" /CropBox [{cx0 + ox:g} {cy0 + oy:g} {cx1 + ox:g} {cy1 + oy:g}]"
         page_ids.append(
             new(
                 (
-                    f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {page.width:g} {page.height:g}]{rotate} "
+                    f"<< /Type /Page /Parent 2 0 R /MediaBox [{ox:g} {oy:g} {ox + page.width:g} {oy + page.height:g}]{crop}{rotate} "
                     f"/Resources << {font} {resources} >> /Contents {contents} 0 R >>"
                 ).encode()
             )

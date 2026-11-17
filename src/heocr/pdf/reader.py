@@ -53,6 +53,7 @@ class PageText:
 
     atoms: list[Atom] = field(default_factory=list)
     chars_total: int = 0  # non-space characters drawn by the page's own text objects
+    outside: int = 0  # non-space characters drawn outside the page's visible box (not read)
     controls: int = 0
     invisible: int = 0
     lone_surrogates: int = 0
@@ -86,11 +87,13 @@ def page_text(page, eth_fonts: frozenset[str] = frozenset(), font_maps: dict | N
     """
     import pypdfium2.raw as raw
 
+    from heocr.pdf.frame import frame_of
+
     out = PageText()
     marks: list[Atom] = []
     textpage = page.get_textpage()
+    frame = frame_of(page)
     try:
-        height = page.get_height()
         count = raw.FPDFText_CountChars(textpage)
         skip_next = False
         for index in range(count):
@@ -124,13 +127,20 @@ def page_text(page, eth_fonts: frozenset[str] = frozenset(), font_maps: dict | N
                 l2, b2, r2, t2 = textpage.get_charbox(index + 1, loose=True)
                 left, bottom, right, top = min(left, l2), min(bottom, b2), max(right, r2), max(top, t2)
             size = raw.FPDFText_GetFontSize(textpage, index)
+            box = frame.box(left, bottom, right, top)
+            if frame.outside(box):
+                # Drawn outside the visible box: a viewer never shows it (a facing page left in the
+                # layer, a slug). Counted and recorded as unread, never read into the page.
+                if not ch.isspace():
+                    out.outside += 1
+                continue
             if not ch.isspace() and not unicodedata.combining(ch):
                 out.chars_total += 1
                 name = _font_name(raw, textpage, index)
                 out.fonts[name] = out.fonts.get(name, 0) + 1
             if not ch.isspace():
                 # Invisible text (render mode 3) is masked too: it sits over the image that holds the same words.
-                out.drawn_boxes.append((left, height - top, right, height - bottom))
+                out.drawn_boxes.append(box)
             angle = raw.FPDFText_GetCharAngle(textpage, index)
             if angle > 0 and abs(math.sin(angle)) > ROTATED_SIN and not ch.isspace():
                 # Rotated text has no horizontal baseline; line building would make one line per letter.
@@ -150,7 +160,7 @@ def page_text(page, eth_fonts: frozenset[str] = frozenset(), font_maps: dict | N
                 font = _font_name(raw, textpage, index)
             if ch == "ð" and eth_fonts and _font_name(raw, textpage, index) in eth_fonts:
                 ch, repaired = "נ", repairs.LATIN1_ETH_NUN.rule_id
-            atom = Atom(ch, left, height - top, right, height - bottom, size or 1.0, index, repaired, font)
+            atom = Atom(ch, *box, size or 1.0, index, repaired, font)
             (marks if unicodedata.combining(ch) else out.atoms).append(atom)
     finally:
         textpage.close()
@@ -563,6 +573,11 @@ def _report_side_losses(doc: Document, index: int, text: PageText, flags: list[s
         )
     if text.lone_surrogates:
         flags.append("lone_surrogates_replaced")
+    if text.outside:
+        flags.append("text_outside_page")
+        doc.unread.append(
+            Unread(scope="page", reason="text_outside_page", page=index, detail=f"{text.outside} characters drawn outside the page's visible box")
+        )
 
 
 def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = frozenset(), font_maps: dict | None = None) -> None:
