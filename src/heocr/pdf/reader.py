@@ -335,6 +335,7 @@ def _close_word(word: list[int], font: str, words: dict, other_words: dict) -> N
     other_words[font] = other_words.get(font, 0) + 1
 
 
+DESKEW_TEXT_MIN_DEG = 1.0  # a page with no ruled table is turned straight only from this skew (degrees)
 RULE_PAD_PT = 2.0  # around a ruling found in a scan
 # A kept OCR layer whose scan has this share of its ink (and SHORT_INK_MIN_PX), in dense areas,
 # outside every layer line and ruling is partial. Correct layers leave 0% on set C pdf_t1_ocr_layer
@@ -1295,17 +1296,24 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
     # A skewed scan is turned straight first: ruling detection looks for straight runs, and at a
     # degree of skew a ruling leaves its pixel row before it is long enough to count (set C's heavily
     # skewed table scans had no table found at all). Every box this page records is turned back.
+    # A page with ruled tables is turned from SKEW_MIN_DEG: its cells are read one by one and need
+    # straight rows. Running text and unruled tables are turned only from DESKEW_TEXT_MIN_DEG:
+    # Tesseract copes with a small skew there, and turning the image cost set C's office scans rows.
     deskew = skew_angle(image)
     first_block, first_unread = len(doc.blocks), len(doc.unread)
-    if deskew:
-        if image.mode not in ("L", "RGB"):
-            image = image.convert("RGB")
-        level = paper_level(image)
-        image = image.rotate(deskew, resample=_BICUBIC, fillcolor=level if image.mode == "L" else (level, level, level))
-        flags = flags + ["deskewed"]
-        signals["deskew_degrees"] = deskew
-    # Ruled tables in the image are read cell by cell; the rest of the page once, without them (D3e).
     grids = tables_in(image, scale)
+    if deskew:
+        source = image if image.mode in ("L", "RGB") else image.convert("RGB")
+        level = paper_level(source)
+        turned = source.rotate(deskew, resample=_BICUBIC, fillcolor=level if source.mode == "L" else (level, level, level))
+        turned_grids = tables_in(turned, scale)
+        if abs(deskew) >= DESKEW_TEXT_MIN_DEG or grids or turned_grids:
+            image, grids = turned, turned_grids
+            flags = flags + ["deskewed"]
+            signals["deskew_degrees"] = deskew
+        else:
+            deskew = 0.0
+    # Ruled tables in the image are read cell by cell; the rest of the page once, without them (D3e).
     page_image = _without(image, scale, [t.bbox for t in grids]) if grids else image
     try:
         result = engine.recognize(page_image, dpi=round(scale * 72))

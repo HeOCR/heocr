@@ -277,6 +277,22 @@ class OcrTableTest(unittest.TestCase):
         self.assertEqual(skew_angle(scan(LEVELS).rotate(SKEW_MAX_DEG + 2, resample=Image.NEAREST, fillcolor=255)), 0.0)
         self.assertAlmostEqual(skew_angle(scan(LEVELS).rotate(-1.5, resample=Image.NEAREST, fillcolor=255)), 1.5, delta=0.15)
 
+    def test_text_is_turned_only_from_a_degree_and_ruled_tables_from_less(self) -> None:
+        # set C office scans: turning running text at half a degree cost rows; ruled table cells need straight rows.
+        from PIL import Image, ImageDraw
+
+        text = Image.new("L", (px(595), px(842)), 255)
+        draw = ImageDraw.Draw(text)
+        for y in range(px(120), px(700), px(18)):
+            for x in range(px(80), px(510), px(14)):
+                draw.rectangle([x, y, x + px(9), y + px(7)], fill=60)  # words, no rulings
+        for angle, turned in ((0.6, False), (1.5, True)):
+            with self.subTest(text=angle):
+                doc = heocr.extract(scanned_pdf(text.rotate(angle, resample=Image.NEAREST, fillcolor=255)), tesseract=FAKE)
+                self.assertEqual("deskewed" in doc.pages[0].flags, turned)
+        doc = heocr.extract(scanned_pdf(scan(LEVELS).rotate(0.6, resample=Image.NEAREST, fillcolor=255)), tesseract=FAKE)
+        self.assertIn("deskewed", doc.pages[0].flags)
+
     def test_a_straight_scan_is_not_turned(self) -> None:
         doc = heocr.extract(scanned_pdf(scan(LEVELS)), tesseract=FAKE)
         self.assertNotIn("deskewed", doc.pages[0].flags)
