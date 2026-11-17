@@ -1,0 +1,164 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/HeOCR/heocr/blob/main/src/heocr/schemas/heocr_document.v1.schema.json",
+  "title": "heocr_document.v1",
+  "description": "The record heocr gives for one input document: what was read, how (route, tool, repairs, flags), and what was not read (unread). Objects are open: a later v1 may add fields (docs/record.md, 'Changing v1'). Rules that need the whole record (a page's index is its position, a block's page indexes pages, a note reference's offset lies in its block's text, no file names or paths anywhere) are checked by heocr.validate.",
+  "type": "object",
+  "required": ["schema", "producer", "document", "options", "pages", "blocks", "unread", "flags"],
+  "properties": {
+    "schema": {"const": "heocr_document.v1"},
+    "producer": {
+      "type": "object",
+      "required": ["name", "version", "components"],
+      "properties": {
+        "name": {"const": "heocr"},
+        "version": {"type": "string"},
+        "components": {
+          "description": "Every external tool and model used, with its version or hash (e.g. tesseract, tesseract:heb.traineddata, libreoffice).",
+          "type": "object",
+          "additionalProperties": {"type": "string"}
+        }
+      }
+    },
+    "document": {
+      "type": "object",
+      "required": ["sha256", "bytes", "format", "format_evidence"],
+      "properties": {
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "bytes": {"type": "integer", "minimum": 0},
+        "format": {"type": "string", "minLength": 1},
+        "format_evidence": {"type": "string", "minLength": 1},
+        "page_count": {"type": "integer", "minimum": 0}
+      },
+      "not": {"anyOf": [{"required": ["name"]}, {"required": ["path"]}, {"required": ["filename"]}, {"required": ["file"]}]}
+    },
+    "options": {
+      "type": "object",
+      "properties": {
+        "repairs": {"type": "boolean"},
+        "ocr": {"oneOf": [{"const": false}, {"type": "object"}]},
+        "convert": {"oneOf": [{"const": false}, {"type": "object"}]},
+        "max_pages": {"type": "integer", "minimum": 1},
+        "check_numbers": {"enum": [false, "suspect", "tables", "all"]}
+      }
+    },
+    "pages": {"type": "array", "items": {"$ref": "#/$defs/page"}},
+    "blocks": {"type": "array", "items": {"$ref": "#/$defs/block"}},
+    "unread": {"type": "array", "items": {"$ref": "#/$defs/unread"}},
+    "flags": {"$ref": "#/$defs/flags"},
+    "font_maps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["font", "map"],
+        "properties": {"font": {"type": "string"}, "map": {"type": "object"}}
+      }
+    }
+  },
+  "$defs": {
+    "box": {
+      "description": "[x0, y0, x1, y1] in points, top-left origin, in the page's frame as displayed.",
+      "type": "array",
+      "items": {"type": "number"},
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "flags": {"type": "array", "items": {"type": "string"}},
+    "page": {
+      "type": "object",
+      "required": ["index", "width", "height", "class", "route", "signals", "coverage", "flags"],
+      "properties": {
+        "index": {"type": "integer", "minimum": 0},
+        "width": {"type": "number"},
+        "height": {"type": "number"},
+        "class": {"enum": ["T1", "T2", "T3", "T4", "T5", "T6", "empty"]},
+        "route": {"type": "string"},
+        "signals": {"type": "object"},
+        "coverage": {"type": "object"},
+        "flags": {"$ref": "#/$defs/flags"}
+      }
+    },
+    "line": {
+      "type": "object",
+      "required": ["text", "bbox"],
+      "properties": {
+        "text": {"type": "string"},
+        "bbox": {"$ref": "#/$defs/box"},
+        "direction": {"enum": ["rtl", "ltr"]}
+      }
+    },
+    "reading": {
+      "type": "object",
+      "required": ["model", "text"],
+      "properties": {
+        "model": {"type": "string"},
+        "text": {"type": "string"},
+        "confidence": {"type": ["number", "null"]}
+      }
+    },
+    "cell": {
+      "type": "object",
+      "required": ["text"],
+      "properties": {
+        "text": {"type": "string"},
+        "colspan": {"type": "integer", "minimum": 1, "maximum": 1000},
+        "rowspan": {"type": "integer", "minimum": 1, "maximum": 1000},
+        "flags": {"$ref": "#/$defs/flags"},
+        "readings": {"type": "array", "items": {"$ref": "#/$defs/reading"}}
+      }
+    },
+    "block": {
+      "type": "object",
+      "required": ["id", "kind", "role", "source", "tool", "repairs", "flags"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^b[0-9]+$"},
+        "kind": {"enum": ["text", "heading", "list_item", "table", "figure"]},
+        "role": {"enum": ["body", "header", "footer", "footnote", "endnote", "comment", "textbox", "navigation", "notes"]},
+        "source": {"enum": ["text_layer", "office_xml", "converted_docx", "converted_xlsx", "converted_pptx", "html", "ocr", "none"]},
+        "tool": {"type": "string"},
+        "text": {"type": "string"},
+        "cells": {"type": "array", "items": {"type": "array", "items": {"$ref": "#/$defs/cell"}}},
+        "level": {"type": "integer"},
+        "label": {"type": "string"},
+        "note_id": {"type": "string"},
+        "direction": {"enum": ["rtl", "ltr"]},
+        "page": {"type": "integer", "minimum": 0},
+        "half": {"enum": ["right", "left"]},
+        "slide": {"type": "integer", "minimum": 1},
+        "bbox": {"$ref": "#/$defs/box"},
+        "lines": {"type": "array", "items": {"$ref": "#/$defs/line"}},
+        "ocr": {
+          "type": "object",
+          "required": ["status"],
+          "properties": {"status": {"const": "unverified"}}
+        },
+        "note_refs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["kind", "offset"],
+            "properties": {"kind": {"enum": ["footnote", "endnote"]}, "offset": {"type": "integer", "minimum": 0}}
+          }
+        },
+        "checks": {"type": "object"},
+        "repairs": {"type": "array", "items": {"type": "object"}},
+        "flags": {"$ref": "#/$defs/flags"}
+      },
+      "allOf": [
+        {"if": {"properties": {"kind": {"const": "table"}}}, "then": {"required": ["cells"]}, "else": {"required": ["text"]}},
+        {"if": {"properties": {"source": {"const": "ocr"}}}, "then": {"required": ["ocr"]}}
+      ]
+    },
+    "unread": {
+      "type": "object",
+      "required": ["scope", "reason"],
+      "properties": {
+        "scope": {"enum": ["document", "page", "block"]},
+        "reason": {"type": "string"},
+        "page": {"type": "integer", "minimum": 0},
+        "bbox": {"$ref": "#/$defs/box"},
+        "detail": {"type": "string"}
+      }
+    }
+  }
+}

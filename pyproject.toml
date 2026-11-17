@@ -35,6 +35,10 @@ dependencies = [
   "Pillow>=10",
 ]
 
+[project.optional-dependencies]
+# Tests only: the record is checked against its JSON Schema (tests/__init__.py). Not needed at run time.
+test = ["jsonschema>=4.18"]
+
 [project.scripts]
 heocr = "heocr.cli:main"
 
@@ -46,3 +50,6 @@ Documentation = "https://github.com/HeOCR/heocr#readme"
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["heocr*"]
+
+[tool.setuptools.package-data]
+heocr = ["schemas/*.json"]
