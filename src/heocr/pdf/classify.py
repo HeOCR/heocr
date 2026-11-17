@@ -80,8 +80,11 @@ def object_stats(page, max_objects: int = 20000) -> ObjectStats:
     """Images, paths and text objects of a page, with the text objects' text in content-stream order."""
     import pypdfium2.raw as raw
 
+    from heocr.pdf.frame import frame_of
+
     stats = ObjectStats()
-    width, height = page.get_size()
+    frame = frame_of(page)
+    width, height = frame.width, frame.height
     rects = []
     textpage = page.get_textpage()
     pieces: list[str] = []
@@ -93,11 +96,11 @@ def object_stats(page, max_objects: int = 20000) -> ObjectStats:
             kind = obj.type
             if kind == raw.FPDF_PAGEOBJ_IMAGE:
                 stats.images += 1
-                left, bottom, right, top = obj.get_bounds()
-                left, right = max(0.0, left), min(width, right)
-                bottom, top = max(0.0, bottom), min(height, top)
-                if right > left and top > bottom and len(rects) < 500:
-                    rects.append((left, bottom, right, top))
+                x0, y0, x1, y1 = frame.box(*obj.get_bounds())  # top-left origin, in the visible box
+                x0, x1 = max(0.0, x0), min(width, x1)
+                y0, y1 = max(0.0, y0), min(height, y1)
+                if x1 > x0 and y1 > y0 and len(rects) < 500:
+                    rects.append((x0, y0, x1, y1))
             elif kind == raw.FPDF_PAGEOBJ_PATH:
                 stats.paths += 1
             elif kind == raw.FPDF_PAGEOBJ_TEXT:
@@ -122,7 +125,7 @@ def object_stats(page, max_objects: int = 20000) -> ObjectStats:
     finally:
         textpage.close()
     stats.image_coverage = _union_area(rects) / (width * height) if width * height > 0 else 0.0
-    stats.image_boxes = [[left, height - top, right, height - bottom] for left, bottom, right, top in rects]
+    stats.image_boxes = [list(rect) for rect in rects]
     stats.stream_text = "".join(pieces)
     return stats
 

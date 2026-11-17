@@ -100,7 +100,11 @@ def rulings(page) -> tuple[list[Rule], list[Rule]]:
     """Horizontal and vertical ruling lines of a page, in points, top-left origin."""
     import pypdfium2.raw as raw
 
-    height = page.get_height()
+    from heocr.pdf.frame import frame_of
+
+    frame = frame_of(page)
+    height = frame.height
+    bottom = frame.top - frame.height  # user-space points are moved into the visible box first
     horizontal: list[Rule] = []
     vertical: list[Rule] = []
     for obj in page.get_objects(max_depth=8):
@@ -122,7 +126,7 @@ def rulings(page) -> tuple[list[Rule], list[Rule]]:
             segment = raw.FPDFPath_GetPathSegment(obj.raw, i)
             x, y = ctypes.c_float(), ctypes.c_float()
             raw.FPDFPathSegment_GetPoint(segment, ctypes.byref(x), ctypes.byref(y))
-            px, py = a * x.value + c * y.value + e, b * x.value + d * y.value + f
+            px, py = a * x.value + c * y.value + e - frame.x0, b * x.value + d * y.value + f - bottom
             kind = raw.FPDFPathSegment_GetType(segment)
             if kind == raw.FPDF_SEGMENT_MOVETO:
                 if fill_only:
