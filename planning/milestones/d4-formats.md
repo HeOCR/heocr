@@ -1,6 +1,6 @@
 # D4 — Every input format: Word's older formats, images, spreads, PPTX, XLSX and HTML
 
-- Status: planned
+- Status: done; see "Status" below
 - Owner: `pipeline[claude/claude-code#shay-macbook-m4]@heocr/opensource`; the lead reviews and merges (heocr-engine decision 0001)
 - Serves: heocr-engine decisions 0019 and 0020 (one package for "Hebrew text from any document"); proposal `document-pipeline-package.md` §3.1 (formats), §3.7 (external tools)
 - Builds on: D1 (identification, the DOCX reader), D2 (the OCR route), D3 (tables, furniture, numbers)
@@ -78,3 +78,20 @@ On the dev split, measured by me (counts only):
 - **Tables in image regions on text-layer pages,** and the 376 pages still flagged `reading_order_unresolved_columns`, are D3 follow-ups. They are planned after D4, each with its own guard.
 - **EPUB, email (EML, MSG) and archives:** identified, not read. Each would come with its own plan.
 - **The first PyPI release** is D5, after the D-bench gate.
+
+## Status (2026-11-17, main `a66eebd`)
+
+All slices are merged (D4a–D4h, #34–#42), plus the fixes #40 and #43. Dev split, aggregate counts only:
+
+- **Unresolved-columns pages:** 376 (end of D3) → 341 (D4c) → 340 (D4g).
+- **Spreads:** 79 pages flagged `possible_spread`, of which 76 are split, the right half first.
+- **Web pages printed to PDF:** 1 of 30 dev PDFs is recognised. 15 menu lines on its first page get the role `navigation`.
+- **DOC:** the 1 dev DOC converts and reads, in about 5 s.
+- **No dev file:** HTML, XLSX, PPTX, ODF, images and legacy XLS/PPT have none on dev. They are tested on synthetic fixtures, plus opt-in round trips through real LibreOffice.
+- **The contract gained:**
+  - the roles `navigation` and `notes`;
+  - `Block.slide` and `Block.half`;
+  - the sources `html`, `converted_docx`, `converted_xlsx` and `converted_pptx`;
+  - `MAX_PAGES` (2,000) and `MAX_SPAN` (1,000).
+- **Limits:** every limit is recorded in `unread` or a flag when it is reached: pages, conversion timeout, HTML size and depth, XLSX cells and merges, PPTX group depth.
+- **Open:** the 340 pages; tables in image regions on text-layer pages (T6); the site's footer menu on a browser print's last page; D2g.

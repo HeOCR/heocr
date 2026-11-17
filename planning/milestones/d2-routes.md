@@ -1,6 +1,6 @@
 # D2 — Every page class has a route: T2, repairs, OCR, coverage, the VLM route
 
-- Status: planned
+- Status: done, except D2g (the VLM route, waiting for eval's bake-off registration); see "Status" below
 - Owner: `pipeline[claude/claude-code#shay-macbook-m4]@heocr/opensource`; the lead reviews and merges (heocr-engine decision 0001)
 - Serves: heocr-engine decisions 0019 and 0020, and the proposal `document-pipeline-package.md` §§3.3–3.6
 - Builds on: D1 ([d1-foundations.md](d1-foundations.md)), including its "Carried to D2" list
@@ -93,3 +93,18 @@ On D-bench v0, measured by evaluation at a pinned commit:
 - **Number cross-checks** between two independent sources (D3).
 - **More formats:** DOC, RTF, ODT, PPTX, XLSX, images as input files, and splitting spreads (D4).
 - **Note references** in body text (D3, with tables).
+
+## Status (2026-11-16, main `bfc49e3`)
+
+Dev split, 30 PDFs (2,242 pages) and 19 DOCX, aggregate counts only, end of D1 → end of D2:
+
+- **Pages with no route:** 89 → 12 (the empty pages only). T3 pages: 72 → 1.
+- **Text-layer characters read:** 96.7% → 99.9%, plus 17,400 characters by OCR (6 pages by page OCR, 151 with region OCR).
+- **RTL paragraphs with valid brackets:** 1.6% → 59% (`rtl_bracket_order`).
+- **Repairs:** latin1_eth_nun 1,918, symbol_font_bullet about 1,140, font_private_use_by_ocr 117.
+- **DOCX:**
+  - multi-level label agreement with LibreOffice went 97.3% → 99.0%;
+  - 10 OCR blocks come from embedded images;
+  - every unread image has a reason.
+- **Unread entries:** every one has a reason (rotated text, image regions with low confidence or no text, regions whose text is already in the layer).
+- **Open:** D2g (VLM). R8b/R7 are available through `--ocr-model`; the default stays stock until eval's D-bench result.
