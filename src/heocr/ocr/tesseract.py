@@ -44,11 +44,20 @@ class OcrUnavailable(RuntimeError):
 
 
 @dataclass
+class OcrWord:
+    text: str
+    bbox: list[float]  # pixels of the recognized image, top-left origin
+    confidence: float
+
+
+@dataclass
 class OcrLine:
     text: str
     bbox: list[float]  # pixels of the recognized image, top-left origin
     confidences: list[float] = field(default_factory=list)
     paragraph: tuple[str, str] = ("0", "0")  # Tesseract's (block, paragraph)
+    words: list[OcrWord] = field(default_factory=list)  # in Tesseract's order; ``text`` is them joined
+    numbers_replaced: int = 0  # words replaced by a second reading of numbers (pdf.reader)
 
 
 @dataclass
@@ -243,11 +252,12 @@ def parse_tsv(tsv: str) -> OcrResult:
             conf = -1.0
         box = [left, top, left + width, top + height]
         if key not in lines:
-            lines[key] = OcrLine(text, box, [conf], (cols[2], cols[3]))
+            lines[key] = OcrLine(text, box, [conf], (cols[2], cols[3]), [OcrWord(text, list(box), conf)])
             order.append(key)
         else:
             line = lines[key]
             line.text += " " + text
             line.bbox = [min(line.bbox[0], box[0]), min(line.bbox[1], box[1]), max(line.bbox[2], box[2]), max(line.bbox[3], box[3])]
             line.confidences.append(conf)
+            line.words.append(OcrWord(text, list(box), conf))
     return OcrResult([lines[k] for k in order])
