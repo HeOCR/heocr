@@ -51,5 +51,22 @@ class PunctuationSpacingTest(unittest.TestCase):
         self.assertEqual(text(visual("(", 2.0, "see", 2.0, ")"), rtl=False), "(see)")
 
 
+class NumbersApartInRtlTest(unittest.TestCase):
+    """Two numbers with a space between them in an RTL line are two runs, as an RTL paragraph lays them out."""
+
+    def test_a_list_of_numbers(self) -> None:
+        # "1, 2" in an RTL paragraph is shown as "2 ,1": the comma touches the 1, the space is left of it.
+        self.assertEqual(text(visual("2", WORD_SPACE, ",", HUG, "1")), "1, 2")
+
+    def test_a_section_number_and_a_note_mark(self) -> None:
+        self.assertEqual(text(visual("1", WORD_SPACE, ".", HUG, "1.2")), "1.2. 1")
+        self.assertEqual(text(visual("2", WORD_SPACE, "1994")), "1994 2")
+
+    def test_numbers_drawn_left_to_right_keep_one_run(self) -> None:
+        # The comma touches the left number: drawn in reading order, left to right.
+        self.assertEqual(text(visual("1", HUG, ",", WORD_SPACE, "2")), "1, 2")
+        self.assertEqual(text(visual("1,000")), "1,000")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -289,8 +289,15 @@ def logical_text(component: list[Atom], page_rtl: bool = True) -> tuple[str, str
             j += 1
         left = ltr_like[i - 1] if i > 0 else base
         right = ltr_like[j] if j < n else base
+        side = left if left == right else base
+        if rtl and i > 0 and j < n and types[i - 1] == "EN" and types[j] == "EN" and texts[i] == " ":
+            # Two numbers apart in an RTL line, the space on the left of what lies between them: the
+            # layout of an RTL paragraph ("1, 2" is shown as "2 ,1"; a section number and a note mark,
+            # "1.2. 1", as "1 .1.2"). Numbers act as R on neutrals (UAX #9 N1), so they are two runs.
+            # Punctuation that touches the left number ("1, 2" drawn left to right) keeps one run.
+            side = base
         for k in range(i, j):
-            resolved[k] = left if left == right else base
+            resolved[k] = side
         i = j
     flags: list[str] = []
     order = list(range(n))
