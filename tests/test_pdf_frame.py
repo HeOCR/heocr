@@ -147,14 +147,17 @@ class DisplayedFrameTest(unittest.TestCase):
         self.assertEqual(shape(sideways), shape(plain))
         self.assertIn("text_sideways_on_screen", sideways.pages[0].flags)
 
-    def test_a_mixed_page_reads_its_majority_and_counts_the_rest(self) -> None:
-        extra = [(ch, 60 + 7 * n, 300) for n, ch in enumerate("שוליים")]  # drawn outside the turn: sideways on screen
+    def test_a_mixed_page_reads_its_majority_and_its_sideways_words(self) -> None:
+        word = "שוליים"  # drawn outside the turn, right to left as Hebrew is: sideways on screen
+        extra = [(ch, 60 + 7 * (len(word) - 1 - n), 300) for n, ch in enumerate(word)]
         doc = read(PdfPage(lines=lines_block(BODY * 3, top=760), turn=90, glyphs=extra))
         self.assertNotIn("text_sideways_on_screen", doc.pages[0].flags)
         for line in BODY:
             self.assertIn(line, doc.text)
-        (entry,) = [u for u in doc.unread if u.reason == "rotated_text_not_read"]
-        self.assertIn(f"{len(extra)} characters", entry.detail)
+        # The sideways word is read in its own frame, after the body, not reported unread.
+        (rotated,) = [b for b in doc.blocks if "rotated_text" in b.flags]
+        self.assertEqual(rotated.text, "שוליים")
+        self.assertEqual([u for u in doc.unread if u.reason == "rotated_text_not_read"], [])
 
 
 if __name__ == "__main__":

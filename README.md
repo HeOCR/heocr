@@ -88,7 +88,7 @@ Every entry has a scope (`document`, `page` or `block`), a reason, and where pos
 | `image_region_*`, `image_*` | Image regions and embedded images: not read, too small, low confidence, or their text already in the layer |
 | `table_row_ink_unread` | A table row with ink in its cells that OCR read none of |
 | `table_cell_unconfirmed` | A scanned table cell whose two readings (`heb` and the number model) differ, neither confident; both are kept in the cell |
-| `rotated_text_not_read` | Characters drawn at an angle |
+| `rotated_text_not_read` | Characters drawn at an angle other than vertical. Vertical text (90 or 270 degrees: a margin note, a stamp's caption) is read as its own lines after the page's body, flagged `rotated_text` |
 | `text_outside_page` | Characters drawn outside the page's visible box |
 | `html_rendered_by_script` | A web page whose content is filled in by JavaScript; print it to PDF from a browser |
 | `page_limit`, `sheet_truncated`, `html_truncated`, `merges_not_applied`, `image_too_large` | A limit was reached (below) |
