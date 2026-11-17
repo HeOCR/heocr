@@ -36,6 +36,7 @@ PARAGRAPH_GAP = 0.9
 _OPENING = frozenset("([{")
 _CLOSING = frozenset(".,;:!?)]}")
 _BRACKETS = frozenset("()[]{}<>")
+_PUNCT_HUG = _OPENING | _CLOSING
 
 
 @dataclass
@@ -188,12 +189,32 @@ def visual_words(atoms: list[Atom]) -> list[list[Atom]]:
     return words
 
 
+def _side_gap(component: list[Atom], index: int, step: int) -> float | None:
+    """The gap between ``component[index]`` and its next ink neighbour in direction ``step`` (+1
+    to the right, -1 to the left); None when there is none or a space glyph lies between."""
+    atom = component[index]
+    j = index + step
+    while 0 <= j < len(component):
+        other = component[j]
+        if other.is_space:
+            return None
+        return other.x0 - atom.x1 if step > 0 else atom.x0 - other.x1
+    return None
+
+
 def _units(component: list[Atom]) -> list[tuple[str, Atom | None]]:
-    """Visual sequence of character units, with word breaks made explicit as spaces."""
+    """Visual sequence of character units, with word breaks made explicit as spaces.
+
+    Punctuation that may hug a word (``_CLOSING``, ``_OPENING``) is joined to the side it sits
+    closer to. In a left-to-right line a comma sits just right of its word; in a right-to-left line,
+    just left of it, with the word space on its other side. Joining only by the glyph (no space
+    before a comma) dropped that space in RTL text drawn with real glyph widths ("תאגיד,למעט").
+    """
     units: list[tuple[str, Atom | None]] = []
     previous: Atom | None = None
+    previous_index = -1
     ink = [a for a in component if not a.is_space]
-    for atom in component:
+    for index, atom in enumerate(component):
         if atom.is_space:
             # A space glyph drawn over a letter (a geresh placed on it, say) is not a visual gap.
             if any(_overlap(atom, other) > 0.5 * min(atom.x1 - atom.x0, other.x1 - other.x0) for other in ink):
@@ -205,11 +226,20 @@ def _units(component: list[Atom]) -> list[tuple[str, Atom | None]]:
             gap = atom.x0 - previous.x1
             if gap > WORD_GAP_EM * max(atom.height, previous.height):
                 tight = gap <= min(atom.height, previous.height) * TIGHT_JOIN
-                # No space before closing or after opening punctuation when tight.
-                if not (tight and (atom.text[:1] in _CLOSING or previous.text[-1:] in _OPENING)):
+                # No space between hugging punctuation and its word when tight: the punctuation
+                # (right of the gap, or left of it) hugs this side unless it sits closer to its other one.
+                hugs = False
+                if tight and atom.text[:1] in _PUNCT_HUG:
+                    other = _side_gap(component, index, +1)
+                    hugs = other is None or other >= gap
+                if tight and not hugs and previous.text[-1:] in _PUNCT_HUG:
+                    other = _side_gap(component, previous_index, -1)
+                    hugs = other is None or other >= gap
+                if not hugs:
                     units.append((" ", None))
         units.append((atom.text, atom))
         previous = atom
+        previous_index = index
     return units
 
 
@@ -259,8 +289,15 @@ def logical_text(component: list[Atom], page_rtl: bool = True) -> tuple[str, str
             j += 1
         left = ltr_like[i - 1] if i > 0 else base
         right = ltr_like[j] if j < n else base
+        side = left if left == right else base
+        if rtl and i > 0 and j < n and types[i - 1] == "EN" and types[j] == "EN" and texts[i] == " ":
+            # Two numbers apart in an RTL line, the space on the left of what lies between them: the
+            # layout of an RTL paragraph ("1, 2" is shown as "2 ,1"; a section number and a note mark,
+            # "1.2. 1", as "1 .1.2"). Numbers act as R on neutrals (UAX #9 N1), so they are two runs.
+            # Punctuation that touches the left number ("1, 2" drawn left to right) keeps one run.
+            side = base
         for k in range(i, j):
-            resolved[k] = left if left == right else base
+            resolved[k] = side
         i = j
     flags: list[str] = []
     order = list(range(n))
