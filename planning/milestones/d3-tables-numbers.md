@@ -1,6 +1,6 @@
 # D3 — Tables, reading order beyond one column, and numbers checked against a second reading
 
-- Status: planned
+- Status: done; see "Status" below
 - Owner: `pipeline[claude/claude-code#shay-macbook-m4]@heocr/opensource`; the lead reviews and merges (heocr-engine decision 0001)
 - Serves: heocr-engine decisions 0019 and 0020; proposal `document-pipeline-package.md` §3.3 (tables, columns), §3.6 (cross-checks), §1 (reversed amounts, silent loss)
 - Builds on: D1 and D2 ([d2-routes.md](d2-routes.md)), and D2c's `digit_groups_suspect` flag, whose repair was left to D3
@@ -71,3 +71,20 @@ On the dev split, measured by me (counts only):
 
 - **Formats:** DOC, RTF and ODT through LibreOffice, images as input files, PPTX and XLSX, and splitting spreads (D4).
 - **The VLM route** (D2g), whose wiring waits for evaluation's registration of the bake-off.
+
+## Status (2026-11-16, main `92f9d9c`)
+
+Dev split, 30 PDFs (2,242 pages), aggregate counts only, end of D2 → end of D3:
+
+- **Pages with `reading_order_unresolved_columns`:** 1,221 → 376. Of the resolved pages, 228 are read row by row, 19 are read as column flows, and 211 were cleared because their side-by-side text was page furniture.
+- **Selection-safe pages:** 865 → 1,530.
+- **Page furniture:** header/footer blocks on 2,063 pages. They are roles, not deletions.
+- **Tables:**
+  - 765 ruled tables (vector), 105 unruled tables, 5,122 rows and 19,629 cells;
+  - 15% of the text sits in cells, and `coverage_mismatch` is 0;
+  - D3e (ruled tables on OCR'd pages) has no case on dev.
+- **Characters read:** unchanged from D2. The repair logs are kept in cells and furniture (#30).
+- **Numbers (D3d):** the `suspect` scope (the default) found no suspect token on dev. With `all`, 2,476 numbers were checked and 51% agreed. The high-confidence disagreements sampled were Tesseract's own misreads. In table cells, eng's second reading agrees 96.5%, with 0 false disagreements (#31, #33).
+- **Open, carried past D4:**
+  - the remaining unresolved-columns pages;
+  - tables in image regions on text-layer pages (27 grids in 19 regions on dev).
