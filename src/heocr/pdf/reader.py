@@ -62,7 +62,8 @@ class PageText:
     controls: int = 0
     invisible: int = 0
     lone_surrogates: int = 0
-    rotated: int = 0  # characters drawn at an angle (vertical or rotated text), not read in D1
+    rotated: int = 0  # characters drawn at an angle (vertical or rotated text) and not built into lines
+    rotated_atoms: list = field(default_factory=list)  # (Atom, angle in degrees in the page frame), for _rotated_blocks
     # Private-use codes drawn only by symbol fonts (Wingdings, Symbol ...): signs, not broken letters.
     symbol_pua: set[str] = field(default_factory=set)
     other_pua: set[str] = field(default_factory=set)
@@ -147,7 +148,9 @@ def page_text(page, eth_fonts: frozenset[str] = frozenset(), font_maps: dict | N
             angle = raw.FPDFText_GetCharAngle(textpage, index)
             if angle >= 0 and abs(math.sin(frame.angle(angle))) > ROTATED_SIN and not ch.isspace():
                 # Rotated text has no horizontal baseline; line building would make one line per letter.
+                # It is kept apart and built in its own frame (_rotated_blocks).
                 out.rotated += 1
+                out.rotated_atoms.append((Atom(ch, *box, size or 1.0, index), round(math.degrees(frame.angle(angle))) % 360))
                 continue
             font = ""
             repaired = None
@@ -782,6 +785,51 @@ def _repair_rtl_brackets(doc: Document) -> None:
             block.flags = [f for f in block.flags if f != "rtl_brackets_unverified"] + ["brackets_mirrored"]
 
 
+ROTATED_SNAP_DEG = 10  # rotated characters within this of 90 or 270 degrees are read as vertical lines
+
+
+def _turn(box, angle: int):
+    """A page box (top-left origin) in the upright frame of text drawn at ``angle`` (pdfium's,
+    clockwise: 90 or 270), and back with ``-angle``. A PDF advances glyphs along text space x, the
+    upright line's left to right: at 90 degrees that runs down the page and the next line lies to
+    the left; at 270 it runs up the page and the next line lies to the right."""
+    x0, y0, x1, y1 = box
+    if angle == 90:
+        return (y0, -x1, y1, -x0)
+    if angle == -90:
+        return (-y1, x0, -y0, x1)
+    if angle == 270:
+        return (-y1, x0, -y0, x1)
+    return (y0, -x1, y1, -x0)  # -270: back from the 270 frame
+
+
+def _rotated_blocks(doc: Document, index: int, rotated) -> tuple[list[Block], int]:
+    """Rotated layer text read as its own lines. Characters drawn at about 90 or 270 degrees (a
+    vertical margin note, a stamp's caption) are turned upright, built into lines as any other
+    text, and given back as blocks with their boxes on the page, flagged ``rotated_text``. Other
+    angles are left to ``rotated_text_not_read``. Returns the blocks and the characters placed."""
+    blocks: list[Block] = []
+    placed = 0
+    for target in (90, 270):
+        atoms = []
+        for atom, angle in rotated:
+            if min(abs(angle - target), 360 - abs(angle - target)) <= ROTATED_SNAP_DEG:
+                x0, y0, x1, y1 = _turn((atom.x0, atom.y0, atom.x1, atom.y1), target)
+                atoms.append(Atom(atom.text, x0, y0, x1, y1, atom.size, atom.index))
+        if not atoms:
+            continue
+        built = build_lines(atoms, rtl=doc._rtl)
+        for group in paragraphs(built):
+            lines = [Line(line.text, list(_turn(line.bbox, -target)), line.direction) for line in group]
+            bbox = [min(l.bbox[0] for l in lines), min(l.bbox[1] for l in lines), max(l.bbox[2] for l in lines), max(l.bbox[3] for l in lines)]
+            text = "\n".join(line.text for line in lines)
+            placed += sum(1 for line in group for a in line.atoms if not a.is_space)
+            blocks.append(Block(kind="text", text=text, page=index, bbox=bbox, source="text_layer", tool=TOOL,
+                                direction=group[0].direction, lines=lines,
+                                flags=["rotated_text", f"rotated_{target}", "reading_order_rotated_appended"] + text_flags(text)))
+    return blocks, placed
+
+
 def _report_side_losses(doc: Document, index: int, text: PageText, flags: list[str]) -> None:
     """Characters the page has but the route does not read are reported, never dropped quietly."""
     if text.rotated:
@@ -840,6 +888,13 @@ def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = froz
                 flags.append("ocr_layer_disagrees_kept")
     if page.get_rotation():
         flags.append("page_rotated")
+    rotated_blocks: list[Block] = []
+    rotated_read = 0
+    layer_read = page_class not in OCR_CLASSES and page_class not in ("T3", "empty") and not (page_class == "T2" and "reversed_after_line_building" in flags)
+    if layer_read and text.rotated_atoms:
+        rotated_blocks, placed = _rotated_blocks(doc, index, text.rotated_atoms)
+        text.rotated -= placed
+        rotated_read = sum(1 for b in rotated_blocks for ch in b.text if not ch.isspace() and not unicodedata.combining(ch))
     _report_side_losses(doc, index, text, flags)
     if page_class == "empty":
         doc.pages.append(
@@ -907,6 +962,11 @@ def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = froz
             table_flags.append("table_rejected_crosses_text")
     t_blocks = all_tables
     read = in_lines + in_tables
+    if rotated_blocks:
+        # Rotated text (a vertical margin note) follows the page's body, read in its own frame.
+        doc.blocks.extend(rotated_blocks)
+        read += rotated_read
+        flags = flags + ["rotated_text_read"]
     # Silent loss check: every layer character ends up in a cell or in a line, never in neither.
     ink = sum(1 for a in text.atoms if not a.is_space)
     placed_ink = in_tables + line_ink
