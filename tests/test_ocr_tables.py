@@ -88,6 +88,57 @@ class OcrTableTest(unittest.TestCase):
         kinds = [b.kind for b in doc.blocks]
         self.assertEqual(kinds[-1], "table")
 
+    def empty_page_ocr(self) -> dict:
+        tsv = Path(self.tmp.name) / "empty.tsv"
+        tsv.write_text("level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext\n1\t1\t0\t0\t0\t0\t0\t0\t1240\t1754\t-1\t\n", encoding="utf-8")
+        return {"FAKE_TSV": str(tsv)}
+
+    def test_a_page_that_is_all_table_is_read_not_unread(self) -> None:
+        # eval's report: a page whose text is all in a ruled table came out unread / ocr_found_no_text.
+        with mock.patch.dict(os.environ, self.empty_page_ocr()):
+            doc = heocr.extract(scanned_pdf(scan(LEVELS)), tesseract=FAKE)
+        page = doc.pages[0]
+        self.assertEqual([b.kind for b in doc.blocks], ["table"])
+        self.assertEqual(page.coverage["status"], "ocr")
+        self.assertGreater(page.coverage["chars_ocr"], 0)
+        self.assertEqual(page.coverage["ink_outside_ocr_share"], 0.0)
+        self.assertEqual(doc.unread, [])
+
+    def test_ink_outside_the_table_that_ocr_missed_is_partial(self) -> None:
+        image = scan(LEVELS)
+        from PIL import ImageDraw
+
+        ImageDraw.Draw(image).rectangle([px(100), px(150), px(500), px(170)], fill=0)  # a line of "text" above the table
+        with mock.patch.dict(os.environ, self.empty_page_ocr()):
+            doc = heocr.extract(scanned_pdf(image), tesseract=FAKE)
+        page = doc.pages[0]
+        self.assertEqual(page.coverage["status"], "partial")
+        self.assertEqual([u.reason for u in doc.unread], ["ocr_short_for_ink"])
+        self.assertNotIn("ocr_found_no_text", [u.reason for u in doc.unread])
+
+    def test_the_table_is_masked_in_the_paper_grey_not_white(self) -> None:
+        from PIL import Image
+
+        from heocr.pdf.reader import _without, paper_level
+
+        page = scan(LEVELS).point(lambda v: 238 if v == 255 else v)  # grey paper, as a soft scan
+        self.assertEqual(paper_level(page), 238)
+        masked = _without(page, DPI / 72, [(XS[0], YS[0], XS[-1], YS[-1])])
+        inside = masked.crop((px(XS[0]), px(YS[0]), px(XS[-1]), px(YS[-1])))
+        self.assertEqual(inside.getextrema(), (238, 238))  # no white patch for a threshold to split on
+        rgb = _without(Image.merge("RGB", [page] * 3), DPI / 72, [(XS[0], YS[0], XS[-1], YS[-1])])
+        self.assertEqual(rgb.getpixel((px(300), px(360))), (238, 238, 238))
+
+    def test_text_layer_masks_use_the_paper_grey_too(self) -> None:
+        from PIL import Image
+
+        from heocr.ocr.regions import mask_layer_text
+
+        crop = Image.new("L", (200, 100), 238)
+        masked, count = mask_layer_text(crop, (0.0, 0.0), 1.0, [(10, 10, 60, 30)])
+        self.assertEqual(count, 1)
+        self.assertEqual(masked.getextrema(), (238, 238))
+
     def test_thick_lines_make_one_grid(self) -> None:
         doc = heocr.extract(scanned_pdf(scan(LEVELS, line_width=9)), tesseract=FAKE)
         (table,) = [b for b in doc.blocks if b.kind == "table"]

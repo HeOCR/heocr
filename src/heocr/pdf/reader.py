@@ -27,6 +27,7 @@ from heocr.ocr.regions import (  # noqa: F401  (re-exported for callers of the P
     has_ink,
     ink_outside,
     mask_layer_text,
+    paper_level,
     short_for_ink,
 )
 from heocr.pdf.classify import FIGURE_IMAGE, classify, object_stats, stream_signals, text_signals
@@ -880,10 +881,11 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
         flags = flags + ["text_layer_ignored"]
     elif page_class == "T3":
         flags = flags + ["text_layer_ignored_broken_mapping"]
-    if not result.lines:
+    found = bool(result.lines) or read > 0  # text read in table cells counts (D3e)
+    if not found:
         doc.unread.append(Unread(scope="page", reason="ocr_found_no_text", page=index, detail=f"class {page_class}"))
     short, outside_share = short_for_ink(page_image.convert("L"), result)
-    if short and result.lines:
+    if short and found:
         flags = flags + ["ocr_short_for_ink"]
         doc.unread.append(
             Unread(scope="page", reason="ocr_short_for_ink", page=index, detail=f"{outside_share:.0%} of the ink lies outside every OCR line")
@@ -892,18 +894,21 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
         Page(index, width, height, page_class, "ocr", signals,
              {"chars_total": text.chars_total, "chars_read": 0, "chars_ocr": read,
               "ink_outside_ocr_share": outside_share,
-              "status": "ocr" if result.lines and not short else "partial" if result.lines else "unread"}, flags)
+              "status": "ocr" if found and not short else "partial" if found else "unread"}, flags)
     )
 
 
 def _without(image, scale: float, boxes) -> object:
-    """A copy of the page image with the given boxes (points) painted white."""
+    """A copy of the page image with the given boxes (points) painted in the paper's own grey
+    (``paper_level``: not white, which a global threshold would split the page on)."""
     from PIL import ImageDraw
 
     out = image.copy()
+    level = paper_level(image)
+    fill = level if out.mode == "L" else (level,) * len(out.getbands())
     draw = ImageDraw.Draw(out)
     for x0, y0, x1, y1 in boxes:
-        draw.rectangle([(x0 - 2) * scale, (y0 - 2) * scale, (x1 + 2) * scale, (y1 + 2) * scale], fill="white")
+        draw.rectangle([(x0 - 2) * scale, (y0 - 2) * scale, (x1 + 2) * scale, (y1 + 2) * scale], fill=fill)
     return out
 
 
