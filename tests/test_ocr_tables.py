@@ -128,6 +128,13 @@ class OcrTableTest(unittest.TestCase):
         self.assertEqual(inside.getextrema(), (238, 238))  # no white patch for a threshold to split on
         rgb = _without(Image.merge("RGB", [page] * 3), DPI / 72, [(XS[0], YS[0], XS[-1], YS[-1])])
         self.assertEqual(rgb.getpixel((px(300), px(360))), (238, 238, 238))
+        for mode in ("RGBA", "P", "LA", "CMYK"):
+            with self.subTest(mode=mode):
+                rgb_page = Image.merge("RGB", [page] * 3)
+                source = rgb_page.convert("P", palette=Image.ADAPTIVE) if mode == "P" else rgb_page.convert(mode)  # an adaptive palette keeps 238
+                other = _without(source, DPI / 72, [(XS[0], YS[0], XS[-1], YS[-1])])
+                self.assertIn(other.mode, ("L", "RGB"))
+                self.assertEqual(other.convert("L").getpixel((px(300), px(360))), 238)
 
     def test_text_layer_masks_use_the_paper_grey_too(self) -> None:
         from PIL import Image
