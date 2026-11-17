@@ -95,6 +95,9 @@ def main() -> None:
             errors = heocr.validate(record)
             if errors:
                 fail(f"{name}: the JSON record is not valid: {errors[:3]}")
+        schema = heocr.contract.json_schema()  # shipped as package data (D5b)
+        if schema.get("title") != heocr.contract.SCHEMA_ID:
+            fail(f"the shipped JSON Schema is {schema.get('title')!r}, not {heocr.contract.SCHEMA_ID!r}")
         version = subprocess.run([exe, "--version"], capture_output=True, check=True, text=True).stdout.strip()
         if version != f"heocr {dist.version}":
             fail(f"--version says {version!r}, the package is {dist.version}")
