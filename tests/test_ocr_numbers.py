@@ -181,6 +181,13 @@ class NumberWordsTest(unittest.TestCase):
         doc = self.segment(["סכום", "64,20", "₪"], "64,200", spans="0-0.99")
         self.assertEqual(doc.blocks[0].text, "סכום 64,20 ₪")
 
+    def test_segment_pieces(self) -> None:
+        from heocr.pdf.reader import _segment_piece as piece
+        for text in ("01.12.2022", ">", "₪", "(₪)", "0ך", "2ךד"):
+            self.assertTrue(piece(text), text)
+        for text in ("2ב", "ו-3", "של", "20000₪", "3ab", "1ךדה"):
+            self.assertFalse(piece(text), text)
+
     def test_a_misread_piece_with_a_final_form_is_part_of_a_segment(self) -> None:
         # "0ך" beside digits is no Hebrew word: a misread piece of "19.04.2020".
         doc = self.segment(["ייעוץ", "42,120", "0ך", ">"], "19.04.2020 42,120", spans="0-0.65,0.68-0.99")
