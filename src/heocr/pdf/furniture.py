@@ -11,7 +11,11 @@ A text-layer line is furniture when all three hold:
   Digits count as one class, so page numbers and "עמוד 3 מתוך 12" group together;
 - it repeats on at least ``MIN_PAGES`` pages, or on a majority (at least 2) of the
   document's pages. A body line that happens to repeat, such as a form heading, is then
-  not taken for furniture unless it keeps to the margin band.
+  not taken for furniture unless it keeps to the margin band;
+- a long line (more than ``LONG_WORDS`` words) varies in at most one of its numbers across
+  those pages: a running header changes only its page number. A body sentence of the same
+  form on short pages ("הסכום הכולל לא יעלה על 527,000 ₪, עד ליום ...") changes its amount
+  and its date, and stays in the body.
 
 Once furniture leaves the body, a page whose side-by-side "columns" were only a header next
 to a page number no longer carries ``reading_order_unresolved_columns`` (or, since D3c, the
@@ -28,6 +32,7 @@ from heocr.contract import Block, Document
 BAND = 0.1
 MIN_PAGES = 3
 X_BIN_PT = 36.0
+LONG_WORDS = 8
 
 _DIGITS = re.compile(r"\d+")
 _SPACES = re.compile(r"\s+")
@@ -45,11 +50,21 @@ def _band(bbox, height: float) -> str | None:
     return None
 
 
+def _numbers_fit(pattern: str, numbers: list[list[str]]) -> bool:
+    """Whether a repeated line's numbers vary as furniture's do: in a long line, at most one of
+    them changes across its repeats (a page number)."""
+    if len(pattern.split()) <= LONG_WORDS:
+        return True
+    varying = sum(1 for values in zip(*numbers) if len(set(values)) > 1)
+    return varying <= 1
+
+
 def mark_furniture(doc: Document) -> int:
     """Give repeated margin lines the header/footer roles. Returns the number of lines moved."""
     heights = {page.index: page.height for page in doc.pages}
     total = len(doc.pages)
     seen: dict[tuple, set[int]] = defaultdict(set)
+    numbers: dict[tuple, list[list[str]]] = defaultdict(list)  # each repeat's numbers, in order
     keyed: list[tuple[int, int, tuple]] = []  # (block index, line index, key)
     for b, block in enumerate(doc.blocks):
         if block.source != "text_layer" or block.role != "body" or block.page is None or not block.lines:
@@ -60,8 +75,12 @@ def mark_furniture(doc: Document) -> int:
                 continue
             key = (band, _pattern(line.text), round((line.bbox[0] + line.bbox[2]) / 2 / X_BIN_PT))
             seen[key].add(block.page)
+            numbers[key].append(_DIGITS.findall(line.text))
             keyed.append((b, i, key))
-    accepted = {key for key, pages in seen.items() if len(pages) >= MIN_PAGES or (len(pages) >= 2 and len(pages) > total / 2)}
+    accepted = {
+        key for key, pages in seen.items()
+        if (len(pages) >= MIN_PAGES or (len(pages) >= 2 and len(pages) > total / 2)) and _numbers_fit(key[1], numbers[key])
+    }
     if not accepted:
         return 0
     furniture: dict[int, dict[int, str]] = defaultdict(dict)
