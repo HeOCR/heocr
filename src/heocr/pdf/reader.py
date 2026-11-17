@@ -1290,7 +1290,16 @@ def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids, n
                 readings = None
                 if text.strip() and numbers is not None and any(ch.isdigit() for ch in text):
                     first = {"model": engine.lang, "text": text, "confidence": result.mean_confidence}
-                    text, readings = _second_number_reading(numbers, crop, dpi, psm, first, cell_flags, checks)
+                    text, readings, second = _second_number_reading(numbers, crop, dpi, psm, first, cell_flags, checks)
+                    if second is not None and _unconfirmed(first, second):
+                        # Two independent readings that disagree, neither confident: the cell's text
+                        # is a guess, and the record says so (fixed rule, not tuned to a measure).
+                        cell_flags.append("table_cell_unconfirmed")
+                        readings = readings or [first, second]
+                        x0, y0, x1, y1 = cell["box"]
+                        doc.unread.append(Unread(scope="block", reason="table_cell_unconfirmed", page=index,
+                                                 bbox=[x0 + ox, y0 + oy, x1 + ox, y1 + oy],
+                                                 detail=f"row {len(rows)}, column {len(out_row)}: two readings differ and neither is confident"))
                 read += sum(1 for ch in text if not ch.isspace())
                 out_row.append(Cell(text, colspan=cell["colspan"], rowspan=cell["rowspan"], flags=cell_flags, readings=readings))
             unread_cells += empty
@@ -1329,7 +1338,25 @@ _WELL_FORMED = re.compile(r"^(?:\d{1,2}[./]\d{1,2}[./](?:\d{2}|\d{4})|\d{1,3}(?:
 WELL_FORMED_MIN_CONFIDENCE = 30.0
 
 
-def _second_number_reading(numbers, crop, dpi: int, psm: int, first: dict, cell_flags: list[str], checks: dict) -> tuple[str, list | None]:
+# line_fold_v1 (D-bench's scoring profile): NFC, signs our references do not write consistently, spaces.
+_LINE_FOLD = str.maketrans({"־": "-", "׳": "'", "״": '"', "“": '"', "”": '"', "„": '"', "—": "–"})
+
+
+def _line_fold(text: str) -> str:
+    return " ".join(unicodedata.normalize("NFC", text).translate(_LINE_FOLD).split())
+
+
+def _unconfirmed(first: dict, second: dict) -> bool:
+    """A cell's two readings differ after line_fold_v1, and neither has confidence of at least
+    ``numbers.MIN_CONFIDENCE`` (``table_cell_unconfirmed``)."""
+    from heocr.pdf.numbers import MIN_CONFIDENCE
+
+    if _line_fold(first["text"]) == _line_fold(second["text"]):
+        return False
+    return all((reading["confidence"] or 0.0) < MIN_CONFIDENCE for reading in (first, second))
+
+
+def _second_number_reading(numbers, crop, dpi: int, psm: int, first: dict, cell_flags: list[str], checks: dict) -> tuple[str, list | None, dict | None]:
     """Amounts in an OCR'd cell read a second time, by the number model (``eng``).
 
     A **numeric cell** (no letters in either reading) takes the number model's reading when it is
@@ -1346,20 +1373,21 @@ def _second_number_reading(numbers, crop, dpi: int, psm: int, first: dict, cell_
     try:
         result = numbers.recognize(crop, dpi=dpi, psm=psm)
     except OcrUnavailable:
-        return text, None
+        return text, None, None
     # A cell's own rulings come back as "|" tokens, at confidences that pull the reading's mean down
     # ("222,720 |" at 95.9 and 73.7): they are no part of the cell's text.
     kept = [[w for w in line.words if w.text.strip("|")] for line in result.lines]
     second = "\n".join(" ".join(w.text for w in words) for words in kept if words)
     values = [w.confidence for words in kept for w in words if w.confidence >= 0]
     confidence = round(sum(values) / len(values), 2) if values else None
+    reading = {"model": numbers.lang, "text": second, "confidence": confidence}
     # A numeric cell: the number model reads no letter, and heb read no Hebrew word (a misreading
     # of digits as letters, "סז5,.?" for 4,370, is no word).
     if not _HEBREW_WORD_IN.search(text) and not any("a" <= ch.lower() <= "z" for ch in text) and second and not any(ch.isalpha() for ch in second):
         if second.split() == text.split():
             checks["numbers"] += len(significant(text))
             checks["agreed"] += len(significant(text))
-            return text, None
+            return text, None, reading
         well_formed = _WELL_FORMED.match(second) and not _WELL_FORMED.match(text)
         if confidence is not None and (confidence >= MIN_CONFIDENCE or (well_formed and confidence >= WELL_FORMED_MIN_CONFIDENCE)):
             # Both readings are OCR: this chooses between two readings, it overwrites no layer
@@ -1368,14 +1396,14 @@ def _second_number_reading(numbers, crop, dpi: int, psm: int, first: dict, cell_
             # against "₪11.22"), is taken at a lower confidence: its form is evidence of its own.
             checks["read_by_number_model"] += 1
             cell_flags.append("number_read_by_number_model")
-            return second, [first, {"model": numbers.lang, "text": second, "confidence": confidence}]
+            return second, [first, reading], reading
     checked, agreed, disagreed, _ = compare(text, second, confidence)
     checks["numbers"] += checked
     checks["agreed"] += agreed
     checks["disagreed"] += disagreed
     if disagreed:
         cell_flags.append("number_disagreement")
-    return text, None
+    return text, None, reading
 
 
 def _ocr_regions(
