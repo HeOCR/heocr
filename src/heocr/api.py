@@ -26,8 +26,9 @@ def _readers() -> dict[str, Reader]:
     from heocr.htmlread import read_html
     from heocr.images import read_image
     from heocr.pdf.reader import read_pdf
+    from heocr.xlsx import read_xlsx
 
-    return {"docx": read_docx, "pdf": read_pdf, "html": read_html, **{fmt: read_converted for fmt in TO_DOCX}, **{fmt: read_image for fmt in IMAGE_FORMATS}}
+    return {"docx": read_docx, "pdf": read_pdf, "html": read_html, "xlsx": read_xlsx, **{fmt: read_converted for fmt in TO_DOCX}, **{fmt: read_image for fmt in IMAGE_FORMATS}}
 
 
 def extract(
