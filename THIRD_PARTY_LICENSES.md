@@ -27,7 +27,7 @@ These are from the wheel's `BUILD_LICENSES`.
 | AGG 2.3 (anti-aliasing) | AGG licence (permissive, BSD-style) |
 | Dragonbox | Apache-2.0 with LLVM exception, or Boost |
 | fast_float | MIT, Apache-2.0 or Boost |
-| FreeType | The FreeType Project License (FTL), chosen over its GPLv2 alternative; the FTL asks for an acknowledgement in the documentation |
+| FreeType | The FreeType Project License (FTL), chosen over its GPLv2 alternative; its acknowledgement is below |
 | HarfBuzz | MIT ("Old MIT") |
 | ICU | Unicode License v3 |
 | Little CMS | MIT |
@@ -67,6 +67,12 @@ These are from the wheel's `LICENSE` and its bundled libraries.
 - **Dual licences.** FreeType and Zstandard are dual-licensed: their permissive licences (FTL, BSD-3-Clause) apply. Nothing requires the GPLv2 alternative.
 - **XZ Utils.** It names GPL and LGPL files that are not in the shipped library.
 - **Libraries Pillow can load, but doesn't ship.** Some optional libraries are LGPL, such as FriBiDi for complex text layout. Pillow loads them at run time only when the user installs them; its wheels do not ship them, and heocr does not use them.
+
+## Acknowledgements the licences ask for
+
+The FreeType Project License asks for this line in the documentation of software that uses it. FreeType comes inside PDFium (pypdfium2) and inside Pillow:
+
+> Portions of this software are copyright © 2025 The FreeType Project (www.freetype.org). All rights reserved.
 
 ## External programs (not installed by pip)
 
