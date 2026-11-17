@@ -57,9 +57,25 @@ class SheetTest(unittest.TestCase):
         self.assertEqual([b.text for b in doc.blocks if b.kind == "heading"], ["Summary", "פירוט"])
         self.assertEqual([t.direction for t in tables(doc)], ["ltr", "rtl"])
 
-    def test_used_range_starts_at_the_first_value_and_keeps_gaps(self) -> None:
-        book = Workbook(sheets=[Sheet("א", rows=[row(3, [c("C3", 1), c("E3", 2)]), row(5, [c("D5", 3)])])])
-        self.assertEqual(grid(tables(extract(book))[0]), [["1", "", "2"], ["", "", ""], ["", "3", ""]])
+    def test_the_grid_holds_only_rows_and_columns_with_a_value(self) -> None:
+        book = Workbook(sheets=[Sheet("א", rows=[row(3, [c("C3", 1), c("E3", 2)]), row(5, [c("D5", 3)]), row(7, [c("F7", 4)])])])
+        table = tables(extract(book))[0]
+        self.assertEqual(grid(table), [["1", "", "2", ""], ["", "3", "", ""], ["", "", "", "4"]])
+        self.assertEqual(set(table.flags), {"empty_rows_left_out"})
+
+    def test_a_stray_value_far_away_costs_one_row_or_column(self) -> None:
+        rows = [row(r, [c(f"A{r}", inline=f"שורה {r}"), c(f"B{r}", r)]) for r in range(1, 1001)]
+        far_right = Workbook(sheets=[Sheet("א", rows=[rows[0][:-6] + c("XFD1", inline="הערה ישנה") + "</row>"] + rows[1:])])
+        doc = extract(far_right)
+        table = tables(doc)[0]
+        self.assertEqual((len(table.cells), len(table.cells[0])), (1000, 3))
+        self.assertEqual(table.cells[999][0].text, "שורה 1000")
+        self.assertEqual(doc.unread, [])
+        self.assertIn("empty_columns_left_out", table.flags)
+        far_down = Workbook(sheets=[Sheet("א", rows=rows[:10] + [row(1048576, [c("A1048576", inline="תחתית")])])])
+        table = tables(extract(far_down))[0]
+        self.assertEqual(len(table.cells), 11)
+        self.assertEqual(table.cells[-1][0].text, "תחתית")
 
     def test_strict_namespace_and_cells_without_references(self) -> None:
         book = Workbook(strict=True, sheets=[Sheet("א", rows=['<row><c><v>1</v></c><c><v>2</v></c></row><row><c><v>3</v></c></row>'])])
@@ -177,9 +193,35 @@ class AroundTheGridTest(unittest.TestCase):
         rows = [row(r, [c(f"A{r}", r), c(f"B{r}", r)]) for r in range(1, 21)]
         with mock.patch.object(xlsx, "MAX_SHEET_CELLS", 10):
             doc = extract(Workbook(sheets=[Sheet("א", rows=rows)]))
-        self.assertEqual(len(tables(doc)[0].cells), 5)
+        self.assertEqual(len(tables(doc)[0].cells), 5)  # collection stops at the cap: no more is held in memory
         self.assertEqual([u.reason for u in doc.unread], ["sheet_truncated"])
-        self.assertIn("rows 6-20", doc.unread[0].detail)
+        self.assertIn("30 cells from row 6 not read", doc.unread[0].detail)
+
+    def test_hostile_merges_stay_bounded(self) -> None:
+        import time
+
+        identical = Workbook(sheets=[Sheet("א", rows=[row(1, [c("A1", inline="א")])], merges=["A1:XFD1048576"] * 2000)])
+        start = time.monotonic()
+        doc = extract(identical)
+        self.assertLess(time.monotonic() - start, 5)
+        self.assertEqual(grid(tables(doc)[0]), [["א"]])
+        cells = [c(f"{col}{r}", inline="x") for r in range(1, 101) for col in "ABCDEFGHIJ"]
+        overlapping = [f"{a}{r}:{b}{r + 2}" for r in range(1, 99) for a, b in zip("ABCDEFGH", "CDEFGHIJ")] * 13  # 10,192 merges
+        book = Workbook(sheets=[Sheet("א", rows=[row(r, cells[(r - 1) * 10 : r * 10]) for r in range(1, 101)], merges=overlapping)])
+        start = time.monotonic()
+        doc = extract(book)
+        self.assertLess(time.monotonic() - start, 5)
+        self.assertEqual(sum(len(r) for r in tables(doc)[0].cells) > 0, True)
+        self.assertIn("merges_not_applied", [u.reason for u in doc.unread])
+
+    def test_merges_beyond_the_position_budget_are_read_unmerged(self) -> None:
+        rows = [row(r, [c(f"A{r}", r), c(f"B{r}", r)]) for r in range(1, 21)]
+        with mock.patch.object(xlsx, "MAX_MERGE_POSITIONS", 11):
+            doc = extract(Workbook(sheets=[Sheet("א", rows=rows[:6], merges=["A1:B2", "A3:B6"])]))
+        table = tables(doc)[0]
+        self.assertEqual((table.cells[0][0].colspan, table.cells[0][0].rowspan), (2, 2))
+        self.assertEqual(table.cells[2][0].rowspan, 1)  # 4 + 8 positions > 11: the second merge is over the budget
+        self.assertEqual([u.reason for u in doc.unread], ["merges_not_applied"])
 
 
 @unittest.skipUnless(os.environ.get("HEOCR_TEST_SOFFICE") and shutil.which("soffice"), "opt-in; needs LibreOffice")

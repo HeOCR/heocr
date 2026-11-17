@@ -1,7 +1,9 @@
 """The XLSX route (D4d): our own reading of SpreadsheetML, each sheet a table block.
 
 - **Sheets** in workbook order. Each one is a heading block with the sheet's name, then a
-  table block over its used range. A chart sheet goes to ``unread``.
+  table block over the rows and columns that hold a value. Empty rows and columns are left out
+  (flagged ``empty_rows_left_out`` / ``empty_columns_left_out``), so a stray value far away
+  costs one row or column, not the range between. A chart sheet goes to ``unread``.
 - **Values** as Excel shows them, never recalculated:
   - shared and inline strings, rich text included (phonetic runs are not text);
   - a formula's **cached** value; a formula with no cached value is an empty cell flagged
@@ -21,12 +23,18 @@
 - **Also read:** cell comments (role ``comment``, with the cell reference as ``note_id``) and the
   sheet's print header and footer (roles ``header`` and ``footer``, field codes removed).
 - **Not read, and recorded:** drawings (pictures, charts, text boxes) on a sheet.
-- **Limits:** a sheet whose used range is over ``MAX_SHEET_CELLS`` is cut to the rows that fit,
-  and the rest goes to ``unread``.
+- **Limits,** each with an ``unread`` entry when reached:
+  - at most ``MAX_SHEET_CELLS`` cells with a value are held per sheet; the rest are counted
+    while the part streams by, never kept (``sheet_truncated``), and the grid is cut to the
+    rows that fit the same number of positions;
+  - merges are deduplicated, and every position a merge covers is paid from one budget of
+    ``MAX_MERGE_POSITIONS``, applied or not; merges that overlap one already applied, or exceed
+    the budget, are read unmerged (``merges_not_applied``); at most ``MAX_MERGES`` are read.
 """
 
 from __future__ import annotations
 
+import bisect
 import datetime as dt
 import io
 import posixpath
@@ -41,7 +49,9 @@ from heocr.contract import Block, Cell, Document, Unread
 from heocr.docx.reader import DocxError, _Package
 
 TOOL = "heocr.xlsx"
-MAX_SHEET_CELLS = 2_000_000
+MAX_SHEET_CELLS = 2_000_000  # cells with a value kept per sheet, and grid positions per table
+MAX_MERGE_POSITIONS = 2_000_000  # grid positions merges may cover per sheet, applied or not
+MAX_MERGES = 100_000  # mergeCell entries read per sheet
 MAX_COLUMNS = 16_384  # Excel's own limit (XFD)
 _STRICT = (
     (b"http://purl.oclc.org/ooxml/spreadsheetml/main", b"http://schemas.openxmlformats.org/spreadsheetml/2006/main"),
@@ -435,9 +445,11 @@ class _Book:
             self.doc.unread.append(Unread(scope="block", reason="sheet_missing", detail=f"sheet {name!r}: its part is missing"))
             return []
         cells: dict[tuple[int, int], Cell] = {}
+        dropped_cells, first_dropped_row = 0, None
         hidden_rows: set[int] = set()
-        hidden_cols: set[int] = set()
-        merges: list[tuple[int, int, int, int]] = []
+        hidden_cols: list[tuple[int, int]] = []  # column ranges, 0-based and inclusive
+        merges: set[tuple[int, int, int, int]] = set()
+        dropped_merges = 0
         rtl = False
         drawings = 0
         header_footer: list[tuple[str, str]] = []
@@ -455,19 +467,28 @@ class _Book:
                 for c in element.findall(S + "c"):
                     position = _ref(c.get("r", ""))
                     col_index = position[1] if position else col_index + 1
+                    if len(cells) >= MAX_SHEET_CELLS:
+                        # The cap holds before anything is kept: the rest is counted, not read.
+                        if c.find(S + "v") is not None or c.find(S + "is") is not None:
+                            dropped_cells += 1
+                            first_dropped_row = row_index if first_dropped_row is None else first_dropped_row
+                        continue
                     text, flags = self.value(c)
                     if text or flags:
                         cells[(row_index, col_index)] = Cell(text, flags=flags)
                 element.clear()
             elif tag == S + "col":
                 if element.get("hidden", "0").lower() in ("1", "true"):
-                    lo, hi = int(element.get("min", "1")), int(element.get("max", "1"))
-                    hidden_cols.update(range(lo - 1, min(hi, MAX_COLUMNS)))
+                    lo, hi = _int(element.get("min"), 1), _int(element.get("max"), 1)
+                    hidden_cols.append((max(lo, 1) - 1, min(hi, MAX_COLUMNS) - 1))
             elif tag == S + "mergeCell":
                 a, _, b = (element.get("ref") or "").partition(":")
                 start, end = _ref(a), _ref(b or a)
                 if start and end:
-                    merges.append((min(start[0], end[0]), min(start[1], end[1]), max(start[0], end[0]), max(start[1], end[1])))
+                    if len(merges) < MAX_MERGES:
+                        merges.add((min(start[0], end[0]), min(start[1], end[1]), max(start[0], end[0]), max(start[1], end[1])))
+                    else:
+                        dropped_merges += 1
             elif tag == S + "sheetView":
                 rtl = element.get("rightToLeft", "0").lower() in ("1", "true")
             elif tag == S + "drawing" or tag == S + "legacyDrawing":
@@ -478,7 +499,11 @@ class _Book:
         blocks = [Block(kind="heading", text=name, level=2, source="office_xml", tool=TOOL, direction="rtl" if rtl or _HEBREW.search(name) else "ltr", flags=["sheet_name"] + (["hidden_sheet"] if state != "visible" else []))]
         if drawings:
             self.doc.unread.append(Unread(scope="block", reason="xlsx_drawing_not_read", detail=f"sheet {name!r}: {drawings} drawings (pictures, charts or text boxes)"))
-        table = self._grid(name, cells, merges, hidden_rows, hidden_cols, rtl)
+        if dropped_cells:
+            self.doc.unread.append(Unread(scope="block", reason="sheet_truncated", detail=f"sheet {name!r}: {dropped_cells} cells from row {first_dropped_row + 1} not read (the limit is {MAX_SHEET_CELLS} cells)"))
+        if dropped_merges:
+            self.doc.unread.append(Unread(scope="block", reason="merges_not_applied", detail=f"sheet {name!r}: {dropped_merges} merged ranges beyond the first {MAX_MERGES} not applied"))
+        table = self._grid(name, cells, sorted(merges), hidden_rows, hidden_cols, rtl)
         if table is not None:
             if state != "visible":
                 table.flags.append("hidden_sheet")
@@ -493,62 +518,87 @@ class _Book:
         return blocks
 
     def _grid(self, name, cells, merges, hidden_rows, hidden_cols, rtl) -> Block | None:
-        used = set(cells)
-        for r0, c0, r1, c1 in merges:
-            if (r0, c0) in cells:
-                used.add((r1, c1))
+        """The table over the rows and columns that hold a value. Empty ones are left out, so a
+        stray value far away costs one row or column, not the whole range between."""
         if not cells:
             return None
-        top = min(r for r, _ in used)
-        bottom = max(r for r, _ in used)
-        left = min(c for _, c in used)
-        right = max(c for _, c in used)
-        width = right - left + 1
-        if width * (bottom - top + 1) > MAX_SHEET_CELLS:
-            keep = max(1, MAX_SHEET_CELLS // width)
-            self.doc.unread.append(Unread(scope="block", reason="sheet_truncated", detail=f"sheet {name!r}: rows {top + keep + 1}-{bottom + 1} not read ({width} columns; the limit is {MAX_SHEET_CELLS} cells)"))
-            bottom = top + keep - 1
-        covered: dict[tuple[int, int], tuple[int, int, int]] = {}  # position -> (the merge's top row, left column, colspan)
+        rows_kept = sorted({r for r, _ in cells})
+        cols_kept = sorted({c for _, c in cells})
+        flags: list[str] = []
+        if rows_kept[-1] - rows_kept[0] + 1 > len(rows_kept):
+            flags.append("empty_rows_left_out")
+        if cols_kept[-1] - cols_kept[0] + 1 > len(cols_kept):
+            flags.append("empty_columns_left_out")
+        if len(rows_kept) * len(cols_kept) > MAX_SHEET_CELLS:
+            keep = max(1, MAX_SHEET_CELLS // len(cols_kept))
+            dropped = sum(1 for (r, _) in cells if r > rows_kept[keep - 1])
+            self.doc.unread.append(Unread(scope="block", reason="sheet_truncated", detail=f"sheet {name!r}: {dropped} cells from row {rows_kept[keep] + 1} not read ({len(cols_kept)} columns; the limit is {MAX_SHEET_CELLS} positions)"))
+            rows_kept = rows_kept[:keep]
+        row_at = {r: i for i, r in enumerate(rows_kept)}
+        col_at = {c: j for j, c in enumerate(cols_kept)}
+
+        # Merges in grid positions. Every position a merge covers is paid for from one budget,
+        # applied or not, so overlapping or hostile merges stay bounded.
         spans: dict[tuple[int, int], tuple[int, int]] = {}
+        covered: dict[tuple[int, int], tuple[int, int, int]] = {}  # position -> (anchor row, anchor column, colspan)
+        budget, skipped = MAX_MERGE_POSITIONS, 0
         for r0, c0, r1, c1 in merges:
-            if r0 < top or c0 < left:
+            anchor = (row_at.get(r0), col_at.get(c0))
+            if None in anchor or (r0, c0) not in cells:
+                continue  # a merge without a value at its top-left shows nothing
+            i0, j0 = anchor
+            i1 = bisect.bisect_right(rows_kept, r1) - 1
+            j1 = bisect.bisect_right(cols_kept, c1) - 1
+            area = (i1 - i0 + 1) * (j1 - j0 + 1)
+            if area > budget:
+                skipped += 1
+                budget = 0
                 continue
-            r1, c1 = min(r1, bottom), min(c1, right)
-            spans[(r0, c0)] = (r1 - r0 + 1, c1 - c0 + 1)
-            for r in range(r0, r1 + 1):
-                for c in range(c0, c1 + 1):
-                    if (r, c) != (r0, c0):
-                        covered[(r, c)] = (r0, c0, c1 - c0 + 1)
+            budget -= area
+            positions = [(i, j) for i in range(i0, i1 + 1) for j in range(j0, j1 + 1)]
+            if (i0, j0) in covered or any(p in covered or p in spans for p in positions):
+                skipped += 1  # overlaps a merge already applied
+                continue
+            if area == 1:
+                continue
+            spans[(i0, j0)] = (i1 - i0 + 1, j1 - j0 + 1)
+            for position in positions[1:]:
+                covered[position] = (i0, j0, j1 - j0 + 1)
+        if skipped:
+            self.doc.unread.append(Unread(scope="block", reason="merges_not_applied", detail=f"sheet {name!r}: {skipped} merged ranges overlap others or exceed the limit of {MAX_MERGE_POSITIONS} positions; their cells are read unmerged"))
+
+        hidden_col_set = set()
+        for lo, hi in hidden_cols:
+            for j in range(bisect.bisect_left(cols_kept, lo), bisect.bisect_right(cols_kept, hi)):
+                hidden_col_set.add(cols_kept[j])
         rows: list[list[Cell]] = []
-        for r in range(top, bottom + 1):
+        for i, r in enumerate(rows_kept):
             row: list[Cell] = []
-            c = left
-            while c <= right:
-                cover = covered.get((r, c))
+            j = 0
+            while j < len(cols_kept):
+                cover = covered.get((i, j))
                 if cover is not None:
                     anchor_row, anchor_col, colspan = cover
-                    if anchor_row == r or c != anchor_col:
-                        c += 1  # inside a colspan: the anchor, or this row's placeholder, covers it
+                    if anchor_row == i or j != anchor_col:
+                        j += 1  # inside a colspan: the anchor, or this row's placeholder, covers it
                         continue
-                    hidden_text = cells.get((r, c))
-                    flags = ["merged_above"] + (["merged_cell_has_text"] if hidden_text is not None and hidden_text.text else [])
-                    row.append(Cell("", colspan=colspan, flags=flags))
-                    c += colspan
+                    under = cells.get((r, cols_kept[j]))
+                    row.append(Cell("", colspan=colspan, flags=["merged_above"] + (["merged_cell_has_text"] if under is not None and under.text else [])))
+                    j += colspan
                     continue
+                c = cols_kept[j]
                 cell = cells.get((r, c)) or Cell("")
-                rowspan, colspan = spans.get((r, c), (1, 1))
-                cell.rowspan, cell.colspan = rowspan, colspan
+                cell.rowspan, cell.colspan = spans.get((i, j), (1, 1))
                 if r in hidden_rows:
                     cell.flags.append("hidden_row")
-                if c in hidden_cols:
+                if c in hidden_col_set:
                     cell.flags.append("hidden_column")
                 row.append(cell)
-                c += colspan
+                j += cell.colspan
             rows.append(row)
-        flags = []
-        if hidden_rows & set(range(top, bottom + 1)):
+        if hidden_rows & set(rows_kept):
             flags.append("hidden_rows_read")
-        if hidden_cols & set(range(left, right + 1)):
+        if hidden_col_set:
             flags.append("hidden_columns_read")
         return Block(kind="table", cells=rows, source="office_xml", tool=TOOL, direction="rtl" if rtl else "ltr", flags=flags)
 
@@ -580,6 +630,13 @@ def _rich_text(element) -> str:
             t = child.find(S + "t")
             parts.append(t.text or "" if t is not None else "")
     return re.sub(r"_x([0-9A-Fa-f]{4})_", lambda m: chr(int(m.group(1), 16)), "".join(parts))
+
+
+def _int(value: str | None, default: int) -> int:
+    try:
+        return int(value) if value is not None else default
+    except ValueError:
+        return default
 
 
 def _raw(text: str) -> str:
