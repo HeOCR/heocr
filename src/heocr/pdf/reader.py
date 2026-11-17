@@ -1323,6 +1323,12 @@ def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids, n
     return blocks, read
 
 
+_HEBREW_WORD_IN = re.compile(r"[\u05d0-\u05ea]{3,}")
+# A whole date (d.m.yyyy) or an amount in comma groups, nothing else in the cell.
+_WELL_FORMED = re.compile(r"^(?:\d{1,2}[./]\d{1,2}[./](?:\d{2}|\d{4})|\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?)$")
+WELL_FORMED_MIN_CONFIDENCE = 30.0
+
+
 def _second_number_reading(numbers, crop, dpi: int, psm: int, first: dict, cell_flags: list[str], checks: dict) -> tuple[str, list | None]:
     """Amounts in an OCR'd cell read a second time, by the number model (``eng``).
 
@@ -1341,16 +1347,25 @@ def _second_number_reading(numbers, crop, dpi: int, psm: int, first: dict, cell_
         result = numbers.recognize(crop, dpi=dpi, psm=psm)
     except OcrUnavailable:
         return text, None
-    second = "\n".join(line.text for line in result.lines if line.text.strip())
-    confidence = result.mean_confidence
-    if not any(ch.isalpha() for ch in text) and second and not any(ch.isalpha() for ch in second):
+    # A cell's own rulings come back as "|" tokens, at confidences that pull the reading's mean down
+    # ("222,720 |" at 95.9 and 73.7): they are no part of the cell's text.
+    kept = [[w for w in line.words if w.text.strip("|")] for line in result.lines]
+    second = "\n".join(" ".join(w.text for w in words) for words in kept if words)
+    values = [w.confidence for words in kept for w in words if w.confidence >= 0]
+    confidence = round(sum(values) / len(values), 2) if values else None
+    # A numeric cell: the number model reads no letter, and heb read no Hebrew word (a misreading
+    # of digits as letters, "סז5,.?" for 4,370, is no word).
+    if not _HEBREW_WORD_IN.search(text) and not any("a" <= ch.lower() <= "z" for ch in text) and second and not any(ch.isalpha() for ch in second):
         if second.split() == text.split():
             checks["numbers"] += len(significant(text))
             checks["agreed"] += len(significant(text))
             return text, None
-        if confidence is not None and confidence >= MIN_CONFIDENCE:
+        well_formed = _WELL_FORMED.match(second) and not _WELL_FORMED.match(text)
+        if confidence is not None and (confidence >= MIN_CONFIDENCE or (well_formed and confidence >= WELL_FORMED_MIN_CONFIDENCE)):
             # Both readings are OCR: this chooses between two readings, it overwrites no layer
-            # text. Both are kept in the cell; the block stays source "ocr", unverified.
+            # text. Both are kept in the cell; the block stays source "ocr", unverified. A reading
+            # that is a whole date or a grouped amount, against one that is neither ("14.09.2023"
+            # against "₪11.22"), is taken at a lower confidence: its form is evidence of its own.
             checks["read_by_number_model"] += 1
             cell_flags.append("number_read_by_number_model")
             return second, [first, {"model": numbers.lang, "text": second, "confidence": confidence}]

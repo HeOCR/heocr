@@ -288,6 +288,45 @@ class OcrTableTest(unittest.TestCase):
         self.assertEqual(table.cells[2][2].text, "200")  # the readings agree: unchanged
         self.assertEqual(doc.components["tesseract:number_lang"], "eng")
 
+    def test_a_numeric_cell_heb_read_as_letters_takes_the_number_model_reading(self) -> None:
+        # set C pdf_t5_table: heb read "4,370" as "סז5,.?"; letters, but no Hebrew word. And the
+        # cell's own ruling comes back as a "|" token, which is no part of the reading.
+        texts = {**TEXTS, 70: "סז5,.?"}
+        cells = Path(self.tmp.name) / "cells.json"
+        cells.write_text(json.dumps({str(k): v for k, v in texts.items()}), encoding="utf-8")
+        self.numbers_setup({70: "4,370 |", 100: "| 200"})
+        doc = heocr.extract(scanned_pdf(scan(LEVELS)), tesseract=FAKE)
+        (table,) = [b for b in doc.blocks if b.kind == "table"]
+        amount = table.cells[1][2]
+        self.assertEqual(amount.text, "4,370")
+        self.assertEqual(amount.flags, ["number_read_by_number_model"])
+        self.assertEqual([r["text"] for r in amount.readings], ["סז5,.?", "4,370"])
+        self.assertEqual(table.cells[2][2].text, "200")  # the readings agree once the ruling is dropped
+        self.assertEqual(table.cells[2][2].readings, None)
+
+    def test_a_well_formed_date_or_amount_is_taken_at_a_lower_confidence(self) -> None:
+        # set C: heb read "14.09.2023" as "₪11.22"; eng read it right, at confidence 33.
+        for second, taken in (("14.09.2023", True), ("1,312,200", True), ("1409", False), ("14.09.2023 5", False)):
+            with self.subTest(second):
+                texts = {**TEXTS, 70: "₪11.22"}
+                cells = Path(self.tmp.name) / "cells.json"
+                cells.write_text(json.dumps({str(k): v for k, v in texts.items()}), encoding="utf-8")
+                self.numbers_setup({70: second, 100: "200"})
+                with mock.patch.dict(os.environ, {"FAKE_CELLS_CONF": "40.0"}):
+                    doc = heocr.extract(scanned_pdf(scan(LEVELS)), tesseract=FAKE)
+                (table,) = [b for b in doc.blocks if b.kind == "table"]
+                self.assertEqual(table.cells[1][2].text, second if taken else "₪11.22")
+
+    def test_a_cell_with_a_hebrew_word_is_not_numeric(self) -> None:
+        texts = {**TEXTS, 70: "סכום 5"}
+        cells = Path(self.tmp.name) / "cells.json"
+        cells.write_text(json.dumps({str(k): v for k, v in texts.items()}), encoding="utf-8")
+        self.numbers_setup({70: "5", 100: "200"})
+        doc = heocr.extract(scanned_pdf(scan(LEVELS)), tesseract=FAKE)
+        (table,) = [b for b in doc.blocks if b.kind == "table"]
+        self.assertEqual(table.cells[1][2].text, "סכום 5")
+        self.assertNotIn("number_read_by_number_model", table.cells[1][2].flags)
+
     def test_a_cell_with_words_is_only_compared(self) -> None:
         texts = {**TEXTS, 70: "סך 100"}
         cells = Path(self.tmp.name) / "cells.json"
