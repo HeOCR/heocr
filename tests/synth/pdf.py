@@ -106,7 +106,7 @@ class TextLine:
     y: float  # baseline, PDF coordinates (origin bottom-left)
     size: float = 12.0
     rtl: bool = True
-    vertical: bool = False  # drawn top to bottom, each glyph rotated 90 degrees
+    vertical: bool = False  # turned 90 degrees clockwise (text space x runs down the page), glyphs in visual order
 
 
 @dataclass
@@ -193,7 +193,9 @@ def make_pdf(pages: list[PdfPage]) -> bytes:
             mode = 3 if page.invisible else 0
             for k, (ch, px) in enumerate(sequence):
                 if line.vertical:
-                    y = line.y - k * line.size * 0.6
+                    # Text space x runs down the page (matrix 0 -1 1 0): each glyph goes where its visual
+                    # position along the upright line puts it, as a real producer draws rotated text.
+                    y = line.y - (px - min(q for _, q in sequence))
                     content.append(f"BT {mode} Tr /F1 {line.size:g} Tf 0 -1 1 0 {line.x:.3f} {y:.3f} Tm <{codes[ch]:02X}> Tj ET")
                 elif page.unit_font_size:
                     content.append(f"BT {mode} Tr /F1 1 Tf {line.size:g} 0 0 {line.size:g} {px:.3f} {line.y:.3f} Tm <{codes[ch]:02X}> Tj ET")

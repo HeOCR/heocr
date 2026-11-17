@@ -122,13 +122,38 @@ class T1ReadingTest(unittest.TestCase):
                 self.assertEqual(lines_of(doc), ["נוסחה 𝐀 כאן", "ערך 𝟏𝟐 ועוד"])
                 doc.to_json().encode("utf-8")
 
-    def test_rotated_text_is_reported_not_split_into_letters(self) -> None:
+    def test_vertical_text_is_read_as_its_own_line(self) -> None:
+        # set C pdf_t1_vertical: a margin note drawn vertically is read whole, on its own line, after
+        # the body, not split into letters and not reported unread.
         page = PdfPage(lines=lines_block(["המציע יגיש את הצעתו"]) + [TextLine("טבלה", 100, 500, vertical=True)])
         doc = heocr.extract(make_pdf([page]))
-        self.assertEqual(lines_of(doc), ["המציע יגיש את הצעתו"])
-        self.assertIn("rotated_text_not_read", doc.pages[0].flags)
-        self.assertEqual(doc.pages[0].coverage["status"], "partial")
-        self.assertIn("rotated_text_not_read", [u.reason for u in doc.unread])
+        self.assertEqual(lines_of(doc), ["המציע יגיש את הצעתו", "טבלה"])
+        (rotated,) = [b for b in doc.blocks if "rotated_text" in b.flags]
+        self.assertIn("reading_order_rotated_appended", rotated.flags)
+        self.assertLess(rotated.bbox[2] - rotated.bbox[0], rotated.bbox[3] - rotated.bbox[1])  # its box is tall, as drawn
+        self.assertEqual(doc.pages[0].coverage["status"], "read")
+        self.assertIn("rotated_text_read", doc.pages[0].flags)
+        self.assertEqual(doc.unread, [])
+        self.assertEqual(heocr.validate(doc.to_dict()), [])
+
+    def test_rotated_frames_and_other_angles(self) -> None:
+        from heocr.pdf.lines import Atom
+        from heocr.pdf.reader import _rotated_blocks, _turn
+
+        box = (30.0, 280.0, 40.0, 370.0)
+        for angle in (90, 270):
+            self.assertEqual(_turn(_turn(box, angle), -angle), box)
+        # At 270 degrees (pdfium, clockwise) text space x runs up the page: the upright line's left,
+        # where a Hebrew line ends, is at the bottom, and its start (ש) at the top.
+        atoms = [(Atom(ch, 100.0, 300.0 + 10 * n, 110.0, 309.0 + 10 * n, 10.0, n), 270) for n, ch in enumerate("שלום")]
+        doc = heocr.Document(sha256="0" * 64, size=0, format="pdf", format_evidence="test")
+        doc._rtl = True
+        blocks, placed = _rotated_blocks(doc, 0, atoms)
+        self.assertEqual(([b.text for b in blocks], placed), (["שלום"], 4))
+        self.assertIn("rotated_270", blocks[0].flags)
+        # Any other angle is left to rotated_text_not_read.
+        slanted = [(Atom(ch, 100.0 + 8 * n, 300.0 + 8 * n, 108.0 + 8 * n, 308.0 + 8 * n, 10.0, n), 45) for n, ch in enumerate("שלום")]
+        self.assertEqual(_rotated_blocks(doc, 0, slanted), ([], 0))
 
     def test_space_glyph_drawn_over_a_letter_is_not_a_word_break(self) -> None:
         page = PdfPage(lines=lines_block(["נספח ג'"]), glyphs=[(" ", 506.0, 780.0)])
