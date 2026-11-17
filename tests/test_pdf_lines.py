@@ -69,6 +69,31 @@ class NumbersApartInRtlTest(unittest.TestCase):
         # A full stop clearly closer to one side still hugs it.
         self.assertEqual(text(visual("1", WORD_SPACE, ".", 2.0, "1.2")), "1.2. 1")
 
+    def test_a_number_in_brackets_after_a_number(self) -> None:
+        # set A synth-039: "סעיף 11(5)" in an RTL line is shown as "(5)11 ףיעס", the brackets drawn
+        # mirrored; it was read back "5(11)". The brackets take the paragraph's direction, not a
+        # number's: line building gives "11)5(", and the document's rtl_bracket_order repair mirrors it.
+        self.assertEqual(text(visual("(", HUG, "5", HUG, ")", HUG, "11")), "11)5(")
+        self.assertEqual(text(visual("(", HUG, "5", HUG, ")", HUG, "11", WORD_SPACE, "ףיעס")), "סעיף 11)5(")
+
+    def test_numbers_in_brackets_inside_a_latin_run_are_left_as_before(self) -> None:
+        # dev (eval, PR #75): "Article 76(1)" and "§75(1)" inside a Hebrew paragraph. The bracket rule
+        # is for digits and punctuation in Hebrew text; in a Latin run the line keeps its former order.
+        self.assertEqual(text(visual("Article", WORD_SPACE, "76", HUG, "(", HUG, "1", HUG, ")", WORD_SPACE, "ףיעס")), "סעיף )Article 76(1")
+        self.assertEqual(text(visual("75", HUG, "(", HUG, "1", HUG, ")", HUG, "§", WORD_SPACE, "ףיעס")), "סעיף §)75(1")
+        # The same shapes inside an outer bracket, with a letter level, and after a Latin act name.
+        self.assertEqual(text(visual("(", HUG, "Article", WORD_SPACE, "76", HUG, "(", HUG, "1", HUG, ")", HUG, ")", WORD_SPACE, "ףיעס")),
+                         "סעיף ))Article 76(1(")
+        self.assertEqual(text(visual("(", HUG, "Article", WORD_SPACE, "77", HUG, "(", HUG, "2", HUG, ")", HUG, "(", HUG, "a", HUG, ")", HUG, ")",
+                                     WORD_SPACE, "ףיעס")), "סעיף ))Article 77(2)(a(")
+        self.assertEqual(text(visual("GWB", WORD_SPACE, "§", HUG, "130", HUG, "(", HUG, "2", HUG, ")", WORD_SPACE, "ףיעס")), "סעיף )GWB §130(2")
+        # Hebrew around the numbers keeps the rule: "סעיף 3(4)(ב)".
+        self.assertEqual(text(visual("(", HUG, "ב", HUG, ")", HUG, "(", HUG, "4", HUG, ")", HUG, "3", WORD_SPACE, "ףיעס")), "סעיף 3)4()ב(")
+
+    def test_brackets_drawn_left_to_right_after_a_number_keep_their_run(self) -> None:
+        # In an LTR line nothing changes: "11(5)" drawn left to right reads as drawn.
+        self.assertEqual(text(visual("11", HUG, "(", HUG, "5", HUG, ")"), rtl=False), "11(5)")
+
     def test_numbers_drawn_left_to_right_keep_one_run(self) -> None:
         # The comma touches the left number: drawn in reading order, left to right.
         self.assertEqual(text(visual("1", HUG, ",", WORD_SPACE, "2")), "1, 2")
