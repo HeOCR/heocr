@@ -74,6 +74,17 @@ class BracketTest(unittest.TestCase):
         self.assertEqual(lines_of(doc), BRACKETED + ["צילום (תמונה עליונה) מתוך האוסף"])
         self.assertIn("brackets_kept_valid_as_read", doc.blocks[-1].flags)
 
+    def test_a_paragraph_whose_labels_read_right_only_mirrored_is_mirrored(self) -> None:
+        # set A synth-018: a paragraph closing a parenthesis from the one before ("2008)") and opening
+        # one into the next ("69י8(ג)(") looks balanced as read ("2008(" ... ")"), but its section
+        # labels, "(ג)", read right only mirrored. Balance as read is then a false pair: mirrored.
+        text = "הודעה מיום 2008) לפי סעיף 69י8(ג) או (ד) ובהתאם לסעיף (5"
+        glyph = PdfPage(lines=paragraphs(BRACKETED + [text]))
+        doc = heocr.extract(make_pdf([glyph]), ocr=False)
+        self.assertEqual(lines_of(doc)[-1], text)
+        self.assertNotIn("brackets_kept_valid_as_read", doc.blocks[-1].flags)
+        self.assertEqual((repairs.bracket_labels("סעיף (ג) או (ד)"), repairs.bracket_labels("סעיף )ג( או )ד(")), (2, 0))
+
     def test_logically_mapped_layer_is_left_alone(self) -> None:
         doc = heocr.extract(make_pdf([PdfPage(lines=paragraphs(BRACKETED), remap={"(": ")", ")": "("})]), ocr=False)
         self.assertEqual(lines_of(doc), BRACKETED)

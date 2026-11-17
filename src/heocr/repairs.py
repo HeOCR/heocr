@@ -15,6 +15,7 @@ else. The plan ``planning/milestones/d2-routes.md`` lists the planned ones.
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from dataclasses import dataclass
 
@@ -193,6 +194,16 @@ def bracket_order_valid(text: str) -> bool | None:
             if not stack or stack.pop() != _PAIRS[ch]:
                 return False
     return not stack
+
+
+_LABEL_PAIR = re.compile(r"\([\u05d0-\u05ea0-9]{1,3}\)")
+
+
+def bracket_labels(text: str) -> int:
+    """Section labels in brackets, "(א)" "(1)" "(ב1)": short pairs that Hebrew legal text is full of.
+    Counted as read and mirrored, they tell a paragraph's bracket order better than balance does: a
+    parenthesis closed from the paragraph before and one opened into the next pair up falsely."""
+    return len(_LABEL_PAIR.findall(text))
 
 
 def rtl_bracket_order(text: str) -> tuple[str, Counter]:
