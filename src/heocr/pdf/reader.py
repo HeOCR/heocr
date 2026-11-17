@@ -765,9 +765,13 @@ def _repair_rtl_brackets(doc: Document) -> None:
             table.flags.append("brackets_mirrored")
     for block in blocks:
         flat = block.text.replace("\n", " ")
-        if repairs.bracket_order_valid(flat) and not repairs.bracket_order_valid(flat.translate(repairs.MIRROR)):
+        mirrored = flat.translate(repairs.MIRROR)
+        labels_say_mirror = repairs.bracket_labels(mirrored) > repairs.bracket_labels(flat)
+        if repairs.bracket_order_valid(flat) and not repairs.bracket_order_valid(mirrored) and not labels_say_mirror:
             # The paragraph's own evidence wins: balanced as read, broken when mirrored (another
-            # source inside the document, such as photo credits). Left as read.
+            # source inside the document, such as photo credits). Left as read. Unless its section
+            # labels read right only mirrored ("(ג)" read as ")ג("): then the balance as read is a
+            # false pair, a parenthesis closed from the paragraph before with one opened into the next.
             block.flags.append("brackets_kept_valid_as_read")
             continue
         changes: Counter = Counter()
