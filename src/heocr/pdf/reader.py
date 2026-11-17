@@ -326,6 +326,46 @@ def _close_word(word: list[int], font: str, words: dict, other_words: dict) -> N
     other_words[font] = other_words.get(font, 0) + 1
 
 
+LAYER_CHECK_LINES = 6  # lines of a page's OCR layer read again, spread over the page
+LAYER_CHECK_MIN_LETTERS = 8  # a line with fewer letters says too little
+LAYER_CHECK_AGREEMENT = 0.5  # the median letter agreement under which the layer is not this page's text
+
+
+def _ocr_layer_agrees(doc: Document, page, built: PageLines) -> bool | None:
+    """Whether an invisible OCR layer agrees with a second reading of a few of its lines.
+
+    Up to ``LAYER_CHECK_LINES`` lines with at least ``LAYER_CHECK_MIN_LETTERS`` letters, spread over the
+    page, are OCR'd one by one (``--psm 7``) and compared with the layer, letters only. A median
+    agreement under ``LAYER_CHECK_AGREEMENT`` means the layer is not the page's text (a foreign or
+    garbage layer): the page is read by OCR instead (T4). None when there is no OCR engine, or no
+    line to check.
+    """
+    import difflib
+
+    engine = engine_for(doc)
+    if engine is None:
+        return None
+    lines = [line for line in built.lines if sum(ch.isalpha() for ch in line.text) >= LAYER_CHECK_MIN_LETTERS]
+    if not lines:
+        return None
+    step = max(1, len(lines) // LAYER_CHECK_LINES)
+    sample = lines[::step][:LAYER_CHECK_LINES]
+    image, scale = _render(page, frame_of(page))
+    ratios = []
+    for line in sample:
+        box = line.bbox
+        crop = image.crop((max(0, int((box[0] - 2) * scale)), max(0, int((box[1] - 2) * scale)), int((box[2] + 2) * scale), int((box[3] + 2) * scale)))
+        try:
+            result = engine.recognize(crop, dpi=round(scale * 72), psm=7)
+        except OcrUnavailable:
+            return None
+        read = "".join(ch for line_ in result.lines for ch in line_.text if ch.isalpha())
+        layer = "".join(ch for ch in line.text if ch.isalpha())
+        ratios.append(difflib.SequenceMatcher(None, layer, read, autojunk=False).ratio())
+    ratios.sort()
+    return ratios[len(ratios) // 2] >= LAYER_CHECK_AGREEMENT
+
+
 def read_t1(doc: Document, page_index: int, built: PageLines) -> int:
     """Read a T1 page's built lines into blocks. Returns the characters read."""
     read = 0
@@ -699,6 +739,14 @@ def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = froz
     if shifted_chars:
         # The layer was a cp1255-shifted font (a T3 layer by its state), fully restored: read as T1.
         flags.append("font_cp1255_shifted")
+    if "text_layer_is_ocr" in flags and page_class in ("T1", "T2"):
+        # An invisible layer over a full-page image is someone's OCR. Its letters alone cannot show
+        # that it is garbage; a second, independent reading of a few of its lines can.
+        verdict = _ocr_layer_agrees(doc, page, built)
+        if verdict is False:
+            page_class, flags = "T4", flags + ["foreign_ocr_layer", "ocr_layer_disagrees"]
+        elif verdict is None:
+            flags.append("ocr_layer_unchecked")
     if page.get_rotation():
         flags.append("page_rotated")
     _report_side_losses(doc, index, text, flags)

@@ -97,6 +97,39 @@ class OcrRouteTest(unittest.TestCase):
         self.assertNotIn("CMLL", doc.text)
         self.assertIn("שלום עולם", doc.text)
 
+    def ocr_layer_page(self) -> bytes:
+        """An invisible Hebrew layer over a full-page image: someone's OCR, plausible letters."""
+        return make_pdf([PdfPage(lines=lines_block(HEBREW), invisible=True, images=FULL_PAGE)])
+
+    def test_an_ocr_layer_that_a_second_reading_confirms_is_kept(self) -> None:
+        # The fake answers every one-line call with the same text, so every layer line is that text.
+        with mock.patch.dict(os.environ, {"FAKE_LINE": HEBREW[0]}):
+            doc = heocr.extract(make_pdf([PdfPage(lines=lines_block([HEBREW[0]] * 5), invisible=True, images=FULL_PAGE)]), tesseract=FAKE)
+        page = doc.pages[0]
+        self.assertEqual(page.page_class, "T1")
+        self.assertIn("text_layer_is_ocr", page.flags)
+        self.assertNotIn("ocr_layer_disagrees", page.flags)
+        self.assertIn(HEBREW[0], doc.text)
+        self.assertTrue(any(call[call.index("--psm") + 1] == "7" for call in self.calls() if "--psm" in call))  # one-line checks ran
+
+    def test_an_ocr_layer_that_disagrees_with_a_second_reading_is_read_by_ocr(self) -> None:
+        # Plausible Hebrew letters, but not the page's: the second reading finds other words.
+        with mock.patch.dict(os.environ, {"FAKE_LINE": "טקסט אחר לגמרי שאינו בשכבה"}):
+            doc = heocr.extract(self.ocr_layer_page(), tesseract=FAKE)
+        page = doc.pages[0]
+        self.assertEqual(page.page_class, "T4")
+        self.assertIn("ocr_layer_disagrees", page.flags)
+        self.assertIn("foreign_ocr_layer", page.flags)
+        self.assertNotIn(HEBREW[1], doc.text)
+        self.assertIn("שלום עולם", doc.text)  # the page OCR (fake's default page)
+
+    def test_without_ocr_the_layer_is_kept_and_marked_unchecked(self) -> None:
+        doc = heocr.extract(self.ocr_layer_page(), ocr=False)
+        page = doc.pages[0]
+        self.assertEqual(page.page_class, "T1")
+        self.assertIn("ocr_layer_unchecked", page.flags)
+        self.assertIn(HEBREW[1], doc.text)
+
     def test_t6_regions_go_to_region_ocr(self) -> None:
         page = PdfPage(lines=lines_block(HEBREW), images=[(50, 100, 495, 300), (500, 20, 4, 4)])
         doc = heocr.extract(make_pdf([page]), tesseract=FAKE)
