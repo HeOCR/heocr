@@ -912,7 +912,7 @@ def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = froz
     # region OCR; otherwise they are logos and icons, counted in coverage.
     ocr_wanted = stats.image_coverage >= FIGURE_IMAGE
     regions = _ocr_regions(doc, index, page, width, height, stats.image_boxes, text.drawn_boxes, ocr_wanted,
-                           layer_is_ocr="text_layer_is_ocr" in flags)
+                           layer_is_ocr="text_layer_is_ocr" in flags, digests=stats.image_digests)
     if regions.pop("layer_scan_short_for_ink", 0):
         flags = flags + ["ocr_short_for_ink"]
     status = "read" if read >= text.chars_total and not regions["image_regions_unread"] else "partial"
@@ -1444,6 +1444,7 @@ def _layer_line_boxes(boxes) -> list[list[float]]:
 def _ocr_regions(
     doc: Document, index: int, page, width: float, height: float, boxes: list[list[float]], drawn_boxes, ocr_wanted: bool = True,
     layer_is_ocr: bool = False,
+    digests: list[str] | None = None,
 ) -> dict:
     """Region OCR for the image regions of a page read from its text layer. Returns coverage counts.
 
@@ -1466,6 +1467,7 @@ def _ocr_regions(
     }
     if not boxes:
         return counts
+    digest_of = {id(b): d for b, d in zip(boxes, digests or [])}
     large = [b for b in boxes if ocr_wanted and (b[2] - b[0]) * (b[3] - b[1]) >= REGION_MIN_PAGE_SHARE * width * height]
     counts["image_regions_small"] = len(boxes) - len(large)
     if layer_is_ocr:
@@ -1494,6 +1496,14 @@ def _ocr_regions(
                 counts["layer_scan_short_for_ink"] = 1
                 doc.unread.append(Unread(scope="page", reason="ocr_short_for_ink", page=index, bbox=scans[0],
                                          detail=f"{share:.0%} of the scan's ink lies outside every layer character"))
+    # The same image drawn again in the document (a letterhead, a logo, a stamp on every page) is read
+    # once, where it first appears; later ones are counted, with no OCR and no unread entry.
+    repeated = [b for b in large if digest_of.get(id(b)) and digest_of[id(b)] in doc._regions_read]
+    if repeated:
+        counts["image_regions_repeated"] = len(repeated)
+        counts["image_regions_no_ocr_needed"] += len(repeated)
+        large = [b for b in large if not any(b is r for r in repeated)]
+    doc._regions_read.update(digest_of[id(b)] for b in large if digest_of.get(id(b)))
     if not large:
         return counts
 

@@ -52,6 +52,20 @@ class ObjectStats:
     text_objects: int = 0
     stream_text: str = ""
     image_boxes: list[list[float]] = field(default_factory=list)  # top-left origin, points
+    image_digests: list[str] = field(default_factory=list)  # each image box's stream digest (repeated images)
+
+
+def _image_digest(obj) -> str:
+    """A digest of an image object's stream data (as stored, still encoded) and pixel size: the
+    same picture drawn again (a letterhead, a logo on every page) has the same digest."""
+    import hashlib
+
+    try:
+        data = bytes(obj.get_data(decode_simple=False))
+        width, height = obj.get_px_size()
+    except Exception:  # an image pdfium cannot give: never taken for a repeat
+        return ""
+    return hashlib.blake2b(data + f"{width}x{height}".encode(), digest_size=16).hexdigest()
 
 
 def _union_area(rects: list[tuple[float, float, float, float]]) -> float:
@@ -86,6 +100,7 @@ def object_stats(page, max_objects: int = 20000) -> ObjectStats:
     frame = frame_of(page)
     width, height = frame.width, frame.height
     rects = []
+    digests: list[str] = []
     textpage = page.get_textpage()
     pieces: list[str] = []
     previous_box = None
@@ -101,6 +116,7 @@ def object_stats(page, max_objects: int = 20000) -> ObjectStats:
                 y0, y1 = max(0.0, y0), min(height, y1)
                 if x1 > x0 and y1 > y0 and len(rects) < 500:
                     rects.append((x0, y0, x1, y1))
+                    digests.append(_image_digest(obj))
             elif kind == raw.FPDF_PAGEOBJ_PATH:
                 stats.paths += 1
             elif kind == raw.FPDF_PAGEOBJ_TEXT:
@@ -126,6 +142,7 @@ def object_stats(page, max_objects: int = 20000) -> ObjectStats:
         textpage.close()
     stats.image_coverage = _union_area(rects) / (width * height) if width * height > 0 else 0.0
     stats.image_boxes = [list(rect) for rect in rects]
+    stats.image_digests = digests
     stats.stream_text = "".join(pieces)
     return stats
 

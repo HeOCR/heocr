@@ -213,6 +213,35 @@ class OcrRouteTest(unittest.TestCase):
         self.assertIn("ocr_layer_unchecked", page.flags)
         self.assertIn(HEBREW[1], doc.text)
 
+    def test_an_image_repeated_on_every_page_is_read_once(self) -> None:
+        # Word PDFs on dev: a letterhead or logo drawn on every page went to region OCR on each one
+        # (72% of region blocks repeated text read on another page), flagging every page.
+        page = PdfPage(lines=lines_block(HEBREW), images=[(50, 100, 495, 300)])
+        doc = heocr.extract(make_pdf([page, page, page]), tesseract=FAKE)
+        region_calls = [c for c in self.calls() if "--psm" in c and c[c.index("--psm") + 1] == "3"]
+        self.assertEqual(len(region_calls), 1)
+        first, *later = doc.pages
+        self.assertEqual(first.coverage["image_regions_ocr"], 1)
+        for record in later:
+            self.assertEqual((record.coverage["image_regions_repeated"], record.coverage["image_regions_no_ocr_needed"]), (1, 1))
+            self.assertEqual([u for u in doc.unread if u.page == record.index], [])
+        for record in doc.pages:  # every region lands in exactly one count
+            c = record.coverage
+            self.assertEqual(c["image_regions"], c["image_regions_ocr"] + c["image_regions_small"] + c["image_regions_unread"] + c["image_regions_no_ocr_needed"])
+        self.assertEqual(len([b for b in doc.blocks if b.source == "ocr"]), len([b for b in doc.blocks if b.source == "ocr" and b.page == 0]))
+
+    def test_different_images_are_each_read(self) -> None:
+        from PIL import Image, ImageDraw
+
+        pages = []
+        for n in range(2):
+            picture = Image.new("L", (400, 240), 255)
+            ImageDraw.Draw(picture).rectangle([20 + 40 * n, 20, 200 + 40 * n, 120], fill=0)
+            pages.append(PdfPage(lines=lines_block(HEBREW), rasters=[(50, 100, 495, 300, picture)]))
+        doc = heocr.extract(make_pdf(pages), tesseract=FAKE)
+        self.assertTrue(all("image_regions_repeated" not in p.coverage for p in doc.pages))
+        self.assertEqual(sum(p.coverage["image_regions_ocr"] + p.coverage["image_regions_unread"] for p in doc.pages), 2)
+
     def test_t6_regions_go_to_region_ocr(self) -> None:
         page = PdfPage(lines=lines_block(HEBREW), images=[(50, 100, 495, 300), (500, 20, 4, 4)])
         doc = heocr.extract(make_pdf([page]), tesseract=FAKE)
