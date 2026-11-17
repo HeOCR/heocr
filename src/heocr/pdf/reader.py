@@ -903,9 +903,11 @@ def _without(image, scale: float, boxes) -> object:
     (``paper_level``: not white, which a global threshold would split the page on)."""
     from PIL import ImageDraw
 
-    out = image.copy()
+    # Only grey and RGB images take a grey fill as is: in RGBA the fill's fourth value would be the
+    # alpha, and in "P" a palette index. Anything else is read as RGB first.
+    out = image.copy() if image.mode in ("L", "RGB") else image.convert("RGB")
     level = paper_level(image)
-    fill = level if out.mode == "L" else (level,) * len(out.getbands())
+    fill = level if out.mode == "L" else (level, level, level)
     draw = ImageDraw.Draw(out)
     for x0, y0, x1, y1 in boxes:
         draw.rectangle([(x0 - 2) * scale, (y0 - 2) * scale, (x1 + 2) * scale, (y1 + 2) * scale], fill=fill)
