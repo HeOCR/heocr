@@ -85,7 +85,7 @@ Every entry has a scope (`document`, `page` or `block`), a reason, and where pos
 | `format_not_supported` | A format with no route yet (EPUB, email, archives) |
 | `converter_unavailable`, `conversion_failed`, `conversion_timeout` | LibreOffice missing, refusing the file, or stopped at its time limit |
 | `ocr_route_unavailable`, `ocr_failed`, `ocr_found_no_text`, `ocr_short_for_ink` | Tesseract missing or failing, or a page whose ink OCR did not read |
-| `image_region_*`, `image_*` | Image regions and embedded images: not read, too small, low confidence, or their text already in the layer |
+| `image_region_*`, `image_*` | Image regions and embedded images: not read, too small, or low confidence. A region whose text is already in the layer, or that is blank, is no loss: it is counted in the page's coverage (`image_regions_text_in_layer`, `image_regions_blank`), not here |
 | `table_row_ink_unread` | A table row with ink in its cells that OCR read none of |
 | `table_cell_unconfirmed` | A scanned table cell whose two readings (`heb` and the number model) differ, neither confident; both are kept in the cell |
 | `rotated_text_not_read` | Characters drawn at an angle other than vertical. Vertical text (90 or 270 degrees: a margin note, a stamp's caption) is read as its own lines after the page's body, flagged `rotated_text` |

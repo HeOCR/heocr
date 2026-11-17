@@ -1620,9 +1620,10 @@ def _ocr_regions(
         inside = [b for b in drawn_boxes if b[0] < box[2] and b[2] > box[0] and b[1] < box[3] and b[3] > box[1]]
         region, masked = mask_layer_text(image.crop(crop), (crop[0] / scale, crop[1] / scale), scale, inside)
         if not has_ink(region):
-            # Not an unread loss: the layer holds this region's text, or it holds none.
-            reason = "image_region_text_in_layer" if masked else "image_region_blank"
-            doc.unread.append(Unread(scope="page", reason=reason, page=index, bbox=box, detail=f"{masked} layer characters masked"))
+            # Not a loss: the layer holds this region's text, or it holds none. Counted in coverage
+            # (within image_regions_no_ocr_needed), never as unread: unread is what was not read.
+            key = "image_regions_text_in_layer" if masked else "image_regions_blank"
+            counts[key] = counts.get(key, 0) + 1
             counts["image_regions_no_ocr_needed"] += 1
             return
         offset = (crop[0] / scale, crop[1] / scale)

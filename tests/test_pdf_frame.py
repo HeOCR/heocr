@@ -112,7 +112,8 @@ class RotatedPageTest(unittest.TestCase):
     def _masked(self, doc) -> None:
         self.assertEqual(doc.pages[0].page_class, "T6")
         # The mask covers the word's ink: nothing is left to OCR, and nothing is read twice.
-        self.assertEqual([u.reason for u in doc.unread], ["image_region_text_in_layer"])
+        self.assertEqual(doc.unread, [])
+        self.assertEqual(doc.pages[0].coverage["image_regions_text_in_layer"], 1)
         self.assertEqual([b for b in doc.blocks if "from_image_region" in b.flags], [])
         self.assertIn("מכרזים", doc.text)
 
