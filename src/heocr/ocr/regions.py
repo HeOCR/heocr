@@ -85,6 +85,30 @@ def ink_outside(image, boxes_px, pad: int = 2) -> tuple[int, int]:
     return total, sum(rest.histogram()[:INK_LEVEL])
 
 
+def dense_ink_outside(image, boxes_px, pad: int, tile_px: int, density: float) -> tuple[int, int]:
+    """Dark pixels in a grey image, in total and outside the given boxes **in dense areas only**:
+    tiles of ``tile_px`` whose uncovered ink is at least ``density`` of the tile. Text left
+    uncovered fills its tiles; rulings (straight or skewed) and specks fill a few percent of any
+    tile, and are not counted."""
+    from PIL import Image, ImageDraw
+
+    gray = image.convert("L")
+    total = sum(gray.histogram()[:INK_LEVEL])
+    if not total:
+        return 0, 0
+    rest = gray.point(lambda v: 0 if v < INK_LEVEL else 255)
+    draw = ImageDraw.Draw(rest)
+    for x0, y0, x1, y1 in boxes_px:
+        draw.rectangle([x0 - pad, y0 - pad, x1 + pad, y1 + pad], fill=255)
+    w, h = rest.size
+    tiles = rest.resize((max(1, w // tile_px), max(1, h // tile_px)), Image.BOX)
+    dense = tiles.point(lambda v: 255 if v <= 255 * (1 - density) else 0)  # mean white at most 1 - density
+    mask = dense.resize((w, h), Image.NEAREST)
+    kept = Image.new("L", (w, h), 255)
+    kept.paste(rest, (0, 0), mask)
+    return total, sum(kept.histogram()[:INK_LEVEL])
+
+
 def short_for_ink(image, result) -> tuple[bool, float]:
     """Whether OCR left much of an image's ink outside every line it read (region accounting)."""
     total, outside = ink_outside(image, [line.bbox for line in result.lines])

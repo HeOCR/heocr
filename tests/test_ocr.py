@@ -101,14 +101,45 @@ class OcrRouteTest(unittest.TestCase):
         self.assertNotIn("CMLL", doc.text)
         self.assertIn("שלום עולם", doc.text)
 
+    def sandwich(self, layer: list[str], extra_paragraph: bool = False) -> PdfPage:
+        """An invisible layer over a page scan whose ink lies under the layer's lines, as a correct
+        sandwich PDF has it; with ``extra_paragraph``, the scan also holds a paragraph the layer lacks."""
+        from PIL import Image, ImageDraw
+
+        probe = heocr.extract(make_pdf([PdfPage(lines=lines_block(layer))]), ocr=False)
+        k = 150 / 72
+        scan = Image.new("L", (round(595 * k), round(842 * k)), 255)
+        draw = ImageDraw.Draw(scan)
+        for line in (l for b in probe.blocks for l in b.lines):
+            x0, y0, x1, y1 = line.bbox
+            for x in range(int(x0 * k) + 2, int(x1 * k) - 2, 9):  # glyph-like strokes inside the line
+                draw.rectangle([x, y0 * k + 2, x + 4, y1 * k - 2], fill=0)
+        if extra_paragraph:
+            for row in range(6):
+                for x in range(120, 1100, 9):
+                    draw.rectangle([x, 1400 + row * 40, x + 4, 1425 + row * 40], fill=0)
+        return PdfPage(lines=lines_block(layer), invisible=True, rasters=[(0, 0, 595, 842, scan)])
+
+    def test_a_partial_ocr_layer_is_flagged(self) -> None:
+        # The OCR software skipped a paragraph: the layer is kept, and the uncovered ink is reported.
+        with mock.patch.dict(os.environ, {"FAKE_LINE": HEBREW[0]}):
+            doc = heocr.extract(make_pdf([self.sandwich(HEBREW * 4, extra_paragraph=True)]), tesseract=FAKE)  # 20 lines, 6 left out
+        page = doc.pages[0]
+        self.assertEqual(page.page_class, "T1")
+        self.assertIn("ocr_short_for_ink", page.flags)
+        (entry,) = doc.unread
+        self.assertEqual((entry.reason, entry.page), ("ocr_short_for_ink", 0))
+        self.assertGreaterEqual(page.coverage["layer_scan_ink_outside_share"], 0.10)
+
     def ocr_layer_page(self) -> bytes:
         """An invisible Hebrew layer over a full-page image: someone's OCR, plausible letters."""
         return make_pdf([PdfPage(lines=lines_block(HEBREW), invisible=True, images=FULL_PAGE)])
 
     def read_layer(self, layer: list[str], line: str, confidence: str = "95.0") -> heocr.Document:
-        """An invisible layer over a full-page image, every one-line OCR call answered with ``line``."""
+        """An invisible layer over its page scan, every one-line OCR call answered with ``line``."""
+        page = self.sandwich(layer)
         with mock.patch.dict(os.environ, {"FAKE_LINE": line, "FAKE_CONF": confidence}):
-            return heocr.extract(make_pdf([PdfPage(lines=lines_block(layer), invisible=True, images=FULL_PAGE)]), tesseract=FAKE)
+            return heocr.extract(make_pdf([page]), tesseract=FAKE)
 
     def test_an_ocr_layer_that_a_second_reading_confirms_is_kept(self) -> None:
         # The fake answers every one-line call with the same text, so every layer line is that text.
@@ -120,6 +151,21 @@ class OcrRouteTest(unittest.TestCase):
         self.assertNotIn("ocr_layer_disagrees", page.flags)
         self.assertIn(HEBREW[0], doc.text)
         self.assertTrue(any(call[call.index("--psm") + 1] == "7" for call in self.calls() if "--psm" in call))  # one-line checks ran
+
+    def test_a_kept_ocr_layer_is_not_read_again_from_its_own_scan(self) -> None:
+        # set C pdf_t1_ocr_layer: masking the layer out of its scan left residue that region OCR read
+        # as noise at low confidence, reported as unread although the layer holds the scan's text.
+        with mock.patch.dict(os.environ, {"FAKE_LINE": HEBREW[0]}):
+            doc = heocr.extract(make_pdf([self.sandwich([HEBREW[0]] * 5)]), tesseract=FAKE)
+        page = doc.pages[0]
+        self.assertEqual(page.page_class, "T1")
+        self.assertEqual(doc.unread, [])
+        self.assertLess(page.coverage["layer_scan_ink_outside_share"], 0.10)
+        self.assertEqual((page.coverage["image_regions_layer_scan"], page.coverage["image_regions_no_ocr_needed"]), (1, 1))
+        self.assertEqual(page.coverage["image_regions_unread"], 0)
+        self.assertFalse([b for b in doc.blocks if b.source == "ocr"])
+        recognitions = [c for c in self.calls() if c[:1] not in (["--version"], ["--list-langs"])]
+        self.assertTrue(recognitions and all("--psm" in c and c[c.index("--psm") + 1] == "7" for c in recognitions))  # only the layer check
 
     def test_a_scrambled_layer_that_a_confident_reading_contradicts_is_read_by_ocr(self) -> None:
         # A permutation of the page's letters: final forms inside words, plain forms at their ends.
