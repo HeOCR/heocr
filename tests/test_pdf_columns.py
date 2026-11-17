@@ -99,6 +99,31 @@ class SideBySideRowsTest(unittest.TestCase):
         self.assertIn("reading_order_unresolved_columns", doc.pages[0].flags)
         self.assertIn("המשך הפריט", doc.text)
 
+    def test_a_heading_above_a_signature_block_does_not_hold_it_back(self) -> None:
+        # The most common case on dev: a heading (or a paragraph's last line) just above a row of
+        # signature labels and a row of blanks. It is not lined up with any label, and it sits
+        # further from the rows than they are from each other: it cannot be a column's line.
+        lines = lines_block([sentence("לפני", 1, FULL)], top=720)
+        lines += [TextLine("חתימת המציע:", 330, 684)]
+        labels = [("תאריך", 545), ("שם החותם", 380), ("חתימה וחותמת", 200)]
+        lines += [TextLine(text, x, 660) for text, x in labels]
+        lines += [TextLine("ריק", 530, 646), TextLine("ריק", 365, 646)]
+        lines += lines_block([sentence("אחרי", 2, FULL)], top=600)
+        doc = extract(lines)
+        page = doc.pages[0]
+        self.assertNotIn("reading_order_unresolved_columns", page.flags)
+        text = doc.text
+        self.assertLess(text.index("חתימת המציע"), text.index("תאריך"))
+        self.assertLess(text.index("תאריך"), text.index("שם החותם"))
+
+    def test_a_line_lined_up_with_a_band_but_far_off_does_not_hold_it_back(self) -> None:
+        lines = lines_block([sentence("לפני", 1, FULL)], top=720)
+        lines += [TextLine("פריט ראשון", 545, 660), TextLine("פריט שני", 200, 660)]
+        lines += [TextLine("המשך הפריט", 545, 660 - 26)]  # lined up, but twice as far as a line spacing (still within NEAR)
+        lines += lines_block([sentence("אחרי", 2, FULL)], top=600)
+        doc = extract(lines)
+        self.assertNotIn("reading_order_unresolved_columns", doc.pages[0].flags)
+
     def test_labels_in_the_margin_keep_their_paragraphs(self) -> None:
         # A hanging-indent list: "1." at the right, its paragraph indented beside it.
         def para(n: int, k: int) -> str:

@@ -28,9 +28,13 @@ and every character ends up in a line or a cell:
 - **One or two side-by-side rows** (forms, "label: value", signatures) with no other text in
   their bands just above or below: row by row and column by column give the same order, so
   they are read row by row and flagged ``reading_order_row_major_unverified``.
-- **Ambiguity stays flagged.** When the row just above or below a run fits inside one of its
-  bands (it could belong to a column), or the bands are not stable, nothing is decided and the
-  run keeps ``reading_order_unresolved_columns``.
+- **Ambiguity stays flagged.** When the line just above or below a run could be one of its
+  columns' lines, or the bands are not stable, nothing is decided and the run keeps
+  ``reading_order_unresolved_columns``. A neighbouring line is such a line only when it fits
+  inside one band, **lines up** with that band's piece in the adjacent row (the reading-side
+  edge or the centre, within ``ALIGN`` line heights), and is **no further** from the run than
+  the run's rows are from each other (plus ``PITCH_SLACK``). A heading or a paragraph's last
+  line above a signature block is neither, and no longer holds the block back.
 """
 
 from __future__ import annotations
@@ -54,6 +58,8 @@ GUTTER_SHARE = 0.5  # a gutter is at least this share of the column gap that spl
 NEAR = 1.5  # line heights: rows this close to each other, or to a table's edge, belong together
 EDGE = 3.0  # pt: tolerance on a ruled table's column positions
 CONTINUATION = 0.75  # a lone line closer than this share of the usual row gap continues the cell above
+ALIGN = 0.5  # line heights: a neighbouring line lines up with a band's piece when an edge or the centre is this close
+PITCH_SLACK = 0.25  # line heights: and it is no further from the run than the run's own rows are from each other
 
 UNRESOLVED = "reading_order_unresolved_columns"
 LABEL = re.compile(r"^[(\[]?(?:\d+[.)\]]|[.]?\d+(?:[.]\d+)+[.)]?)$|^[(]?[א-תa-zA-Z][.)]$|^[•·▪●○■□◦\-–*]$")  # not a bare number
@@ -319,12 +325,16 @@ def _decide(rows, run, consumed, median_height, gap_limit, rtl, page_index, repa
         # Labels in the margin: row by row keeps each label before its text, whatever follows.
         return Segment("rows", atoms, bands=[row.atoms for row in members])
     near = NEAR * median_height + 2.0
+    gaps = sorted(members[n + 1].top - members[n].bottom for n in range(len(members) - 1))
+    pitch = gaps[len(gaps) // 2] if gaps else 0.5 * median_height
     for k in (run[0] - 1, run[-1] + 1):
         if 0 <= k < len(rows) and k not in consumed:
             other = rows[k]
             gap = members[0].top - other.bottom if k < run[0] else other.top - members[-1].bottom
             if gap <= near and _gutters(members + [other], gap_limit) and len(other.lines) == 1:
-                return unresolved  # a neighbouring line could belong to one of the bands
+                adjacent = members[0] if k < run[0] else members[-1]
+                if gap <= pitch + PITCH_SLACK * median_height and _lines_up(other.lines[0], adjacent, gutters, rtl, median_height):
+                    return unresolved  # a neighbouring line could belong to one of the bands
     count = len(gutters) + 1
     if len(members) <= 2:
         # Each row is built alone, so two stacked rows are never re-read column by column.
@@ -361,6 +371,19 @@ def _decide(rows, run, consumed, median_height, gap_limit, rtl, page_index, repa
         )
         return Segment("table", atoms, block=block, chars=placed)
     return unresolved
+
+
+def _lines_up(line: BuiltLine, row: _Row, gutters, rtl: bool, median_height: float) -> bool:
+    """Whether a line lines up with the piece of the row in its band, as a line of that column would:
+    the same reading-side edge (right in RTL), or the same centre. With no piece in that band, it may."""
+    band = _band(line, gutters)
+    piece = next((other for other in row.lines if _band(other, gutters) == band), None)
+    if piece is None:
+        return True
+    tolerance = ALIGN * median_height
+    edge = abs(line.bbox[2] - piece.bbox[2]) if rtl else abs(line.bbox[0] - piece.bbox[0])
+    centre = abs((line.bbox[0] + line.bbox[2]) - (piece.bbox[0] + piece.bbox[2])) / 2
+    return edge <= tolerance or centre <= tolerance
 
 
 def _prose(members, bands_of, gutters, count) -> bool:
