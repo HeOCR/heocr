@@ -201,6 +201,36 @@ class TesseractScanTest(unittest.TestCase):
         self.assertEqual(doc.pages[0].coverage["status"], "ocr")
         self.assertEqual(doc.unread, [])
 
+    def test_region_text_and_table_read_the_same_on_turned_pages(self) -> None:
+        # A rotated page upright on screen (content turned in user space, /Rotate set) is read as
+        # displayed: region OCR and the region's table see upright text, as on an unrotated page.
+        import pypdfium2 as pdfium
+
+        from tests.synth.pdf import PdfPage, TextLine, lines_block, make_pdf
+
+        rows = [["שם", "תפקיד"], ["ספק ראשון", "מנהל"], ["ספק שני", "עובד"]]
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "region.docx"
+            source.write_bytes(Docx(body=[para("טבלת הספקים במכרז"), table(rows, borders=True)]).build())
+            subprocess.run(["soffice", "--headless", "--convert-to", "pdf", "--outdir", tmp, str(source)], check=True, capture_output=True, timeout=180)
+            pdf = pdfium.PdfDocument(str(Path(tmp) / "region.pdf"))
+            picture = pdf[0].render(scale=300 / 72).to_pil().convert("L").crop((0, 0, 2480, 1100))
+            pdf.close()
+        layer = lines_block(["המציע יגיש את הצעתו עד המועד הקבוע", "במסמכי המכרז ולא יאוחר מן המועד", "ובצירוף כל המסמכים הנדרשים"], top=800)
+
+        def read(turn):
+            doc = heocr.extract(make_pdf([PdfPage(lines=layer + [TextLine("סוף העמוד", 545, 60)], rasters=[(0, 350, 595, 264, picture)], turn=turn)]))
+            tables = [[[c.text for c in row] for row in b.cells] for b in doc.blocks if b.kind == "table"]
+            region = [b.text for b in doc.blocks if b.kind != "table" and "from_image_region" in b.flags]
+            return tables, region
+
+        upright = read(0)
+        self.assertEqual(upright[0], [rows])
+        self.assertTrue(any("טבלת הספקים" in text for text in upright[1]))
+        for turn in (90, 270):
+            with self.subTest(turn=turn):
+                self.assertEqual(read(turn), upright)
+
     def test_amounts_in_a_scanned_table_are_read_by_the_number_model(self) -> None:
         # Stock heb read these cells as "12000", "00" and "1700"; eng reads them.
         import pypdfium2 as pdfium

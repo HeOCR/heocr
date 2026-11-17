@@ -103,8 +103,7 @@ def rulings(page) -> tuple[list[Rule], list[Rule]]:
     from heocr.pdf.frame import frame_of
 
     frame = frame_of(page)
-    height = frame.height
-    bottom = frame.top - frame.height  # user-space points are moved into the visible box first
+    height = frame.height  # points are taken into the page's frame, then given back y-up for the flips below
     horizontal: list[Rule] = []
     vertical: list[Rule] = []
     for obj in page.get_objects(max_depth=8):
@@ -126,7 +125,8 @@ def rulings(page) -> tuple[list[Rule], list[Rule]]:
             segment = raw.FPDFPath_GetPathSegment(obj.raw, i)
             x, y = ctypes.c_float(), ctypes.c_float()
             raw.FPDFPathSegment_GetPoint(segment, ctypes.byref(x), ctypes.byref(y))
-            px, py = a * x.value + c * y.value + e - frame.x0, b * x.value + d * y.value + f - bottom
+            fx, fy = frame.point(a * x.value + c * y.value + e, b * x.value + d * y.value + f)
+            px, py = fx, height - fy
             kind = raw.FPDFPathSegment_GetType(segment)
             if kind == raw.FPDF_SEGMENT_MOVETO:
                 if fill_only:
