@@ -1,0 +1,8 @@
+heocr
+Copyright the HeOCR maintainers. Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This product includes code ported from internal tools of the Adanim Research Institute, with its permission, under the Apache License, Version 2.0.
+
+heocr runs, when they are installed, these separate programs, which it does not bundle:
+- Tesseract OCR (Apache License 2.0);
+- LibreOffice (Mozilla Public License 2.0).

@@ -4,7 +4,7 @@
 Nevo copy of the tender law (each section number on its own line; the section's margin heading
 set beside its text), in the two ways such pages are commonly laid out: Word's "save as web
 page" paragraphs with a floated margin heading, and a layout table with one section per row.
-The sentences are invented. ``govil_skeleton`` imitates a gov.il page saved without its scripts
+The sentences are invented. ``script_filled_skeleton`` imitates a gov.il page saved without its scripts
 having run: a frame of menus, and an empty mount point.
 """
 
@@ -54,7 +54,7 @@ def nevo_like_table(*, charset: str = "windows-1255") -> bytes:
     return _page(body, charset=charset).encode(charset)
 
 
-def govil_skeleton() -> bytes:
+def script_filled_skeleton() -> bytes:
     """A page whose content is filled in by script: menus, an empty mount point and scripts."""
     head = '<script src="/runtime.js"></script><script src="/main.js" type="module"></script>'
     body = (
