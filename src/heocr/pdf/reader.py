@@ -1380,15 +1380,17 @@ def _reread_number_words(numbers, image, result, dpi: int) -> tuple[int, int]:
                 continue
             wider = levels = False
             at_start = word is max(line.words, key=lambda w: w.bbox[2])
-            label = at_start and bool(_LABEL_ONE_LEVEL.match(word.text)) and word.text.endswith(".")  # "4.", not a bare "4"
+            # "4." or "1.2." (a label with its stop, not a bare "4"): heb may keep only the last levels.
+            label = at_start and bool(_LABEL_ONE_LEVEL.match(word.text) or _LABEL_DEEPER.match(word.text)) and word.text.endswith(".")
             try:
                 found = _number_reading(numbers, image, word.bbox, dpi, min_confidence=0.0 if label else NUMBER_WORD_MIN_CONFIDENCE)
                 reread += 1
                 reading, confidence = found if found is not None else (None, None)
                 if reading is not None and confidence < NUMBER_WORD_MIN_CONFIDENCE:
-                    # heb cuts a deeper label at a line's (RTL) start to its last level ("2.2.4." as "4.");
-                    # the number model reads it whole, often with a low confidence on such short crops. Below
-                    # the floor its reading is kept only when it is a deeper label ending with heb's level.
+                    # heb cuts a deeper label at a line's (RTL) start to its last levels ("2.2.4." as "4.",
+                    # "11.1.2." as "1.2."); the number model reads it whole, often with a low confidence on such
+                    # short crops. Below the floor its reading is kept only when it is a deeper label ending
+                    # with all of heb's levels.
                     levels = bool(_LABEL_DEEPER.match(reading)) and reading.rstrip(".").endswith("." + word.text.rstrip("."))
                     if not levels:
                         reading = confidence = None

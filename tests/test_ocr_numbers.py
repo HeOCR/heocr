@@ -129,6 +129,14 @@ class NumberWordsTest(unittest.TestCase):
         self.assertNotIn("used", logged)
         self.assertEqual(heocr.validate(doc.to_dict()), [])
 
+    def test_a_label_missing_its_first_level_is_read_whole(self) -> None:
+        # set C pdf_t5_office: heb reads "11.1.2." as "1.2." (confidence 20); eng reads "11.1.2" at 25.
+        doc = self.read_lines([["11.1.", "הגדרות"], ["1.2.", "תחולה"]], ["11.1", "11.1.2"])
+        self.assertEqual(doc.text.splitlines(), ["11.1. הגדרות", "11.1.2. תחולה"])
+        # The reading must keep all of heb's levels at its end: "1.1.3" for "1.2." is not used.
+        doc = self.read_lines([["11.1.", "הגדרות"], ["1.2.", "תחולה"]], ["11.1", "1.1.3"])
+        self.assertEqual(doc.text.splitlines(), ["11.1. הגדרות", "1.2. תחולה"])
+
     def test_a_cut_label_out_of_sequence_is_not_used_and_is_logged(self) -> None:
         # "23.2" between "3.1." and "3.3." follows neither: heb's "2." stays.
         doc = self.read_lines([["3.1.", "אחת"], ["2.", "שתיים"], ["3.3.", "שלוש"]], ["3.1", "23.2", "3.3"])
