@@ -8,7 +8,9 @@ Some fonts map Hebrew letters to private-use codes and carry no glyph names to r
 2. **Acceptance.** A reading is accepted only when it matches the layer's word letter for letter
    at every known position. The broken code's position then shows its letter. Punctuation that
    OCR reads just outside the word is trimmed.
-3. **A map per code.** Each code needs at least ``MIN_ACCEPTED`` accepted words, and at least
+3. **A map per code.** A reading that fails a consistency check below (a letter the font draws
+   in its regular form, or one at the wrong place in words) is an OCR confusion and is not
+   counted. Each code needs at least ``MIN_ACCEPTED`` counted words, and at least
    ``MIN_AGREEMENT`` of them must give the same letter.
 4. **Consistency checks** before a map is applied:
    - the target letter is absent, or almost absent, in its regular form in that font;
@@ -166,10 +168,20 @@ def learn(pages: list[tuple[int, list[Atom]]], render, recognize, font_letters: 
                 letters = {layer[i]: v for i, v in found.items()}
                 if code in letters:
                     readings[letters[code]] += 1
-            accepted = sum(readings.values())
-            letter, agreeing = readings.most_common(1)[0] if readings else ("", 0)
+            # A reading the code cannot stand for (a letter the font draws in its regular form, or at
+            # the wrong place in words) is an OCR confusion, not a vote: ן read as ו, say.
+            regular = font_letters.get(font, Counter())
+            ruled_out = {l: why for l in readings if (why := _consistent(l, len(uses[key]), at_end[key], regular))}
+            votes = Counter({l: n for l, n in readings.items() if l not in ruled_out})
+            accepted = sum(votes.values())
+            letter, agreeing = votes.most_common(1)[0] if votes else ("", 0)
             fmap.evidence[code] = {"accepted": accepted, "agreeing": agreeing, "checked": len(sample), "uses": len(uses[key])}
-            reason = _check(code, letter, accepted, agreeing, len(uses[key]), at_end[key], font_letters.get(font, Counter()))
+            if ruled_out:
+                fmap.evidence[code]["ruled_out"] = sum(readings[l] for l in ruled_out)
+            if not votes and ruled_out:
+                reason = ruled_out[readings.most_common(1)[0][0]]
+            else:
+                reason = _check(code, letter, accepted, agreeing, len(uses[key]), at_end[key], regular)
             if reason:
                 fmap.unresolved[code] = reason
             else:
@@ -193,6 +205,11 @@ def _check(code: str, letter: str, accepted: int, agreeing: int, uses: int, at_e
         return f"{accepted} accepted words, fewer than {MIN_ACCEPTED}"
     if agreeing / accepted < MIN_AGREEMENT:
         return f"agreement {agreeing}/{accepted} below {MIN_AGREEMENT:.0%}"
+    return _consistent(letter, uses, at_end, regular)
+
+
+def _consistent(letter: str, uses: int, at_end: int, regular: Counter) -> str | None:
+    """Why a code used ``uses`` times (``at_end`` of them at a word end) cannot stand for ``letter``; None if it can."""
     if _HEBREW.match(letter):
         if regular.get(letter, 0) > max(1, ABSENT_SHARE * uses):
             return f"the font also has {letter} in its regular form"

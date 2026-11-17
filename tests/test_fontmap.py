@@ -81,6 +81,25 @@ class LearnTest(unittest.TestCase):
         (fmap,) = run(self.WORDS, answer=lambda true: true[:-1] + next(readings))
         self.assertIn("agreement", fmap.unresolved[CODE])
 
+    def test_a_confusion_at_the_wrong_place_is_not_a_vote(self) -> None:
+        # OCR reads the word-final code as ו in half the words: ו at every word end cannot be it.
+        readings = iter(["ו", "ם", "ו", "ם", "ו", "ם"])
+        (fmap,) = run(self.WORDS, answer=lambda true: true[:-1] + next(readings))
+        self.assertEqual(fmap.letters, {CODE: "ם"})
+        self.assertEqual((fmap.evidence[CODE]["accepted"], fmap.evidence[CODE]["ruled_out"]), (3, 3))
+
+    def test_a_letter_the_font_draws_itself_is_not_a_vote(self) -> None:
+        readings = iter(["ן", "ם", "ם", "ן", "ם", "ם"])
+        (fmap,) = run(self.WORDS, answer=lambda true: true[:-1] + next(readings), font_letters={"SynthDavid": Counter({"ן": 30})})
+        self.assertEqual(fmap.letters, {CODE: "ם"})
+        self.assertEqual(fmap.evidence[CODE]["ruled_out"], 2)
+
+    def test_too_few_votes_after_confusions_stay_unresolved(self) -> None:
+        readings = iter(["ו", "ו", "ו", "ו", "ם", "ם"])
+        (fmap,) = run(self.WORDS, answer=lambda true: true[:-1] + next(readings))
+        self.assertEqual(fmap.letters, {})
+        self.assertIn("fewer than 3", fmap.unresolved[CODE])
+
     def test_letter_present_in_regular_form_blocks_the_map(self) -> None:
         (fmap,) = run(self.WORDS, font_letters={"SynthDavid": Counter({"ם": 40})})
         self.assertIn("regular form", fmap.unresolved[CODE])
