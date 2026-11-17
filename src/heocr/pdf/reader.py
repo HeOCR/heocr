@@ -33,6 +33,8 @@ from heocr.ocr.regions import (  # noqa: F401  (re-exported for callers of the P
     mask_layer_text,
     paper_level,
     short_for_ink,
+    skew_angle,
+    unrotate_box,
 )
 from heocr.pdf.classify import FIGURE_IMAGE, PAGE_IMAGE, classify, object_stats, stream_signals, text_signals
 from heocr.pdf.frame import frame_of
@@ -342,6 +344,13 @@ RULE_PAD_PT = 2.0  # around a ruling found in a scan
 LAYER_SCAN_SHORT_SHARE = 0.10
 LAYER_SCAN_TILE_PT = 30.0  # uncovered ink counts only where it is dense, as text is (dense_ink_outside)
 LAYER_SCAN_DENSITY = 0.07
+try:  # Pillow >= 9.1
+    from PIL.Image import Resampling as _Resampling
+
+    _BICUBIC = _Resampling.BICUBIC
+except ImportError:  # pragma: no cover
+    from PIL.Image import BICUBIC as _BICUBIC
+
 LAYER_SCAN_PAD = 0.5  # of the median layer line height: a scan's glyphs sit near, not on, their layer boxes
 
 
@@ -1252,6 +1261,21 @@ def _ocr_blocks(
     return read
 
 
+def _unrotate_records(doc: Document, first_block: int, first_unread: int, index: int, angle: float, center) -> None:
+    """Boxes a deskewed page recorded (its blocks, their lines, its unread entries), turned back
+    into the page's own coordinates."""
+    for block in doc.blocks[first_block:]:
+        if block.page != index:
+            continue
+        if block.bbox:
+            block.bbox = unrotate_box(block.bbox, angle, center)
+        for line in block.lines or []:
+            line.bbox = unrotate_box(line.bbox, angle, center)
+    for entry in doc.unread[first_unread:]:
+        if entry.page == index and entry.bbox:
+            entry.bbox = unrotate_box(entry.bbox, angle, center)
+
+
 def _ocr_page(doc: Document, index: int, page, width, height, page_class, signals, text: PageText, flags, rendered=None) -> None:
     """Read a page by OCR. ``rendered`` is (image, pixels per point) when the page is already an
     image (an image file, D4b); otherwise the PDF page is rendered."""
@@ -1268,6 +1292,18 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
     if scale * 72 < RENDER_DPI and rendered is None:
         flags = flags + ["render_dpi_reduced"]
     signals = {**signals, "render_dpi": round(scale * 72, 1)}
+    # A skewed scan is turned straight first: ruling detection looks for straight runs, and at a
+    # degree of skew a ruling leaves its pixel row before it is long enough to count (set C's heavily
+    # skewed table scans had no table found at all). Every box this page records is turned back.
+    deskew = skew_angle(image)
+    first_block, first_unread = len(doc.blocks), len(doc.unread)
+    if deskew:
+        if image.mode not in ("L", "RGB"):
+            image = image.convert("RGB")
+        level = paper_level(image)
+        image = image.rotate(deskew, resample=_BICUBIC, fillcolor=level if image.mode == "L" else (level, level, level))
+        flags = flags + ["deskewed"]
+        signals["deskew_degrees"] = deskew
     # Ruled tables in the image are read cell by cell; the rest of the page once, without them (D3e).
     grids = tables_in(image, scale)
     page_image = _without(image, scale, [t.bbox for t in grids]) if grids else image
@@ -1304,6 +1340,9 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
         doc.unread.append(
             Unread(scope="page", reason="ocr_short_for_ink", page=index, detail=f"{outside_share:.0%} of the ink lies outside every OCR line")
         )
+    if deskew:
+        center = (image.size[0] / 2 / scale, image.size[1] / 2 / scale)
+        _unrotate_records(doc, first_block, first_unread, index, deskew, center)
     doc.pages.append(
         Page(index, width, height, page_class, "ocr", signals,
              {"chars_total": text.chars_total, "chars_read": 0, "chars_ocr": read,

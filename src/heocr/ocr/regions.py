@@ -114,3 +114,54 @@ def short_for_ink(image, result) -> tuple[bool, float]:
     total, outside = ink_outside(image, [line.bbox for line in result.lines])
     share = outside / total if total else 0.0
     return outside >= SHORT_INK_MIN_PX and share >= SHORT_INK_SHARE, round(share, 4)
+
+
+SKEW_MAX_DEG = 3.0  # skew searched within this many degrees either way
+SKEW_STEP_DEG = 0.1
+SKEW_MIN_DEG = 0.3  # a smaller skew is left alone: OCR and ruling detection cope with it
+SKEW_WIDTH_PX = 600  # the skew is measured on a copy this wide
+
+
+def skew_angle(image) -> float:
+    """The angle (degrees, counter-clockwise, as ``Image.rotate`` takes it) that makes a scanned
+    page's text rows and rulings horizontal: the one whose row profile of ink is sharpest (highest
+    variance), searched within ``SKEW_MAX_DEG``. 0.0 below ``SKEW_MIN_DEG``, or for a blank page."""
+    from PIL import Image
+
+    gray = image.convert("L")
+    w, h = gray.size
+    if w < 50 or h < 50:
+        return 0.0
+    small = gray.resize((SKEW_WIDTH_PX, max(1, round(h * SKEW_WIDTH_PX / w))), Image.BILINEAR)
+    ink = small.point(lambda v: 255 if v < INK_LEVEL else 0)  # ink white, paper black: rotation fills with paper
+    if not ink.getbbox():
+        return 0.0
+
+    def sharpness(angle: float) -> float:
+        turned = ink.rotate(angle, resample=Image.NEAREST, fillcolor=0)
+        rows = turned.resize((1, turned.size[1]), Image.BOX).tobytes()  # one byte per row ("L")
+        mean = sum(rows) / len(rows)
+        return sum((v - mean) ** 2 for v in rows)
+
+    steps = round(SKEW_MAX_DEG / SKEW_STEP_DEG)
+    best = max((k * SKEW_STEP_DEG for k in range(-steps, steps + 1)), key=lambda a: (sharpness(a), -abs(a)))
+    if abs(best) >= SKEW_MAX_DEG - SKEW_STEP_DEG / 2:
+        # At the edge of the search: no peak was found within it. On dev, pages that are mostly
+        # pictures came out at exactly 3 degrees, and turning them lost most of their words.
+        return 0.0
+    return 0.0 if abs(best) < SKEW_MIN_DEG else round(best, 2)
+
+
+def unrotate_box(box, angle: float, center: tuple[float, float]) -> list[float]:
+    """A box found in an image turned by ``angle`` (``Image.rotate``, counter-clockwise, about
+    ``center``), as a box in the image before it was turned: its corners turned back, enclosed."""
+    import math
+
+    a = math.radians(angle)
+    ca, sa = math.cos(a), math.sin(a)
+    cx, cy = center
+    points = []
+    for x, y in ((box[0], box[1]), (box[2], box[1]), (box[0], box[3]), (box[2], box[3])):
+        dx, dy = x - cx, y - cy
+        points.append((cx + dx * ca - dy * sa, cy + dx * sa + dy * ca))
+    return [min(p[0] for p in points), min(p[1] for p in points), max(p[0] for p in points), max(p[1] for p in points)]
