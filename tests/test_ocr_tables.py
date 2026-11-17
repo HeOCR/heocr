@@ -146,6 +146,58 @@ class OcrTableTest(unittest.TestCase):
         self.assertEqual(count, 1)
         self.assertEqual(masked.getextrema(), (238, 238))
 
+    def region_page(self, image) -> bytes:
+        """A text-layer page (T6) with ``image`` as an image region over the middle of the page."""
+        from tests.synth.pdf import TextLine, lines_block
+
+        text = lines_block(["המציע יגיש את הצעתו עד המועד הקבוע", "במסמכי המכרז ולא יאוחר מן המועד"], top=800)
+        return make_pdf([PdfPage(lines=text + [TextLine("סוף העמוד", 545, 60)], rasters=[(50, 150, 495, 560, image)])])
+
+    def region_image(self, fills):
+        """A 495 x 560 pt region at DPI: a 3x3 ruled table at its top; ``fills(draw, x0, y0, x1, y1, r, c)`` paints each cell."""
+        from PIL import Image, ImageDraw
+
+        w, h = px(495), px(560)
+        image = Image.new("L", (w, h), 255)
+        draw = ImageDraw.Draw(image)
+        xs, ys = [px(20), px(180), px(330), px(475)], [px(20), px(70), px(120), px(170)]
+        for y in ys:
+            draw.rectangle([xs[0], y - 1, xs[-1], y + 1], fill=0)
+        for x in xs:
+            draw.rectangle([x - 1, ys[0], x + 1, ys[-1]], fill=0)
+        for r in range(3):
+            for c in range(3):
+                fills(draw, xs[c], ys[r], xs[c + 1], ys[r + 1], r, c)
+        return image
+
+    def test_a_table_in_an_image_region_is_read_cell_by_cell(self) -> None:
+        def text_cells(draw, x0, y0, x1, y1, r, c):
+            draw.rectangle([x0 + px(30), y0 + px(15), x0 + px(100), y0 + px(30)], fill=LEVELS[r][2 - c])
+
+        doc = heocr.extract(self.region_page(self.region_image(text_cells)), tesseract=FAKE)
+        page = doc.pages[0]
+        self.assertEqual(page.page_class, "T6")
+        (table,) = [b for b in doc.blocks if b.kind == "table"]
+        self.assertEqual([[c.text for c in row] for row in table.cells], [[TEXTS[g] for g in row] for row in LEVELS])
+        self.assertIn("from_image_region", table.flags)
+        self.assertEqual(table.source, "ocr")
+        # Boxes are in page points: the region's top-left is at (50, 842 - 710).
+        self.assertAlmostEqual(table.bbox[0], 50 + 20, delta=2)
+        self.assertAlmostEqual(table.bbox[1], 842 - 710 + 20, delta=2)
+        self.assertIn("image_region_tables", page.flags)
+        self.assertEqual(page.coverage["image_region_tables"], 1)
+        self.assertIn("המציע יגיש", doc.text)  # the layer text is read as before
+
+    def test_a_chart_with_gridlines_is_not_a_table(self) -> None:
+        def bars(draw, x0, y0, x1, y1, r, c):
+            draw.rectangle([x0 + px(10), y0 + px(10), x1 - px(10), y1 - px(5)], fill=85)  # bars: a grey the fake reads as no text
+
+        doc = heocr.extract(self.region_page(self.region_image(bars)), tesseract=FAKE)
+        self.assertEqual([b for b in doc.blocks if b.kind == "table"], [])
+        self.assertNotIn("table_row_ink_unread", [u.reason for u in doc.unread])  # the rejected grid leaves nothing
+        self.assertNotIn("image_region_tables", doc.pages[0].flags)
+        self.assertTrue([b for b in doc.blocks if "from_image_region" in b.flags])  # region OCR as before
+
     def test_thick_lines_make_one_grid(self) -> None:
         doc = heocr.extract(scanned_pdf(scan(LEVELS, line_width=9)), tesseract=FAKE)
         (table,) = [b for b in doc.blocks if b.kind == "table"]

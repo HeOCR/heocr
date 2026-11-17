@@ -692,7 +692,8 @@ def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = froz
                 "status": status,
                 "selection_safe": selection_safe,
             },
-            flags + body_flags + table_flags + (["ruled_tables"] if t_blocks else []) + (["unruled_tables"] if unruled else []),
+            flags + body_flags + table_flags + (["ruled_tables"] if t_blocks else []) + (["unruled_tables"] if unruled else [])
+            + (["image_region_tables"] if regions.get("image_region_tables") else []),
         )
     )
 
@@ -932,11 +933,13 @@ def _without(image, scale: float, boxes) -> object:
     return out
 
 
-def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids, numbers=None) -> tuple[list[Block], int]:
+def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids, numbers=None, offset=(0.0, 0.0)) -> tuple[list[Block], int]:
     """Table blocks for ruled tables found in a page image, each inked cell OCR'd as its own region.
 
     With ``numbers`` (the number model), a cell whose reading holds digits is read a second time.
+    ``offset`` (points) places an image that is a crop of the page (an image region, T6).
     """
+    ox, oy = offset
     dpi = round(scale * 72)
     blocks: list[Block] = []
     read = 0
@@ -980,7 +983,7 @@ def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids, n
             unread_cells += empty
             if inked and empty == inked:
                 boxes = [c["box"] for c in row if c["box"] is not None]
-                bbox = [min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes)]
+                bbox = [min(b[0] for b in boxes) + ox, min(b[1] for b in boxes) + oy, max(b[2] for b in boxes) + ox, max(b[3] for b in boxes) + oy]
                 doc.unread.append(Unread(scope="page", reason="table_row_ink_unread", page=index, bbox=bbox, detail=f"{inked} inked cells, OCR read none"))
             rows.append(out_row)
         flags = ["ruled_table", "ocr_unverified", *grid.flags]
@@ -995,7 +998,7 @@ def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids, n
                 kind="table",
                 cells=rows,
                 page=index,
-                bbox=list(grid.bbox),
+                bbox=[grid.bbox[0] + ox, grid.bbox[1] + oy, grid.bbox[2] + ox, grid.bbox[3] + oy],
                 source="ocr",
                 tool=engine.version,
                 direction="rtl" if doc._rtl else "ltr",
@@ -1096,12 +1099,26 @@ def _ocr_regions(
             doc.unread.append(Unread(scope="page", reason=reason, page=index, bbox=box, detail=f"{masked} layer characters masked"))
             counts["image_regions_no_ocr_needed"] += 1
             continue
+        offset = (crop[0] / scale, crop[1] / scale)
+        tables, in_cells = _region_tables(doc, index, engine, region, scale, offset)
+        if tables:
+            # The region's tables are read cell by cell; the rest of the region once, without them.
+            doc.blocks.extend(tables)
+            counts["chars_ocr"] += in_cells
+            counts["image_region_tables"] = counts.get("image_region_tables", 0) + len(tables)
+            region = _without(region, scale, [[b.bbox[0] - offset[0], b.bbox[1] - offset[1], b.bbox[2] - offset[0], b.bbox[3] - offset[1]] for b in tables])
+            if not has_ink(region):
+                counts["image_regions_ocr"] += 1
+                continue
         try:
             result = engine.recognize(region, dpi=round(scale * 72))
         except OcrUnavailable as exc:
             unread("ocr_failed", box, str(exc))
             continue
         if not result.lines:
+            if tables:
+                counts["image_regions_ocr"] += 1  # its tables were read; the rest held no text
+                continue
             unread("image_region_no_text_found", box)
             continue
         confidence = result.mean_confidence
@@ -1129,6 +1146,62 @@ def _ocr_regions(
             )
         counts["image_regions_ocr"] += 1
     return counts
+
+
+# A grid found in an image region is a table only when it holds records: charts, photos and
+# diagrams have ruled lines too, but their "cells" hold bars, pictures, axis ticks or nothing.
+REGION_TABLE_RECORD_ROWS = 2  # at least this many rows with REGION_TABLE_RECORD_CELLS cells of text
+REGION_TABLE_RECORD_CELLS = 2
+REGION_TABLE_MIN_ALNUM = 2  # a cell of text holds at least this many letters or digits (not "|", "1", ".")
+REGION_TABLE_SOLID_LEVEL = 128  # pixels darker than this are solid ink (bars, photos), not light shading
+REGION_TABLE_SOLID_SHARE = 0.5  # a cell more than this dark is solid
+REGION_TABLE_MAX_SOLID_CELLS = 0.3  # a grid with more than this share of solid cells is a chart or a picture
+
+
+def _solid_share(region, grid, scale: float) -> float:
+    """The share of a grid's cells that are mostly solid ink: bars, photographs, filled shapes."""
+    cells = [c for row in grid.rows for c in row if not c["placeholder"]]
+    solid = 0
+    for cell in cells:
+        histogram = cell_crop(region, cell["box"], scale).convert("L").histogram()
+        if sum(histogram[:REGION_TABLE_SOLID_LEVEL]) > REGION_TABLE_SOLID_SHARE * max(sum(histogram), 1):
+            solid += 1
+    return solid / max(len(cells), 1)
+
+
+def _region_tables(doc: Document, index: int, engine, region, scale: float, offset) -> tuple[list[Block], int]:
+    """Ruled tables inside an image region of a text-layer page (T6), read cell by cell (D3e).
+
+    A grid is kept only as a table of **records**: at most ``REGION_TABLE_MAX_SOLID_CELLS`` of its
+    cells solid (bars and photographs are not cells of text), at least ``REGION_TABLE_RECORD_ROWS``
+    rows that each hold ``REGION_TABLE_RECORD_CELLS`` cells of text (``REGION_TABLE_MIN_ALNUM``
+    letters or digits each: axis ticks and stray marks are not text), and a mean confidence of at
+    least ``REGION_MIN_CONFIDENCE``. Otherwise the grid is dropped, with anything it recorded, and the
+    region is read by region OCR as before.
+    """
+    grids = [g for g in tables_in(region, scale) if len(g.rows) >= REGION_TABLE_RECORD_ROWS and max(len(r) for r in g.rows) >= REGION_TABLE_RECORD_CELLS]
+    grids = [g for g in grids if _solid_share(region, g, scale) <= REGION_TABLE_MAX_SOLID_CELLS]
+    if not grids:
+        return [], 0
+    numbers = number_engine_for(doc) if doc.options.get("check_numbers", "suspect") else None
+    kept: list[Block] = []
+    total = 0
+    for grid in grids:
+        mark = len(doc.unread)
+        blocks, read = _ocr_tables(doc, index, engine, region, scale, [grid], None if numbers is engine else numbers, offset=offset)
+        block = blocks[0]
+        records = sum(
+            1 for row in block.cells
+            if sum(1 for c in row if sum(ch.isalnum() for ch in c.text) >= REGION_TABLE_MIN_ALNUM) >= REGION_TABLE_RECORD_CELLS
+        )
+        confidence = (block.ocr or {}).get("mean_confidence")
+        if records >= REGION_TABLE_RECORD_ROWS and (confidence is None or confidence >= REGION_MIN_CONFIDENCE):
+            block.flags += ["from_image_region", "reading_order_region_appended"]
+            kept.append(block)
+            total += read
+        else:
+            del doc.unread[mark:]  # not a table: what it recorded goes with it
+    return kept, total
 
 
 # Classes read through the text layer. T2 (a visual-order stream) is read by the same geometric
