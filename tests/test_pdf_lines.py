@@ -62,6 +62,13 @@ class NumbersApartInRtlTest(unittest.TestCase):
         self.assertEqual(text(visual("1", WORD_SPACE, ".", HUG, "1.2")), "1.2. 1")
         self.assertEqual(text(visual("2", WORD_SPACE, "1994")), "1994 2")
 
+    def test_a_full_stop_with_equal_gaps_between_two_numbers_stands_alone(self) -> None:
+        # set C pdf_t3_pua_font synth-001: "התשס"ז-2007 . 1123" drawn with a real space advance on
+        # both sides of the full stop. It hugged both numbers and W4 made one number, "1123.2007".
+        self.assertEqual(text(visual("1123", WORD_SPACE, ".", WORD_SPACE, "2007-ז")), "ז-2007 . 1123")
+        # A full stop clearly closer to one side still hugs it.
+        self.assertEqual(text(visual("1", WORD_SPACE, ".", 2.0, "1.2")), "1.2. 1")
+
     def test_numbers_drawn_left_to_right_keep_one_run(self) -> None:
         # The comma touches the left number: drawn in reading order, left to right.
         self.assertEqual(text(visual("1", HUG, ",", WORD_SPACE, "2")), "1, 2")

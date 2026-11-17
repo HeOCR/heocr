@@ -30,6 +30,9 @@ COLUMN_GAP_MIN = 24.0
 COLUMN_GAP_HEIGHTS = 2.5
 # A punctuation join counts as tight within 0.35 of the smaller height.
 TIGHT_JOIN = 0.35
+# Tight punctuation hugs the word on one side only when its gap on the other side is wider by more
+# than this factor. A mark with equal gaps on both sides stands alone ("2007 . 1123"), not hugging both.
+HUG_MARGIN = 1.1
 # A vertical gap above this many median line heights starts a new paragraph.
 PARAGRAPH_GAP = 0.9
 
@@ -227,14 +230,15 @@ def _units(component: list[Atom]) -> list[tuple[str, Atom | None]]:
             if gap > WORD_GAP_EM * max(atom.height, previous.height):
                 tight = gap <= min(atom.height, previous.height) * TIGHT_JOIN
                 # No space between hugging punctuation and its word when tight: the punctuation
-                # (right of the gap, or left of it) hugs this side unless it sits closer to its other one.
+                # (right of the gap, or left of it) hugs this side when it sits clearly closer to it
+                # than to its other one.
                 hugs = False
                 if tight and atom.text[:1] in _PUNCT_HUG:
                     other = _side_gap(component, index, +1)
-                    hugs = other is None or other >= gap
+                    hugs = other is None or other > gap * HUG_MARGIN
                 if tight and not hugs and previous.text[-1:] in _PUNCT_HUG:
                     other = _side_gap(component, previous_index, -1)
-                    hugs = other is None or other >= gap
+                    hugs = other is None or other > gap * HUG_MARGIN
                 if not hugs:
                     units.append((" ", None))
         units.append((atom.text, atom))
