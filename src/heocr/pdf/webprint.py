@@ -20,8 +20,11 @@ that is either:
 At the end of the **last page**, the site's footer menu (links in columns, the site's
 contact lines) gets the same role, with the flag ``site_footer_menu``: the rows at the bottom of
 the body, read upwards until the first piece of more than ``MENU_MAX_WORDS`` words, when there
-are at least ``MIN_FOOTER_ROWS`` of them and at least ``FOOTER_MULTI_SHARE`` hold two pieces or
-more side by side. A page that ends with a signature (short lines, one to a row) is not one.
+are at least ``MIN_FOOTER_ROWS`` of them, at least ``FOOTER_MULTI_SHARE`` hold two pieces or
+more side by side, and they show **site chrome**: a URL, an email address or a phone number, or at
+least ``MENU_SHARED_WORDS`` words shared with the first page's site menu. A page that ends with a
+signature (short lines, one to a row), or with signatories side by side (minister | minister,
+name | title), is not one.
 
 Above it is the site menu: at least ``MIN_MENU_PIECES`` pieces, each of at most
 ``MENU_MAX_WORDS`` words (rows of short links, the site's name, a breadcrumb). A piece is a
@@ -47,6 +50,9 @@ MENU_MAX_WORDS = 6
 MIN_COUNTER_PAGES = 2
 MIN_FOOTER_ROWS = 3  # the site's footer menu: at least this many rows at the bottom of the last page
 FOOTER_MULTI_SHARE = 2 / 3  # and at least this share of them hold two pieces or more, side by side
+MENU_SHARED_WORDS = 2  # site chrome: at least this many words shared with the first page's site menu
+_EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
+_PHONE = re.compile(r"(?<!\d)(?:0\d{1,2}-?\d{7}|\*\d{4}|1-?[5-9]00-?\d{2,3}-?\d{3,4})(?!\d)")
 
 _COUNTER = re.compile(r"\s*(\d{1,4})\s*/\s*(\d{1,4})\s*")
 _URL = re.compile(r"\bhttps?://\S+", re.I)
@@ -154,6 +160,16 @@ def mark_site_menu(doc: Document) -> int:
     return len(pieces)
 
 
+def _site_chrome(doc: Document, texts: list[str]) -> bool:
+    """Whether footer rows show the site: a URL, an email or a phone number, or words of its first-page menu."""
+    joined = " ".join(texts)
+    if _URL.search(joined) or re.search(r"\bwww\.", joined) or _EMAIL.search(joined) or _PHONE.search(joined):
+        return True
+    menu_words = {w for b in doc.blocks if "site_menu" in b.flags for w in _WORD.findall(b.text if b.kind != "table" else " ".join(c.text for r in b.cells or [] for c in r)) if len(w) > 1}
+    footer_words = {w for w in _WORD.findall(joined) if len(w) > 1}
+    return len(menu_words & footer_words) >= MENU_SHARED_WORDS
+
+
 def mark_site_footer(doc: Document) -> int:
     """On a browser print, give the last page's site footer menu the navigation role. Returns the pieces moved."""
     if not doc.pages or "browser_print" not in doc.flags:
@@ -186,6 +202,8 @@ def mark_site_footer(doc: Document) -> int:
     pieces_per_row = [n for n in pieces_per_row if n]
     if len(pieces_per_row) < MIN_FOOTER_ROWS or sum(1 for n in pieces_per_row if n >= 2) < FOOTER_MULTI_SHARE * len(pieces_per_row):
         return 0
+    if not _site_chrome(doc, [l.text for l, _ in below] + [c.text for t in tables for row in t.cells or [] for c in row]):
+        return 0  # rows of short pieces with no sign of the site: signatories, not a menu
     menu = {id(line) for line, _ in below}
     from heocr.pdf.furniture import _clear_furniture_columns, _sub_block
 

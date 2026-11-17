@@ -133,8 +133,8 @@ class WebPrintTest(unittest.TestCase):
 
     def test_the_last_page_footer_menu_is_navigation(self) -> None:
         footer = [
-            [("מידע שימושי", 545), ("תמיכה", 420), ("מידע נוסף", 300)],
-            [("לכל השירותים", 545), ("התקשרו למוקד", 420), ("אודות האתר", 300)],
+            [("מידע שימושי", 545), ("תמיכה", 420), ("משרדים", 300)],  # "משרדים" is also in the first page's menu
+            [("לכל השירותים", 545), ("התקשרו למוקד", 420), ("אודות האתר", 300)],  # and "שירותים"
             [("RSS", 545), ("צ'אט", 420), ("הצהרת נגישות", 300)],
             [("תנאי שימוש", 545), ("מפת האתר", 300)],
         ]
@@ -156,6 +156,24 @@ class WebPrintTest(unittest.TestCase):
         doc = self.last_page_with(signature)
         self.assertEqual([b for b in doc.blocks if "site_footer_menu" in b.flags], [])
         self.assertIn("מנהל הרכש", "\n".join(b.text for b in doc.blocks if b.role == "body"))
+
+    def test_signatories_side_by_side_are_not_a_footer_menu(self) -> None:
+        # Common at the end of a government decision: two signatories, side by side, row by row.
+        signatories = [
+            [("שר האוצר", 545), ("שר הרווחה", 300)],
+            [("ישראל ישראלי", 545), ("משה כהן", 300)],
+            [("חתימה", 545), ("חתימה", 300)],
+        ]
+        doc = self.last_page_with(signatories)
+        self.assertEqual([b for b in doc.blocks if "site_footer_menu" in b.flags], [])
+        self.assertNotIn("site_footer_menu", doc.pages[2].flags)
+        body = "\n".join(b.text if b.kind != "table" else " ".join(c.text for r in b.cells for c in r) for b in doc.blocks if b.role == "body")
+        self.assertIn("משה כהן", body)
+
+    def test_a_footer_with_a_phone_number_is_site_chrome(self) -> None:
+        footer = [[("צרו קשר", 545), ("מוקד *6050", 300)], [("נגישות", 545), ("פרטיות", 300)], [("תנאים", 545), ("עזרה", 300)]]
+        doc = self.last_page_with(footer)
+        self.assertTrue([b for b in doc.blocks if "site_footer_menu" in b.flags])
 
     def test_counter_rule(self) -> None:
         self.assertTrue(webprint._COUNTER.fullmatch("2/8"))
