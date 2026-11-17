@@ -1,8 +1,7 @@
 """The DOCX route: our own reading of WordprocessingML, with numbering rendered.
 
-The volunteer's Word-based pipeline served as the specification for what to keep
-(AdanimInstitute/social-procurement-yonatan-amster-project, scripts/extract_compare.py:
-``mark_headings``, ``delete_hidden_text``, ``mark_cell_breaks``, ``remove_invisible_text``).
+A volunteer's Word-based pipeline served as the specification for what to keep: marking
+headings, deleting hidden text, marking line breaks in cells, and removing invisible text.
 This module does the same without Word: headings from outline levels, TOC lines not
 taken as headings, hidden text dropped, white text without a background dropped, and
 line breaks in table cells kept.

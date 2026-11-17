@@ -19,7 +19,7 @@ def _parser() -> argparse.ArgumentParser:
         prog="heocr",
         description="Extract the Hebrew text of a document through the best open pipeline for it.",
     )
-    parser.add_argument("file", type=Path, nargs="?", help="input document (PDF, DOCX, ...)")
+    parser.add_argument("file", type=Path, nargs="?", help="input document: PDF, DOCX, DOC, RTF, ODT, XLSX, ODS, XLS, PPTX, ODP, PPT, HTML or an image")
     parser.add_argument("-o", "--output", type=Path, help="write here instead of standard output")
     parser.add_argument(
         "-f",
@@ -39,7 +39,7 @@ def _parser() -> argparse.ArgumentParser:
         default="suspect",
         help="read numbers a second time by OCR: suspect digit groups only (default), also every table cell, all amounts and dates, or off",
     )
-    parser.add_argument("--no-convert", action="store_true", help="do not convert DOC, RTF or ODT with LibreOffice; they are reported unread")
+    parser.add_argument("--no-convert", action="store_true", help="do not convert DOC, RTF, ODT, ODS, XLS, ODP or PPT with LibreOffice; they are reported unread")
     parser.add_argument("--soffice", help="the LibreOffice program (soffice), when it is not on the PATH")
     parser.add_argument("--convert-timeout", type=float, metavar="SECONDS", help="time limit for one LibreOffice conversion (default: 180)")
     parser.add_argument("--max-pages", type=int, default=MAX_PAGES, metavar="N", help=f"read at most N pages or image frames (default: {MAX_PAGES}); the rest are reported unread")

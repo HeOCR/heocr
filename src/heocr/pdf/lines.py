@@ -1,22 +1,16 @@
 """Right-to-left line building from character boxes: our own reading order for PDF text layers.
 
-Ported from tendex (AdanimInstitute/adanim-govil-scraper, released for porting into heocr under
-Apache-2.0 by decision 0020, item 4), without PyMuPDF:
+Ported code (see NOTICE), rewritten without PyMuPDF: row clustering by baseline, column-sized
+gaps, the stable two-column gutter test, the direction test, the tight-join spacing rules, the
+``selection_safe`` rule, and the RTL line with its LTR sub-runs kept in visual order.
 
-- ``tendex_l4/layout.py``: row clustering by baseline (``_rows``), column-sized gaps
-  (``_components``), the stable two-column gutter test (``_clear_two_column_gutter``), the
-  direction test (``_is_rtl``), the tight-join spacing rules (``_join_words``), and the
-  ``selection_safe`` rule;
-- ``tendex_l4/extract.py``: ``word_lines`` and ``ordered_words``, the RTL line with its LTR
-  sub-runs kept in visual order.
-
-tendex works on words that PyMuPDF has already formed. Here the atoms are characters from
+The original worked on words that PyMuPDF had already formed. Here the atoms are characters from
 pypdfium2. The inverse bidi pass therefore runs on characters, so mixed words such as
 ``ב-2026`` come out in logical order.
 
 The visual order of a line does not always determine its logical order. For example,
-``סעיף 3.1 ABC`` and ``סעיף ABC 3.1`` display identically. Such lines keep tendex's
-convention, which is to keep a mixed Latin and number run in visual order, and they are
+``סעיף 3.1 ABC`` and ``סעיף ABC 3.1`` display identically. Such lines keep the
+convention of the ported code, which is to keep a mixed Latin and number run in visual order, and they are
 flagged ``bidi_ambiguous_ltr_run``.
 """
 
@@ -30,11 +24,11 @@ from dataclasses import dataclass, field
 # 1.1-1.2 em), with no space character in it, is a word break. The reported font size is not used:
 # many producers set it to 1 and scale the text matrix instead.
 WORD_GAP_EM = 0.15
-# tendex: rows cluster within 0.42 of the median height; a column gap is max(24 pt, 2.5 heights).
+# Rows cluster within 0.42 of the median height; a column gap is max(24 pt, 2.5 heights).
 ROW_TOLERANCE = 0.42
 COLUMN_GAP_MIN = 24.0
 COLUMN_GAP_HEIGHTS = 2.5
-# tendex: a punctuation join counts as tight within 0.35 of the smaller height.
+# A punctuation join counts as tight within 0.35 of the smaller height.
 TIGHT_JOIN = 0.35
 # A vertical gap above this many median line heights starts a new paragraph.
 PARAGRAPH_GAP = 0.9
@@ -118,7 +112,7 @@ def _unit_type(text: str) -> str:
 
 
 def is_rtl(text: str) -> bool:
-    """tendex ``_is_rtl``: RTL when some token has RTL script and RTL tokens are not outnumbered by Latin ones."""
+    """RTL when some token has RTL script and RTL tokens are not outnumbered by Latin ones."""
     tokens = text.split()
     rtl = sum(any(_bidi_type(ch) == "R" for ch in token) for token in tokens)
     latin = sum(any("LATIN" in unicodedata.name(ch, "") for ch in token) for token in tokens)
@@ -126,7 +120,7 @@ def is_rtl(text: str) -> bool:
 
 
 def rows(atoms: list[Atom], median_height: float) -> list[list[Atom]]:
-    """tendex ``_rows``: cluster visual baselines, top to bottom, without trusting source line ids."""
+    """Cluster visual baselines, top to bottom, without trusting source line ids."""
     tolerance = max(1.0, median_height * ROW_TOLERANCE)
     ordered = sorted(atoms, key=lambda a: (a.cy, a.x0))
     out: list[list[Atom]] = []
@@ -142,7 +136,7 @@ def rows(atoms: list[Atom], median_height: float) -> list[list[Atom]]:
 
 
 def components(row: list[Atom], median_height: float) -> list[list[Atom]]:
-    """tendex ``_components``: split a visual row only at a clearly column-sized gap. Left to right."""
+    """Split a visual row only at a clearly column-sized gap. Left to right."""
     left_to_right = sorted(row, key=lambda a: (a.cx, a.index))
     ink = [a for a in left_to_right if not a.is_space]
     if not ink:
@@ -211,7 +205,7 @@ def _units(component: list[Atom]) -> list[tuple[str, Atom | None]]:
             gap = atom.x0 - previous.x1
             if gap > WORD_GAP_EM * max(atom.height, previous.height):
                 tight = gap <= min(atom.height, previous.height) * TIGHT_JOIN
-                # tendex _join_words: no space before closing or after opening punctuation when tight.
+                # No space before closing or after opening punctuation when tight.
                 if not (tight and (atom.text[:1] in _CLOSING or previous.text[-1:] in _OPENING)):
                     units.append((" ", None))
         units.append((atom.text, atom))
@@ -224,7 +218,7 @@ def line_is_rtl(text: str, page_rtl: bool) -> bool:
 
     A PDF does not record paragraph direction. A line with Hebrew letters, or with no letters
     at all (an amount, a date), takes the page's direction. A line with Latin letters and no
-    Hebrew is LTR. This departs from tendex's per-line majority vote: in a Hebrew document a
+    Hebrew is LTR. This departs from a per-line majority vote: in a Hebrew document a
     mostly-English line is still an RTL paragraph.
     """
     has_r = any(_bidi_type(ch) == "R" for ch in text)
@@ -252,7 +246,7 @@ def logical_text(component: list[Atom], page_rtl: bool = True) -> tuple[str, str
                 types[i] = "EN"
     rtl = line_is_rtl("".join(texts), page_rtl)
     base = "R" if rtl else "L"
-    # Neutrals between two LTR units (Latin or number) join them (tendex convention); otherwise base.
+    # Neutrals between two LTR units (Latin or number) join them; otherwise base.
     ltr_like = [("L" if t in ("L", "EN") else t) for t in types]
     resolved = list(ltr_like)
     i = 0
@@ -302,7 +296,7 @@ def logical_text(component: list[Atom], page_rtl: bool = True) -> tuple[str, str
 
 
 def clear_two_column_gutter(rendered_rows: list[list[BuiltLine]], median_height: float) -> bool:
-    """tendex ``_clear_two_column_gutter``: a stable full-page two-column grid (still unverified)."""
+    """A stable full-page two-column grid (still unverified)."""
     if len(rendered_rows) < 2 or any(len(row) != 2 for row in rendered_rows):
         return False
     tolerance = max(COLUMN_GAP_MIN, median_height * COLUMN_GAP_HEIGHTS)
@@ -316,10 +310,8 @@ def clear_two_column_gutter(rendered_rows: list[list[BuiltLine]], median_height:
 def build_lines(atoms: list[Atom], rtl: bool | None = None) -> PageLines:
     """Lines in reading order, with the page's reading-order flags.
 
-    ``selection_safe`` follows tendex's rule for when a geometric reading order may be used without review:
-    every atom has valid geometry and no unresolved column structure was seen. tendex also required an
-    observed repair, because its geometric order competed with a default router; here geometry is the
-    route, so the safety conditions are what remains.
+    ``selection_safe`` says when a geometric reading order may be used without review: every atom has
+    valid geometry and no unresolved column structure was seen.
     """
     valid = [a for a in atoms if a.x1 >= a.x0 and a.y1 >= a.y0 and a.height > 0]
     invalid = len(atoms) - len(valid)
@@ -332,7 +324,7 @@ def build_lines(atoms: list[Atom], rtl: bool | None = None) -> PageLines:
     built_rows: list[list[BuiltLine]] = []
     for row_index, row in enumerate(rows(valid, median_height)):
         comps = components(row, median_height)
-        # Column direction follows the page script (tendex).
+        # Column direction follows the page script.
         comps.sort(key=lambda c: max(a.x1 for a in c), reverse=page_rtl)
         rendered: list[BuiltLine] = []
         for slot, comp in enumerate(comps):
