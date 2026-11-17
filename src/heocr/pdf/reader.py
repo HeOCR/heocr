@@ -23,7 +23,10 @@ from heocr.ocr.regions import (  # noqa: F401  (re-exported for callers of the P
     MIN_REGION_PX,
     REGION_MIN_CONFIDENCE,
     REGION_MIN_PAGE_SHARE,
+    SHORT_INK_MIN_PX,
+    SHORT_INK_SHARE,
     RENDER_DPI,
+    dense_ink_outside,
     has_ink,
     ink_outside,
     mask_layer_text,
@@ -34,7 +37,7 @@ from heocr.pdf.classify import FIGURE_IMAGE, PAGE_IMAGE, classify, object_stats,
 from heocr.pdf.frame import frame_of
 from heocr.pdf.lines import Atom, PageLines, build_lines, line_is_rtl, paragraphs
 from heocr.pdf.columns import UNRESOLVED, Segment, arrange
-from heocr.pdf.ocrtables import cell_crop, cell_has_ink, cell_psm, tables_in
+from heocr.pdf.ocrtables import cell_crop, cell_has_ink, cell_psm, image_rulings, tables_in
 from heocr.pdf.tables import find_tables, rulings, table_blocks
 from heocr.textflags import is_private_use, text_flags
 
@@ -324,6 +327,18 @@ def _close_word(word: list[int], font: str, words: dict, other_words: dict) -> N
             words.setdefault((font, kind), []).append(list(word))
             return
     other_words[font] = other_words.get(font, 0) + 1
+
+
+RULE_PAD_PT = 2.0  # around a ruling found in a scan
+# A kept OCR layer whose scan has this share of its ink (and SHORT_INK_MIN_PX), in dense areas,
+# outside every layer line and ruling is partial. Correct layers leave 0% on set C pdf_t1_ocr_layer
+# and at most 8% on heavy hocrsyngen scans skewed about 1.5 degrees under an unskewed layer; a
+# missing paragraph of about five lines on a full page is over 10%. A line or two left out of the
+# layer is below this and not detected.
+LAYER_SCAN_SHORT_SHARE = 0.10
+LAYER_SCAN_TILE_PT = 30.0  # uncovered ink counts only where it is dense, as text is (dense_ink_outside)
+LAYER_SCAN_DENSITY = 0.07
+LAYER_SCAN_PAD = 0.5  # of the median layer line height: a scan's glyphs sit near, not on, their layer boxes
 
 
 LAYER_CHECK_LINES = 6  # lines of a page's OCR layer read again, spread over the page
@@ -898,6 +913,8 @@ def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = froz
     ocr_wanted = stats.image_coverage >= FIGURE_IMAGE
     regions = _ocr_regions(doc, index, page, width, height, stats.image_boxes, text.drawn_boxes, ocr_wanted,
                            layer_is_ocr="text_layer_is_ocr" in flags)
+    if regions.pop("layer_scan_short_for_ink", 0):
+        flags = flags + ["ocr_short_for_ink"]
     status = "read" if read >= text.chars_total and not regions["image_regions_unread"] else "partial"
     route = "text_layer+ocr_regions" if regions["image_regions_ocr"] else "text_layer"
     doc.pages.append(
@@ -1407,6 +1424,23 @@ def _second_number_reading(numbers, crop, dpi: int, psm: int, first: dict, cell_
     return text, None, reading
 
 
+def _layer_line_boxes(boxes) -> list[list[float]]:
+    """A text layer's character boxes merged into line boxes (points): characters whose vertical
+    centres lie within half a height of each other and that sit at most three heights apart."""
+    lines: list[list[float]] = []
+    for x0, y0, x1, y1 in sorted(boxes, key=lambda b: ((b[1] + b[3]) / 2, b[0])):
+        h = max(y1 - y0, 1e-6)
+        cy = (y0 + y1) / 2
+        for line in reversed(lines[-8:]):
+            lh = line[3] - line[1]
+            if abs((line[1] + line[3]) / 2 - cy) <= 0.5 * max(h, lh) and x0 - line[2] <= 3 * h and line[0] - x1 <= 3 * h:
+                line[0], line[1], line[2], line[3] = min(line[0], x0), min(line[1], y0), max(line[2], x1), max(line[3], y1)
+                break
+        else:
+            lines.append([x0, y0, x1, y1])
+    return lines
+
+
 def _ocr_regions(
     doc: Document, index: int, page, width: float, height: float, boxes: list[list[float]], drawn_boxes, ocr_wanted: bool = True,
     layer_is_ocr: bool = False,
@@ -1439,6 +1473,27 @@ def _ocr_regions(
         counts["image_regions_no_ocr_needed"] += len(scans)
         counts["image_regions_layer_scan"] = len(scans)
         large = [b for b in large if b not in scans]
+        if scans:
+            # The skip assumes the layer covers its scan. A sandwich layer is often partial (the
+            # OCR software skipped a table, a stamp, a faint paragraph): the scan's ink outside the
+            # layer's characters is measured as on an OCR page, and reported when OCR would be.
+            image, scale = _render(page, frame_of(page))
+            grey = image.convert("L")
+            lines = _layer_line_boxes(drawn_boxes)
+            heights = sorted(b[3] - b[1] for b in lines) or [0.0]
+            pad = max(2, int(LAYER_SCAN_PAD * heights[len(heights) // 2] * scale))
+            # Rulings are ink with no text on them: they count as covered.
+            horizontal, vertical = image_rulings(image, scale)
+            covered = lines + [[r.start, r.pos - RULE_PAD_PT, r.end, r.pos + RULE_PAD_PT] for r in horizontal]
+            covered += [[r.pos - RULE_PAD_PT, r.start, r.pos + RULE_PAD_PT, r.end] for r in vertical]
+            total, outside = dense_ink_outside(grey, [[b[0] * scale, b[1] * scale, b[2] * scale, b[3] * scale] for b in covered], pad=pad,
+                                               tile_px=max(8, int(LAYER_SCAN_TILE_PT * scale)), density=LAYER_SCAN_DENSITY)
+            share = round(outside / total, 4) if total else 0.0
+            counts["layer_scan_ink_outside_share"] = share
+            if outside >= SHORT_INK_MIN_PX and share >= LAYER_SCAN_SHORT_SHARE:
+                counts["layer_scan_short_for_ink"] = 1
+                doc.unread.append(Unread(scope="page", reason="ocr_short_for_ink", page=index, bbox=scans[0],
+                                         detail=f"{share:.0%} of the scan's ink lies outside every layer character"))
     if not large:
         return counts
 
