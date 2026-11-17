@@ -76,6 +76,7 @@ class CellRepairs:
     bullets: Counter = field(default_factory=Counter)
     eth: int = 0
     pua: Counter = field(default_factory=Counter)  # (font, letter)
+    shifted: Counter = field(default_factory=Counter)  # (font, letter): cp1255_shifted_font
 
     def text(self, atoms: list[Atom], rtl: bool, lines: list | None = None) -> str:
         """The cell's text; with ``lines``, each line's [text, bbox] is appended to it (number checks)."""
@@ -93,6 +94,8 @@ class CellRepairs:
                 self.eth += 1
             elif atom.repaired == repairs.FONT_PRIVATE_USE_BY_OCR.rule_id:
                 self.pua[(atom.font, atom.text)] += 1
+            elif atom.repaired == repairs.CP1255_SHIFTED_FONT.rule_id:
+                self.shifted[(atom.font, atom.text)] += 1
         return "\n".join(texts)
 
 

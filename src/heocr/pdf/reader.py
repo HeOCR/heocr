@@ -77,7 +77,7 @@ def _font_name(raw, textpage, index: int) -> str:
     return buffer.value.decode("utf-8", "replace")
 
 
-def page_text(page, eth_fonts: frozenset[str] = frozenset(), font_maps: dict | None = None, all_fonts: bool = False) -> PageText:
+def page_text(page, eth_fonts: frozenset[str] = frozenset(), font_maps: dict | None = None, all_fonts: bool = False, shifted: dict | None = None) -> PageText:
     """Characters with loose boxes, in page coordinates with the origin at the top left.
 
     ``eth_fonts`` names the fonts whose ð is a broken נ (``latin1_eth_nun``, decided per font
@@ -147,7 +147,14 @@ def page_text(page, eth_fonts: frozenset[str] = frozenset(), font_maps: dict | N
                 continue
             font = ""
             repaired = None
-            if is_private_use(ch):
+            if shifted and (0xE0 <= code <= 0xFA or 0xF0E0 <= code <= 0xF0FA):
+                name = _font_name(raw, textpage, index)
+                if shifted.get(name) == ("pua" if code >= 0xF000 else "latin1"):
+                    # cp1255_shifted_font: the font carries Hebrew as its cp1255 byte (decided per font).
+                    ch, repaired, font = repairs.cp1255_letter(code), repairs.CP1255_SHIFTED_FONT.rule_id, name
+            if repaired:
+                pass
+            elif is_private_use(ch):
                 font = _font_name(raw, textpage, index)
                 symbolic = SYMBOL_FONT.search(font) is not None
                 (out.symbol_pua if symbolic else out.other_pua).add(ch)
@@ -255,6 +262,70 @@ def eth_fonts_of(pdf, limit: int | None = None) -> frozenset[str]:
     return frozenset(name for name in eth if not nun.get(name))
 
 
+SHIFTED_MIN_WORDS = 10
+SHIFTED_WORD_SHARE = 0.8
+SHIFTED_FINAL_EDGE = 0.9
+_FINAL_BYTES = (0xEA, 0xED, 0xEF, 0xF3, 0xF5)  # ך ם ן ף ץ
+
+
+def shifted_fonts_of(pdf, limit: int | None = None) -> dict[str, str]:
+    """Fonts that carry Hebrew as its cp1255 byte, as Latin-1 or at U+F000 + the byte
+    (``cp1255_shifted_font``). Decided per font over the whole document; see the rule's evidence."""
+    import pypdfium2.raw as raw
+
+    words: dict[tuple[str, str], list[list[int]]] = {}  # (font, kind) -> words of shifted codes
+    other_words: dict[str, int] = {}
+    hebrew: set[str] = set()
+    for index in range(len(pdf) if limit is None else min(len(pdf), limit)):
+        page = pdf[index]
+        textpage = page.get_textpage()
+        try:
+            count = raw.FPDFText_CountChars(textpage)
+            current: list[int] = []
+            current_font = ""
+            for i in range(count + 1):
+                code = raw.FPDFText_GetUnicode(textpage, i) if i < count else 0x20
+                letter_like = 0xE0 <= code <= 0xFA or 0xF0E0 <= code <= 0xF0FA or (0x41 <= code <= 0x5A) or (0x61 <= code <= 0x7A) or (0x05D0 <= code <= 0x05EA)
+                if letter_like:
+                    name = _font_name(raw, textpage, i)
+                    if 0x05D0 <= code <= 0x05EA:
+                        hebrew.add(name)
+                    if current and name != current_font:
+                        _close_word(current, current_font, words, other_words)
+                        current = []
+                    current_font = name
+                    current.append(code)
+                elif current:
+                    _close_word(current, current_font, words, other_words)
+                    current = []
+        finally:
+            textpage.close()
+            page.close()
+    out: dict[str, str] = {}
+    for (font, kind), found in words.items():
+        if font in hebrew or len(found) < SHIFTED_MIN_WORDS:
+            continue
+        if len(found) < SHIFTED_WORD_SHARE * (len(found) + other_words.get(font, 0)):
+            continue
+        base = 0xF000 if kind == "pua" else 0
+        finals = [(n, len(w)) for w in found if len(w) > 1 for n, code in enumerate(w) if code - base in _FINAL_BYTES]
+        if len(finals) < 3:
+            continue
+        at_end = sum(1 for n, size in finals if n == size - 1) / len(finals)
+        at_start = sum(1 for n, size in finals if n == 0) / len(finals)
+        if max(at_end, at_start) >= SHIFTED_FINAL_EDGE:  # logical order, or visual order: one edge, consistently
+            out[font] = kind
+    return out
+
+
+def _close_word(word: list[int], font: str, words: dict, other_words: dict) -> None:
+    for kind, low, high in (("latin1", 0xE0, 0xFA), ("pua", 0xF0E0, 0xF0FA)):
+        if all(low <= code <= high for code in word):
+            words.setdefault((font, kind), []).append(list(word))
+            return
+    other_words[font] = other_words.get(font, 0) + 1
+
+
 def read_t1(doc: Document, page_index: int, built: PageLines) -> int:
     """Read a T1 page's built lines into blocks. Returns the characters read."""
     read = 0
@@ -262,6 +333,9 @@ def read_t1(doc: Document, page_index: int, built: PageLines) -> int:
         lines: list[Line] = []
         bullets: Counter = Counter()
         eths = sum(1 for line in group for atom in line.atoms if atom.repaired == repairs.LATIN1_ETH_NUN.rule_id)
+        shifted = Counter(
+            (_shifted_code(doc, atom), atom.text) for line in group for atom in line.atoms if atom.repaired == repairs.CP1255_SHIFTED_FONT.rule_id
+        )
         # A learned map gives each letter at most one code per font, so the code is recoverable.
         by_ocr = Counter(
             (f"U+{ord(doc._font_codes[(atom.font, atom.text)]):04X}", atom.text)
@@ -278,7 +352,7 @@ def read_t1(doc: Document, page_index: int, built: PageLines) -> int:
                     line.flags.append("bullet_symbol_mapped")
             lines.append(Line(text, line.bbox, line.direction))
         flags = sorted({flag for line in group for flag in line.flags})
-        block_repairs = _logged(bullets, eths, by_ocr)
+        block_repairs = _logged(bullets, eths, by_ocr, shifted)
         bbox = [
             min(line.bbox[0] for line in group),
             min(line.bbox[1] for line in group),
@@ -304,14 +378,27 @@ def read_t1(doc: Document, page_index: int, built: PageLines) -> int:
     return read
 
 
-def _logged(bullets: Counter, eths: int, by_ocr: Counter) -> list[dict]:
-    """The repair log of a block read from the layer: bullets, ð per font, codes learned by OCR."""
+def _logged(bullets: Counter, eths: int, by_ocr: Counter, shifted: Counter | None = None) -> list[dict]:
+    """The repair log of a block read from the layer: bullets, ð per font, codes learned by OCR,
+    and cp1255-shifted fonts."""
     out = repairs.record(repairs.SYMBOL_FONT_BULLET, bullets)
     if eths:
         out += repairs.record(repairs.LATIN1_ETH_NUN, Counter({("U+00F0", "נ"): eths}))
     if by_ocr:
         out += repairs.record(repairs.FONT_PRIVATE_USE_BY_OCR, by_ocr)
+    if shifted:
+        out += repairs.record(repairs.CP1255_SHIFTED_FONT, shifted)
     return out
+
+
+def _shifted_code(doc: Document, atom) -> str:
+    """The code a cp1255-shifted font drew for a restored letter."""
+    return _shifted_code_of(doc, atom.font, atom.text)
+
+
+def _shifted_code_of(doc: Document, font: str, letter: str) -> str:
+    byte = letter.encode("cp1255")[0]
+    return f"U+{(0xF000 + byte) if doc._shifted_fonts.get(font) == 'pua' else byte:04X}"
 
 
 def _log_cell_repairs(doc: Document, table: Block) -> None:
@@ -320,7 +407,8 @@ def _log_cell_repairs(doc: Document, table: Block) -> None:
     if ledger is None:
         return
     by_ocr = Counter({(f"U+{ord(doc._font_codes[(font, letter)]):04X}", letter): n for (font, letter), n in ledger.pua.items()})
-    table.repairs += _logged(ledger.bullets, ledger.eth, by_ocr)
+    shifted = Counter({(_shifted_code_of(doc, font, letter), letter): n for (font, letter), n in ledger.shifted.items()})
+    table.repairs += _logged(ledger.bullets, ledger.eth, by_ocr, shifted)
     table._cell_repairs = None
 
 
@@ -344,11 +432,15 @@ def read_pdf(body: bytes, doc: Document) -> None:
         verdict = document_is_rtl(pdf, pages)
         doc._rtl = verdict if verdict is not None else _language_is_rtl(doc)
         eth_fonts = eth_fonts_of(pdf, pages) if doc.options.get("repairs", True) else frozenset()
+        doc._shifted_fonts = shifted_fonts_of(pdf, pages) if doc.options.get("repairs", True) else {}
+        if doc._shifted_fonts:
+            doc._rtl = True  # its letters are Hebrew, though the layer shows none
+            doc.flags.append("font_cp1255_shifted")
         font_maps = _learn_font_maps(doc, pdf) if doc.options.get("repairs", True) else {}
         for index in range(pages):
             page = pdf[index]
             try:
-                _read_page(doc, index, page, eth_fonts, font_maps)
+                _read_page(doc, index, page, eth_fonts, font_maps, doc._shifted_fonts)
             finally:
                 page.close()
         if doc.options.get("check_numbers"):
@@ -580,9 +672,9 @@ def _report_side_losses(doc: Document, index: int, text: PageText, flags: list[s
         )
 
 
-def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = frozenset(), font_maps: dict | None = None) -> None:
+def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = frozenset(), font_maps: dict | None = None, shifted: dict | None = None) -> None:
     width, height = page.get_size()
-    text = page_text(page, eth_fonts, font_maps)
+    text = page_text(page, eth_fonts, font_maps, shifted=shifted)
     stats = object_stats(page)
     built = build_lines(text.atoms)
     chars = "".join(a.text for a in text.atoms)
@@ -600,7 +692,13 @@ def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = froz
             "fonts": [name for name, _ in sorted(text.fonts.items(), key=lambda kv: -kv[1])[:5]],
         }
     )
+    shifted_chars = sum(1 for a in text.atoms if a.repaired == repairs.CP1255_SHIFTED_FONT.rule_id)
+    if shifted_chars:
+        signals["cp1255_shifted_chars"] = shifted_chars
     page_class, flags = classify(signals)
+    if shifted_chars:
+        # The layer was a cp1255-shifted font (a T3 layer by its state), fully restored: read as T1.
+        flags.append("font_cp1255_shifted")
     if page.get_rotation():
         flags.append("page_rotated")
     _report_side_losses(doc, index, text, flags)

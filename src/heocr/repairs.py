@@ -90,9 +90,49 @@ REVERSED_DIGIT_GROUPS = Rule(
     ),
 )
 
+CP1255_SHIFTED_FONT = Rule(
+    rule_id="cp1255_shifted_font",
+    reason=(
+        "Some fonts carry Hebrew as its cp1255 byte: read as Latin-1 (שלום as ùìåí), or moved into the "
+        "private-use area at U+F000 + the byte, as symbol fonts do. No Hebrew letter is left on the page."
+    ),
+    example=("ùìåí", "שלום"),
+    formats=("pdf",),
+    evidence=(
+        "decided per font, over the document: the font has no Hebrew letter; at least "
+        "SHIFTED_MIN_WORDS words consist only of codes in U+00E0-U+00FA (or U+F0E0-U+F0FA), and they are "
+        "at least SHIFTED_WORD_SHARE of the font's words; and the codes of the five final letters (ך ם ן ף ץ) "
+        "stand at a word's edge at least SHIFTED_FINAL_EDGE of the time, consistently at one edge"
+    ),
+)
+
+
+def cp1255_shifted_font(text: str) -> tuple[str, Counter]:
+    """Every Latin-1 or private-use cp1255 code → its Hebrew letter. The per-font evidence is checked
+    by the reader (``shifted_fonts_of``); this applies the change to text it chose."""
+    changes: Counter = Counter()
+    out = []
+    for ch in text:
+        letter = cp1255_letter(ord(ch))
+        if letter is not None:
+            changes[(f"U+{ord(ch):04X}", letter)] += 1
+            out.append(letter)
+        else:
+            out.append(ch)
+    return "".join(out), changes
+
+
+def cp1255_letter(code: int) -> str | None:
+    """The Hebrew letter whose cp1255 byte is ``code`` (or ``code`` - 0xF000), else None."""
+    byte = code - 0xF000 if code >= 0xF000 else code
+    if 0xE0 <= byte <= 0xFA:
+        return bytes([byte]).decode("cp1255")
+    return None
+
+
 RULES: dict[str, Rule] = {
     rule.rule_id: rule
-    for rule in (SYMBOL_FONT_BULLET, DIRECTION_MARKS, LATIN1_ETH_NUN, RTL_BRACKET_ORDER, FONT_PRIVATE_USE_BY_OCR, REVERSED_DIGIT_GROUPS)
+    for rule in (SYMBOL_FONT_BULLET, DIRECTION_MARKS, LATIN1_ETH_NUN, RTL_BRACKET_ORDER, FONT_PRIVATE_USE_BY_OCR, REVERSED_DIGIT_GROUPS, CP1255_SHIFTED_FONT)
 }
 
 
