@@ -1059,9 +1059,9 @@ _LABEL_ONE_LEVEL = re.compile(r"^\d{1,2}\.?$")
 _LABEL_DEEPER = re.compile(r"^\d{1,2}(\.\d{1,2})+\.?$")
 
 
-def _number_reading(numbers, image, bbox, dpi: int) -> str | None:
-    """The number model's reading of one word box, when it is one number-shaped word with
-    confidence at least ``NUMBER_WORD_MIN_CONFIDENCE``; else None."""
+def _number_reading(numbers, image, bbox, dpi: int) -> tuple[str, float] | None:
+    """The number model's reading of one word box and its confidence, when it is one number-shaped
+    word with confidence at least ``NUMBER_WORD_MIN_CONFIDENCE``; else None."""
     x0, y0, x1, y1 = bbox
     crop = (max(0, int(x0) - NUMBER_WORD_PAD), max(0, int(y0) - NUMBER_WORD_PAD),
             min(image.size[0], int(x1) + NUMBER_WORD_PAD), min(image.size[1], int(y1) + NUMBER_WORD_PAD))
@@ -1071,7 +1071,7 @@ def _number_reading(numbers, image, bbox, dpi: int) -> str | None:
     words = [w for l in second.lines for w in l.words]
     if len(words) != 1 or words[0].confidence < NUMBER_WORD_MIN_CONFIDENCE or not _NUMBER_WORD.match(words[0].text):
         return None
-    return words[0].text
+    return words[0].text, words[0].confidence
 
 
 def _reread_number_words(numbers, image, result, dpi: int) -> tuple[int, int]:
@@ -1087,9 +1087,11 @@ def _reread_number_words(numbers, image, result, dpi: int) -> tuple[int, int]:
         for word in line.words:
             if not any(ch.isdigit() for ch in word.text) or _HEBREW_LETTER.search(word.text):
                 continue
+            wider = False
             try:
-                reading = _number_reading(numbers, image, word.bbox, dpi)
+                found = _number_reading(numbers, image, word.bbox, dpi)
                 reread += 1
+                reading, confidence = found if found is not None else (None, None)
                 if reading is not None and _LABEL_ONE_LEVEL.match(reading) and word is max(line.words, key=lambda w: w.bbox[2]):
                     # A one-level label at a line's (RTL) start: heb's box often covers only the part of a
                     # deeper label it read ("1." of "1.1.1."). One more reading reaches into the blank
@@ -1099,8 +1101,9 @@ def _reread_number_words(numbers, image, result, dpi: int) -> tuple[int, int]:
                     wide = [max(word.bbox[0] - reach, left + NUMBER_WORD_PAD), word.bbox[1], word.bbox[2] + reach, word.bbox[3]]
                     deeper = _number_reading(numbers, image, wide, dpi)
                     # heb keeps a label's last level ("1." of "3.2.1."): the deeper reading must end with it.
-                    if deeper is not None and _LABEL_DEEPER.match(deeper) and deeper.rstrip(".").endswith(reading.rstrip(".")):
-                        reading = deeper
+                    if deeper is not None and _LABEL_DEEPER.match(deeper[0]) and deeper[0].rstrip(".").endswith(reading.rstrip(".")):
+                        reading, confidence = deeper
+                        wider = True
             except OcrUnavailable:
                 return reread, replaced
             if reading is None:
@@ -1108,6 +1111,10 @@ def _reread_number_words(numbers, image, result, dpi: int) -> tuple[int, int]:
             if word.text[-1] in ".:" and reading[-1].isdigit():
                 reading += word.text[-1]  # eng drops a label's closing stop more often than heb invents one
             if reading != word.text:
+                # Every replacement is logged with both readings (decision 0002), as a cell's are: a
+                # reviewer can audit it, a consumer can revert it.
+                line.number_readings.append({"first": word.text, "second": reading, "first_confidence": word.confidence,
+                                             "second_confidence": confidence, "model": numbers.lang, "wider": wider})
                 word.text = reading
                 line.numbers_replaced += 1
                 replaced += 1
@@ -1154,6 +1161,7 @@ def _ocr_blocks(
                 direction="rtl",
                 lines=lines,
                 ocr={**block_ocr(engine, group), "dpi": dpi, **({"number_words_replaced": replaced} if replaced else {})},
+                checks={"number_readings": [r for line in group for r in line.number_readings]} if replaced else None,
                 flags=["ocr_unverified", *flags] + (["render_dpi_reduced"] if dpi < RENDER_DPI else [])
                 + (["numbers_from_second_reading"] if replaced else []) + text_flags(text),
             )

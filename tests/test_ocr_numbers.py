@@ -57,6 +57,10 @@ class NumberWordsTest(unittest.TestCase):
         self.assertEqual(block.ocr["number_words_replaced"], 1)
         self.assertEqual((doc.pages[0].coverage["number_words_reread"], doc.pages[0].coverage["number_words_replaced"]), (1, 1))
         self.assertEqual(self.second_readings(), ["eng"])  # only the digit word, and in eng
+        # Each replacement is logged in its block with both readings, so it can be audited or reverted.
+        self.assertEqual(block.checks["number_readings"], [{"first": "1.", "second": "1.1.", "first_confidence": 90.0,
+                                                            "second_confidence": 90.0, "model": "eng", "wider": False}])
+        self.assertEqual(doc.to_dict()["blocks"][0]["checks"]["number_readings"][0]["first"], "1.")
         self.assertEqual(heocr.validate(doc.to_dict()), [])
 
     def test_words_with_hebrew_letters_keep_their_reading(self) -> None:
@@ -70,6 +74,7 @@ class NumberWordsTest(unittest.TestCase):
                 doc = self.read(["סכום", "20000"], second, confidence)
                 self.assertEqual(doc.blocks[0].text, "סכום 20000")
                 self.assertNotIn("numbers_from_second_reading", doc.blocks[0].flags)
+                self.assertIsNone(doc.blocks[0].checks)
 
     def test_an_amount_is_read_again(self) -> None:
         doc = self.read(["סכום", "20000", "₪"], "256,000")
@@ -89,6 +94,8 @@ class NumberWordsTest(unittest.TestCase):
             doc = self.read(["1.", "תאגיד", "למעט"], "")
         self.assertEqual(doc.blocks[0].text, "3.2.1. תאגיד למעט")
         self.assertEqual(self.second_readings(), ["eng", "eng"])
+        [logged] = doc.blocks[0].checks["number_readings"]
+        self.assertEqual((logged["first"], logged["second"], logged["wider"]), ("1.", "3.2.1.", True))
 
     def test_a_wider_reading_that_is_not_the_same_label_deeper_is_not_used(self) -> None:
         state = str(Path(self.tmp.name) / "seq")

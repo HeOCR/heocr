@@ -58,6 +58,7 @@ class OcrLine:
     paragraph: tuple[str, str] = ("0", "0")  # Tesseract's (block, paragraph)
     words: list[OcrWord] = field(default_factory=list)  # in Tesseract's order; ``text`` is them joined
     numbers_replaced: int = 0  # words replaced by a second reading of numbers (pdf.reader)
+    number_readings: list[dict] = field(default_factory=list)  # each replacement, both readings (pdf.reader)
 
 
 @dataclass
