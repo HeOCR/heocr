@@ -146,26 +146,60 @@ class NumberWordsTest(unittest.TestCase):
             doc = self.read(["סעיף", "12", "34"], "", gaps=[60, 8, 60])
         self.assertEqual(doc.blocks[0].text, "סעיף 12 34")
 
-    def segment(self, words, line, gaps=None):
-        with mock.patch.dict(os.environ, {"FAKE_LINE": line}):
+    def segment(self, words, line, gaps=None, spans=None, confs=None):
+        env = {"FAKE_LINE": line}
+        if spans:
+            env["FAKE_LINE_SPANS"] = spans
+        if confs:
+            env["FAKE_CONFS"] = confs
+        with mock.patch.dict(os.environ, env):
             return self.read(words, "", gaps=gaps)
 
     def test_a_table_rows_date_broken_into_marks_is_read_again_as_a_segment(self) -> None:
         # set C office_numbers: heb reads a row's last cell "01.12.2022" as "2022 >": the day and month
-        # turned into a mark. The row's number segment is read again by the number model as one line.
-        doc = self.segment(["הסעות", "21", "5,990", "2022", ">"], "21 5,990 01.12.2022")
+        # turned into a mark. The row's number segment is read again by the number model as one line;
+        # its date token, over "2022" and ">", replaces both.
+        doc = self.segment(["הסעות", "21", "5,990", "2022", ">"], "01.12.2022 5,990 21", spans="0-0.49,0.51-0.75,0.77-0.99")
         block = doc.blocks[0]
         self.assertEqual(block.text, "הסעות 21 5,990 01.12.2022")
         (logged,) = block.checks["number_readings"]
-        self.assertEqual((logged["first"], logged["second"], logged["segment"]), ("21 5,990 2022 >", "21 5,990 01.12.2022", 4))
+        self.assertEqual((logged["segment"], logged["replaced"]), (4, [["2022 >", "01.12.2022"]]))
+
+    def test_a_mark_the_number_model_cannot_read_leaves_its_word_as_read(self) -> None:
+        # set C: the number model read a row's quantity "7" as "V/" at confidence 5: that word stays as heb
+        # read it, while the row's date is still restored.
+        doc = self.segment(["ליווי", "7", "2021", ">"], "26.10.2021 V/", spans="0-0.66,0.68-0.99", confs="97,5")
+        self.assertEqual(doc.blocks[0].text, "ליווי 7 26.10.2021")
+
+    def test_a_date_read_partly_as_a_shekel_sign_is_restored(self) -> None:
+        # set C: heb read "26.05.2024" as "05.2024. ₪": part of the date became a ₪. A date token may take its place.
+        doc = self.segment(["אחזקה", "50,170", "05.2024.", "₪"], "26.05.2024 50,170", spans="0-0.65,0.68-0.99")
+        self.assertEqual(doc.blocks[0].text, "אחזקה 50,170 26.05.2024")
+
+    def test_an_amount_keeps_its_shekel_sign(self) -> None:
+        # Only a date takes a ₪'s place: an amount token over a ₪ leaves the ₪ (and the amount) as read.
+        doc = self.segment(["סכום", "64,20", "₪"], "64,200", spans="0-0.99")
+        self.assertEqual(doc.blocks[0].text, "סכום 64,20 ₪")
+
+    def test_segment_pieces(self) -> None:
+        from heocr.pdf.reader import _segment_piece as piece
+        for text in ("01.12.2022", ">", "₪", "(₪)", "0ך", "2ךד"):
+            self.assertTrue(piece(text), text)
+        for text in ("2ב", "ו-3", "של", "20000₪", "3ab", "1ךדה"):
+            self.assertFalse(piece(text), text)
+
+    def test_a_misread_piece_with_a_final_form_is_part_of_a_segment(self) -> None:
+        # "0ך" beside digits is no Hebrew word: a misread piece of "19.04.2020".
+        doc = self.segment(["ייעוץ", "42,120", "0ך", ">"], "19.04.2020 42,120", spans="0-0.65,0.68-0.99")
+        self.assertEqual(doc.blocks[0].text, "ייעוץ 42,120 19.04.2020")
 
     def test_a_segments_numbers_stay_separate_words(self) -> None:
         # Numbers in neighbouring columns come back as separate tokens: never joined into one.
-        doc = self.segment(["פריט", "120,960", "26", "09.2023"], "120,960 26.09.2023", gaps=[60, 200, 8, 60])
+        doc = self.segment(["פריט", "120,960", "26", "09.2023"], "26.09.2023 120,960", gaps=[60, 200, 8, 60], spans="0-0.54,0.73-1")
         self.assertEqual(doc.blocks[0].text.split()[1:], ["120,960", "26.09.2023"])
 
-    def test_a_segment_reading_that_is_not_all_numbers_is_not_used(self) -> None:
-        doc = self.segment(["הסעות", "2022", ">"], "2022 Tf")
+    def test_a_token_that_is_not_a_number_shape_is_not_used(self) -> None:
+        doc = self.segment(["הסעות", "2022", ">"], "Tf 2022")
         self.assertEqual(doc.blocks[0].text, "הסעות 2022 >")
 
     def test_a_currency_sign_ends_a_segment(self) -> None:
