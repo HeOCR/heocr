@@ -124,6 +124,61 @@ class SideBySideRowsTest(unittest.TestCase):
         doc = extract(lines)
         self.assertNotIn("reading_order_unresolved_columns", doc.pages[0].flags)
 
+    def test_prose_beside_a_list_is_not_a_table(self) -> None:
+        # Running text in the right band, a bulleted list in the left: columns of text, not
+        # records. Their order is not known, so the run stays flagged and is never selection-safe.
+        prose = [sentence("פסקה", n, 40) + "," for n in range(1, 9)]
+        items = [f"• פריט {n}" for n in range(1, 9)]
+        lines = lines_block([sentence("לפני", 1, FULL)], top=760)
+        for n, (text, item) in enumerate(zip(prose, items)):
+            lines += [TextLine(text, 545, 720 - n * 16), TextLine(item, 230, 720 - n * 16)]
+        lines += lines_block([sentence("אחרי", 2, FULL)], top=560)
+        doc = extract(lines)
+        self.assertEqual(tables_of(doc), [])
+        page = doc.pages[0]
+        self.assertIn("reading_order_unresolved_columns", page.flags)
+        self.assertFalse(page.coverage["selection_safe"])
+        for text in prose + items:
+            self.assertIn(text, doc.text)
+
+    def test_long_entries_beside_page_numbers_stay_a_table(self) -> None:
+        # A table of contents: long entries, but the other band holds one number per row.
+        entries = [sentence("נספח", n, 40) for n in range(1, 7)]
+        lines = lines_block([sentence("לפני", 1, FULL)], top=760)
+        for n, text in enumerate(entries):
+            lines += [TextLine(text, 545, 720 - n * 16), TextLine(str(90 + n), 120, 720 - n * 16)]
+        lines += lines_block([sentence("אחרי", 2, FULL)], top=600)
+        (table,) = tables_of(extract(lines))
+        self.assertEqual([row[1].text for row in table.cells], [str(90 + n) for n in range(6)])
+
+    def test_a_row_across_the_columns_does_not_unsettle_the_rows_around_it(self) -> None:
+        # Four-column rows, then a row whose long piece crosses the inner columns, then four-column
+        # rows again. Before, the run took the long row in, kept one gutter, and the four-piece rows
+        # had two pieces in a band: unresolved. Now the long row ends the run.
+        header = [("ציון", 545), ("0.63", 440), ("0.52", 334), ("27%", 236)]
+        lines = lines_block([sentence("לפני", 1, FULL)], top=760)
+        for r in range(3):
+            lines += [TextLine(text, x, 720 - r * 16) for text, x in header]
+        lines += [TextLine("סיווג", 545, 672), TextLine("שורה ארוכה שחוצה את העמודות הפנימיות", 460, 672)]
+        for r in range(3):
+            lines += [TextLine(text, x, 656 - r * 16) for text, x in header]
+        lines += lines_block([sentence("אחרי", 2, FULL)], top=580)
+        doc = extract(lines)
+        self.assertNotIn("reading_order_unresolved_columns", doc.pages[0].flags)
+        self.assertEqual(len(tables_of(doc)), 2)
+        self.assertFalse(doc.pages[0].coverage["selection_safe"])  # unruled tables are inferred, never selection-safe
+        self.assertIn("שורה ארוכה שחוצה את העמודות הפנימיות", doc.text)
+
+    def test_labels_scattered_over_a_chart_are_not_a_table(self) -> None:
+        lines = lines_block([sentence("לפני", 1, FULL)], top=760)
+        spots = [(545, 720, "שנות ניסיון"), (330, 720, "ניסיון בליווי"), (200, 704, "36%"), (500, 688, "39%"), (330, 672, "32%"), (120, 656, "13%")]
+        lines += [TextLine(text, x, y) for x, y, text in spots]
+        lines += lines_block([sentence("אחרי", 2, FULL)], top=600)
+        doc = extract(lines)
+        self.assertEqual(tables_of(doc), [])
+        for _, _, text in spots:
+            self.assertIn(text, doc.text)
+
     def test_labels_in_the_margin_keep_their_paragraphs(self) -> None:
         # A hanging-indent list: "1." at the right, its paragraph indented beside it.
         def para(n: int, k: int) -> str:

@@ -706,6 +706,9 @@ def _read_region(doc: Document, index: int, atoms: list[Atom], tables, built: Pa
             doc.blocks.append(segment.block)
             in_tables += segment.chars
             unruled = True
+            # An unruled table is inferred from geometry alone: its cells' order is our reading,
+            # not one the page shows, so the page cannot be called selection-safe.
+            selection_safe = False
             continue
         parts = segment.bands if segment.kind in ("flow", "rows") else [segment.atoms]
         for part in parts:
