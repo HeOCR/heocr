@@ -81,6 +81,12 @@ class NumbersApartInRtlTest(unittest.TestCase):
         # is for digits and punctuation in Hebrew text; in a Latin run the line keeps its former order.
         self.assertEqual(text(visual("Article", WORD_SPACE, "76", HUG, "(", HUG, "1", HUG, ")", WORD_SPACE, "ףיעס")), "סעיף )Article 76(1")
         self.assertEqual(text(visual("75", HUG, "(", HUG, "1", HUG, ")", HUG, "§", WORD_SPACE, "ףיעס")), "סעיף §)75(1")
+        # The same shapes inside an outer bracket, with a letter level, and after a Latin act name.
+        self.assertEqual(text(visual("(", HUG, "Article", WORD_SPACE, "76", HUG, "(", HUG, "1", HUG, ")", HUG, ")", WORD_SPACE, "ףיעס")),
+                         "סעיף ))Article 76(1(")
+        self.assertEqual(text(visual("(", HUG, "Article", WORD_SPACE, "77", HUG, "(", HUG, "2", HUG, ")", HUG, "(", HUG, "a", HUG, ")", HUG, ")",
+                                     WORD_SPACE, "ףיעס")), "סעיף ))Article 77(2)(a(")
+        self.assertEqual(text(visual("GWB", WORD_SPACE, "§", HUG, "130", HUG, "(", HUG, "2", HUG, ")", WORD_SPACE, "ףיעס")), "סעיף )GWB §130(2")
         # Hebrew around the numbers keeps the rule: "סעיף 3(4)(ב)".
         self.assertEqual(text(visual("(", HUG, "ב", HUG, ")", HUG, "(", HUG, "4", HUG, ")", HUG, "3", WORD_SPACE, "ףיעס")), "סעיף 3)4()ב(")
 
