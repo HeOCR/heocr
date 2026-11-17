@@ -312,14 +312,18 @@ class OcrRouteTest(unittest.TestCase):
         doc = heocr.extract(make_pdf([page]), tesseract=FAKE)
         self.assertEqual(doc.pages[0].page_class, "T6")
         self.assertFalse([b for b in doc.blocks if b.source == "ocr"])
-        self.assertEqual([u.reason for u in doc.unread], ["image_region_text_in_layer"])
+        # Not a loss: counted in coverage, not reported unread.
+        self.assertEqual(doc.unread, [])
+        self.assertEqual((doc.pages[0].coverage["image_regions_text_in_layer"], doc.pages[0].coverage["image_regions_no_ocr_needed"]), (1, 1))
         self.assertIn("תווית בתוך התמונה", doc.text)
         self.assertFalse([c for c in self.calls() if c and not c[0].startswith("--")])
 
     def test_blank_image_region_is_not_sent_to_ocr(self) -> None:
         page = PdfPage(lines=lines_block(HEBREW), images=[(50, 100, 495, 300)], image_gray=0xFF)
         doc = heocr.extract(make_pdf([page]), tesseract=FAKE)
-        self.assertEqual([u.reason for u in doc.unread], ["image_region_blank"])
+        self.assertEqual(doc.unread, [])
+        self.assertEqual(doc.pages[0].coverage["image_regions_blank"], 1)
+        self.assertEqual(doc.pages[0].coverage["status"], "read")
 
     def test_render_is_capped_and_the_dpi_recorded(self) -> None:
         with mock.patch("heocr.pdf.reader.MAX_RENDER_PIXELS", 2_000_000):
@@ -367,7 +371,7 @@ class OcrRouteTest(unittest.TestCase):
         record = doc.pages[0]
         self.assertEqual(record.page_class, "T2")
         self.assertEqual(record.coverage["image_regions"], 1)
-        self.assertEqual([u.reason for u in doc.unread], ["image_region_blank"])
+        self.assertEqual((record.coverage["image_regions_blank"], doc.unread), (1, []))
 
     def test_scan_with_ink_beyond_the_ocr_lines_is_flagged(self) -> None:
         doc = heocr.extract(make_pdf([PdfPage(images=FULL_PAGE)]), tesseract=FAKE)  # grey: ink everywhere
