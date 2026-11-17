@@ -30,6 +30,21 @@ class FurnitureTest(unittest.TestCase):
         self.assertTrue(all("page_furniture" in b.flags for b in doc.blocks if b.role != "body"))
         self.assertEqual(heocr.validate(doc.to_dict()), [])
 
+    def test_a_long_body_sentence_of_the_same_form_is_not_furniture(self) -> None:
+        # set C pdf_t1_ocr_layer: short pages whose first line was "הסכום הכולל לא יעלה על X ₪, עד
+        # ליום D": the same form in the top band, but its amount and its date change.
+        amounts = [("527,000", "27.04.2025"), ("123,000", "03.11.2024"), ("64,200", "18.09.2022")]
+        pages = [PdfPage(lines=[TextLine(f"הסכום הכולל לא יעלה על {a} ₪, עד ליום {d} לכל המאוחר", 545, 815)] + lines_block(BODY, top=700))
+                 for a, d in amounts]
+        doc = extract(pages)
+        self.assertEqual([b for b in doc.blocks if b.role != "body"], [])
+
+    def test_a_long_running_header_with_a_page_number_is_furniture(self) -> None:
+        pages = [PdfPage(lines=[TextLine(f"משרד האוצר מכרז פומבי מס' 5/2026 לרכישת שירותי ייעוץ עמוד {n}", 545, 815)] + lines_block(BODY, top=700))
+                 for n in range(1, 4)]
+        doc = extract(pages)
+        self.assertEqual(len([b for b in doc.blocks if b.role == "header"]), 3)
+
     def test_columns_from_furniture_only_are_cleared(self) -> None:
         doc = extract([tender_page(n) for n in range(1, 5)])
         for page in doc.pages:
