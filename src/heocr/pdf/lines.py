@@ -264,6 +264,22 @@ def line_is_rtl(text: str, page_rtl: bool) -> bool:
     return page_rtl
 
 
+def _latin_around(types: list[str], texts: list[str], i: int, j: int) -> bool:
+    """Whether the non-Hebrew stretch around units ``i``..``j`` (up to the nearest R unit on each
+    side) holds a Latin letter or a section sign."""
+    k = i - 1
+    while k >= 0 and types[k] != "R":
+        if types[k] == "L" or "§" in texts[k]:
+            return True
+        k -= 1
+    k = j
+    while k < len(types) and types[k] != "R":
+        if types[k] == "L" or "§" in texts[k]:
+            return True
+        k += 1
+    return any("§" in texts[k] for k in range(i, j))
+
+
 def logical_text(component: list[Atom], page_rtl: bool = True) -> tuple[str, str, list[str]]:
     """Inverse bidi for one visual line segment: (text, direction, flags)."""
     units = _units(component)
@@ -300,10 +316,12 @@ def logical_text(component: list[Atom], page_rtl: bool = True) -> tuple[str, str
             # "1.2. 1", as "1 .1.2"). Numbers act as R on neutrals (UAX #9 N1), so they are two runs.
             # Punctuation that touches the left number ("1, 2" drawn left to right) keeps one run.
             side = base
-        elif rtl and i > 0 and j < n and types[i - 1] == "EN" and types[j] == "EN" and any(texts[k] in _BRACKETS for k in range(i, j)):
+        elif (rtl and i > 0 and j < n and types[i - 1] == "EN" and types[j] == "EN" and any(texts[k] in _BRACKETS for k in range(i, j))
+              and not _latin_around(types, texts, i, j)):
             # A bracket between two numbers in an RTL line: "11(5)" is shown as "(5)11". A bracket pair
             # takes the paragraph's direction when it holds a number (UAX #9 N0, numbers counting as R),
-            # so the brackets are not part of either number's run.
+            # so the brackets are not part of either number's run. Not inside a Latin run ("Article
+            # 76(1)", "§75(1)"): there the numbers belong to the Latin text's own left-to-right order.
             side = base
         for k in range(i, j):
             resolved[k] = side

@@ -76,6 +76,14 @@ class NumbersApartInRtlTest(unittest.TestCase):
         self.assertEqual(text(visual("(", HUG, "5", HUG, ")", HUG, "11")), "11)5(")
         self.assertEqual(text(visual("(", HUG, "5", HUG, ")", HUG, "11", WORD_SPACE, "ףיעס")), "סעיף 11)5(")
 
+    def test_numbers_in_brackets_inside_a_latin_run_are_left_as_before(self) -> None:
+        # dev (eval, PR #75): "Article 76(1)" and "§75(1)" inside a Hebrew paragraph. The bracket rule
+        # is for digits and punctuation in Hebrew text; in a Latin run the line keeps its former order.
+        self.assertEqual(text(visual("Article", WORD_SPACE, "76", HUG, "(", HUG, "1", HUG, ")", WORD_SPACE, "ףיעס")), "סעיף )Article 76(1")
+        self.assertEqual(text(visual("75", HUG, "(", HUG, "1", HUG, ")", HUG, "§", WORD_SPACE, "ףיעס")), "סעיף §)75(1")
+        # Hebrew around the numbers keeps the rule: "סעיף 3(4)(ב)".
+        self.assertEqual(text(visual("(", HUG, "ב", HUG, ")", HUG, "(", HUG, "4", HUG, ")", HUG, "3", WORD_SPACE, "ףיעס")), "סעיף 3)4()ב(")
+
     def test_brackets_drawn_left_to_right_after_a_number_keep_their_run(self) -> None:
         # In an LTR line nothing changes: "11(5)" drawn left to right reads as drawn.
         self.assertEqual(text(visual("11", HUG, "(", HUG, "5", HUG, ")"), rtl=False), "11(5)")
