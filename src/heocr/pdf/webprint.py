@@ -17,6 +17,15 @@ that is either:
   (the browser prints the page's ``<title>`` in its header);
 - or, when the furniture has no title, at least ``HEADING_HEIGHT`` times the median.
 
+At the end of the **last page**, the site's footer menu (links in columns, the site's
+contact lines) gets the same role, with the flag ``site_footer_menu``: the rows at the bottom of
+the body, read upwards until the first piece of more than ``MENU_MAX_WORDS`` words, when there
+are at least ``MIN_FOOTER_ROWS`` of them, at least ``FOOTER_MULTI_SHARE`` hold two pieces or
+more side by side, and they show **site chrome**: a URL, an email address or a phone number, or at
+least ``MENU_SHARED_WORDS`` words shared with the first page's site menu. A page that ends with a
+signature (short lines, one to a row), or with signatories side by side (minister | minister,
+name | title), is not one.
+
 Above it is the site menu: at least ``MIN_MENU_PIECES`` pieces, each of at most
 ``MENU_MAX_WORDS`` words (rows of short links, the site's name, a breadcrumb). A piece is a
 line, or a table cell when the menu's aligned rows were read as a table. They get the role
@@ -39,6 +48,11 @@ TITLE_SHARE = 0.5
 MIN_MENU_PIECES = 3
 MENU_MAX_WORDS = 6
 MIN_COUNTER_PAGES = 2
+MIN_FOOTER_ROWS = 3  # the site's footer menu: at least this many rows at the bottom of the last page
+FOOTER_MULTI_SHARE = 2 / 3  # and at least this share of them hold two pieces or more, side by side
+MENU_SHARED_WORDS = 2  # site chrome: at least this many words shared with the first page's site menu
+_EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
+_PHONE = re.compile(r"(?<!\d)(?:0\d{1,2}-?\d{7}|\*\d{4}|1-?[5-9]00-?\d{2,3}-?\d{3,4})(?!\d)")
 
 _COUNTER = re.compile(r"\s*(\d{1,4})\s*/\s*(\d{1,4})\s*")
 _URL = re.compile(r"\bhttps?://\S+", re.I)
@@ -144,3 +158,77 @@ def mark_site_menu(doc: Document) -> int:
     doc.pages[0].flags.append("site_menu")
     _clear_furniture_columns(doc, "columns_were_site_menu")
     return len(pieces)
+
+
+def _site_chrome(doc: Document, texts: list[str]) -> bool:
+    """Whether footer rows show the site: a URL, an email or a phone number, or words of its first-page menu."""
+    joined = " ".join(texts)
+    if _URL.search(joined) or re.search(r"\bwww\.", joined) or _EMAIL.search(joined) or _PHONE.search(joined):
+        return True
+    menu_words = {w for b in doc.blocks if "site_menu" in b.flags for w in _WORD.findall(b.text if b.kind != "table" else " ".join(c.text for r in b.cells or [] for c in r)) if len(w) > 1}
+    footer_words = {w for w in _WORD.findall(joined) if len(w) > 1}
+    return len(menu_words & footer_words) >= MENU_SHARED_WORDS
+
+
+def mark_site_footer(doc: Document) -> int:
+    """On a browser print, give the last page's site footer menu the navigation role. Returns the pieces moved."""
+    if not doc.pages or "browser_print" not in doc.flags:
+        return 0
+    last = doc.pages[-1].index
+    body = [b for b in doc.blocks if b.page == last and b.role == "body"]
+    lines = [(line, block) for block in body if block.source == "text_layer" for line in block.lines or []]
+    # The footer is what lies below the page's last longer line.
+    long_bottom = max((l.bbox[3] for l, _ in lines if len(l.text.split()) > MENU_MAX_WORDS), default=float("-inf"))
+    below = [(l, b) for l, b in lines if l.bbox[1] >= long_bottom]
+    tables = [
+        b for b in body
+        if b.kind == "table" and b.bbox is not None and b.bbox[1] >= long_bottom
+        and "unruled_table" in b.flags  # menu rows read as a table (D3c); a ruled table is content
+        and all(len(c.text.split()) <= MENU_MAX_WORDS for row in b.cells or [] for c in row)
+    ]
+    if any(b.kind in ("table", "figure") and b not in tables and b.bbox is not None and b.bbox[1] >= long_bottom for b in body):
+        return 0  # other content among the rows: not a menu
+    rows: list[list] = []
+    for line, block in sorted(below, key=lambda pair: (pair[0].bbox[1], pair[0].bbox[3])):
+        if rows:
+            top = min(l.bbox[1] for l, _ in rows[-1])
+            bottom = max(l.bbox[3] for l, _ in rows[-1])
+            overlap = min(bottom, line.bbox[3]) - max(top, line.bbox[1])
+            if overlap > 0.5 * min(bottom - top, line.bbox[3] - line.bbox[1]):
+                rows[-1].append((line, block))
+                continue
+        rows.append([(line, block)])
+    pieces_per_row = [len(row) for row in rows] + [sum(1 for c in row if c.text.strip()) for t in tables for row in t.cells or []]
+    pieces_per_row = [n for n in pieces_per_row if n]
+    if len(pieces_per_row) < MIN_FOOTER_ROWS or sum(1 for n in pieces_per_row if n >= 2) < FOOTER_MULTI_SHARE * len(pieces_per_row):
+        return 0
+    if not _site_chrome(doc, [l.text for l, _ in below] + [c.text for t in tables for row in t.cells or [] for c in row]):
+        return 0  # rows of short pieces with no sign of the site: signatories, not a menu
+    menu = {id(line) for line, _ in below}
+    from heocr.pdf.furniture import _clear_furniture_columns, _sub_block
+
+    out: list[Block] = []
+    for block in doc.blocks:
+        if block in tables:
+            block.role = "navigation"
+            block.flags.append("site_footer_menu")
+            out.append(block)
+            continue
+        if block.page != last or block.role != "body" or not block.lines or not any(id(l) in menu for l in block.lines):
+            out.append(block)
+            continue
+        nav = [l for l in block.lines if id(l) in menu]
+        rest = [l for l in block.lines if id(l) not in menu]
+        parts = [_sub_block(block, rest, "body")] if rest else []
+        moved = _sub_block(block, nav, "navigation")
+        moved.flags = [f for f in moved.flags if f != "page_furniture"] + ["site_footer_menu"]
+        parts.append(moved)
+        keeper = parts[0]
+        keeper.repairs = list(block.repairs)
+        keeper.checks = block.checks
+        out.extend(parts)
+    doc.blocks[:] = out
+    page = next(p for p in doc.pages if p.index == last)
+    page.flags.append("site_footer_menu")
+    _clear_furniture_columns(doc, "columns_were_site_menu")
+    return sum(pieces_per_row)
