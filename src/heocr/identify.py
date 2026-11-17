@@ -1,8 +1,7 @@
 """File-type identification from content: magic bytes and container parts, never the file name.
 
-Ported from tendex ``identify()`` (AdanimInstitute/adanim-govil-scraper, ``tendex_l4/extract.py``,
-released for porting into heocr under Apache-2.0 by decision 0020, item 4), extended with ODF,
-RTF, HTML, image and text detection, and with our own OLE2 directory reader in place of olefile.
+Ported code (see NOTICE), extended with ODF, RTF, HTML, image and text detection, and with our
+own OLE2 directory reader in place of olefile.
 """
 
 from __future__ import annotations

@@ -31,6 +31,7 @@ from heocr.ocr.regions import (  # noqa: F401  (re-exported for callers of the P
     short_for_ink,
 )
 from heocr.pdf.classify import FIGURE_IMAGE, classify, object_stats, stream_signals, text_signals
+from heocr.pdf.frame import frame_of
 from heocr.pdf.lines import Atom, PageLines, build_lines, line_is_rtl, paragraphs
 from heocr.pdf.columns import UNRESOLVED, Segment, arrange
 from heocr.pdf.ocrtables import cell_crop, cell_has_ink, cell_psm, tables_in
@@ -87,8 +88,6 @@ def page_text(page, eth_fonts: frozenset[str] = frozenset(), font_maps: dict | N
     """
     import pypdfium2.raw as raw
 
-    from heocr.pdf.frame import frame_of
-
     out = PageText()
     marks: list[Atom] = []
     textpage = page.get_textpage()
@@ -142,7 +141,7 @@ def page_text(page, eth_fonts: frozenset[str] = frozenset(), font_maps: dict | N
                 # Invisible text (render mode 3) is masked too: it sits over the image that holds the same words.
                 out.drawn_boxes.append(box)
             angle = raw.FPDFText_GetCharAngle(textpage, index)
-            if angle > 0 and abs(math.sin(angle)) > ROTATED_SIN and not ch.isspace():
+            if angle >= 0 and abs(math.sin(frame.angle(angle))) > ROTATED_SIN and not ch.isspace():
                 # Rotated text has no horizontal baseline; line building would make one line per letter.
                 out.rotated += 1
                 continue
@@ -359,10 +358,11 @@ def read_pdf(body: bytes, doc: Document) -> None:
     if doc.options.get("repairs", True):
         _repair_rtl_brackets(doc)
     from heocr.pdf.furniture import mark_furniture
-    from heocr.pdf.webprint import mark_site_menu
+    from heocr.pdf.webprint import mark_site_footer, mark_site_menu
 
     mark_furniture(doc)
     mark_site_menu(doc)
+    mark_site_footer(doc)
 
 
 def _learn_font_maps(doc: Document, pdf) -> dict[str, dict[str, str]]:
@@ -408,7 +408,7 @@ def _learn_font_maps(doc: Document, pdf) -> dict[str, dict[str, str]]:
     def render(index: int):
         page = pdf[index]
         try:
-            return _render(page, layer_frame=True)
+            return _render(page, frame_of(page))
         finally:
             page.close()
 
@@ -460,7 +460,7 @@ def _check_numbers(doc: Document, pdf, scope: str = "suspect") -> None:
     for index, items in sorted(candidates.items()):
         page = pdf[index]
         try:
-            image, scale = _render(page, layer_frame=True)
+            image, scale = _render(page, frame_of(page))
         finally:
             page.close()
         for block, cell, line in items:
@@ -614,12 +614,13 @@ def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = froz
     if needs_ocr:
         _ocr_page(doc, index, page, width, height, page_class, signals, text, flags)
         return
-    # From here the page is read from its text layer, whose positions are in the unrotated visible
-    # box: the page's size is that box's, so its blocks' boxes and its size share one frame.
-    from heocr.pdf.frame import frame_of
-
+    # From here the page is read from its text layer, in the frame its positions are in (the page
+    # as displayed, or the user frame when the layer is sideways on screen): the page's size is
+    # that frame's, so its blocks' boxes and its size agree.
     layer = frame_of(page)
     width, height = layer.width, layer.height
+    if layer.sideways:
+        flags = flags + ["text_sideways_on_screen"]
     if page_class not in READ_CLASSES:
         doc.pages.append(
             Page(
@@ -809,22 +810,21 @@ def _place_tables(doc: Document, first: int, tables: list[Block]) -> None:
         doc.blocks.insert(at, table)
 
 
-def _render(page, layer_frame: bool = False) -> tuple[object, float]:
+def _render(page, frame=None) -> tuple[object, float]:
     """The page as a PIL image at RENDER_DPI, or lower when that would pass MAX_RENDER_PIXELS.
 
     Returns the image and the scale used (pixels per point). A huge or hostile page size
     cannot allocate billions of pixels.
 
-    ``layer_frame`` renders the page **unrotated**, in the frame its text layer is read in (the
-    visible box, ignoring ``/Rotate``): region crops, masks of layer characters and number and
-    font checks place layer boxes on it. Without it, the page is rendered as displayed, the frame
-    of a page read wholly by OCR.
+    The page is rendered as displayed (``/Rotate`` applied), the frame its layer is read in.
+    With ``frame`` for a page whose layer is sideways on screen (``Frame.sideways``), it is
+    rendered unrotated, in the user frame its layer is read in, so layer boxes still meet it.
     """
     width, height = page.get_size()
     scale = RENDER_DPI / 72
     if width * height * scale * scale > MAX_RENDER_PIXELS:
         scale = (MAX_RENDER_PIXELS / (width * height)) ** 0.5
-    rotation = (360 - page.get_rotation()) % 360 if layer_frame else 0
+    rotation = (360 - frame.page_rotate) % 360 if frame is not None and frame.sideways else 0
     if rotation:
         return page.render(scale=scale, rotation=rotation).to_pil(), scale
     return page.render(scale=scale).to_pil(), scale
@@ -1099,7 +1099,7 @@ def _ocr_regions(
         for box in large:
             unread("image_region_not_read", box, reason)
         return counts
-    image, scale = _render(page, layer_frame=True)
+    image, scale = _render(page, frame_of(page))
     for box in large:
         crop = [int(box[0] * scale), int(box[1] * scale), int(box[2] * scale + 0.999), int(box[3] * scale + 0.999)]
         if crop[2] - crop[0] < MIN_REGION_PX or crop[3] - crop[1] < MIN_REGION_PX:

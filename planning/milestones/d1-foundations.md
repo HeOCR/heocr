@@ -27,11 +27,11 @@ Each slice is one PR, with offline tests on fixtures generated in `tests/synth/`
 | Slice | Content | Status |
 |---|---|---|
 | **D1a** | Package skeleton; `heocr` CLI; the `heocr_document.v1` contract (builder, JSON schema, validator, the no-local-paths rule); `extract()` dispatch, with unsupported inputs recorded rather than raised | merged (#2) |
-| **D1b** | File-type identification by magic bytes and container parts, never by extension. Ports tendex `identify()` without PyMuPDF or olefile (our own OLE2 directory reader) | merged (#3) |
+| **D1b** | File-type identification by magic bytes and container parts, never by extension. Ported code, without PyMuPDF or olefile (our own OLE2 directory reader) | merged (#3) |
 | **D1c** | Our own DOCX `numbering.xml` renderer: abstract and concrete lists, nine levels, `lvlText` templates, `start`, `lvlRestart`, `isLgl`, level overrides and `startOverride`, style-linked lists, and Hebrew counting (`hebrew1`, `hebrew2`) | merged (#4) |
 | **D1d** | The DOCX reader: body in order; headings from outline levels (direct and through styles) as well as heading styles; hidden and deleted text dropped; line breaks in table cells kept; tables with their direction; footnotes, endnotes, comments, headers and footers kept separate from the body; images reported as unread | merged (#5) |
-| **D1e** | The PDF text-layer route for T1 pages: characters and boxes through pypdfium2, and our own RTL word and line building, with columns flagged and the `selection_safe` rule. Ports tendex `word_lines`, `ordered_words` and the `layout.py` geometry | merged (#6) |
-| **D1f** | PDF page signals and the T1–T6 classifier; T2–T5 pages are classified and flagged, not read, and T6 pages are read from the text layer with their image regions unread; the text-layer warning flags. Ports tendex `text_flags` | merged (#7) |
+| **D1e** | The PDF text-layer route for T1 pages: characters and boxes through pypdfium2, and our own RTL word and line building, with columns flagged and the `selection_safe` rule. Ported code (line building and its geometry) | merged (#6) |
+| **D1f** | PDF page signals and the T1–T6 classifier; T2–T5 pages are classified and flagged, not read, and T6 pages are read from the text layer with their image regions unread; the text-layer warning flags. Ported code (the text flags) | merged (#7) |
 
 ## The contract (`heocr_document.v1`)
 

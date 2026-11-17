@@ -5,7 +5,7 @@
 Project-wide decisions live in heocr-engine's [`planning/decisions/`](https://github.com/HeOCR/heocr-engine/tree/main/planning/decisions). The ones that set this package's course:
 
 - **0019:** HeOCR's top goal is a document pipeline, not a model.
-- **0020:** the package plan: name, licences, external tools, Adanim code, team and the VLM route.
+- **0020:** the package plan: name, licences, external tools, ported code, team and the VLM route.
 - **The design** is the proposal [`document-pipeline-package.md`](https://github.com/HeOCR/heocr-engine/blob/main/planning/proposals/document-pipeline-package.md); decision 0020 wins where they differ.
 
 ## Notation

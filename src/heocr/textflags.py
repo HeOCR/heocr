@@ -1,7 +1,6 @@
 """Warning flags on extracted text: reasons not to trust it silently.
 
-Ported from tendex ``text_flags`` (AdanimInstitute/adanim-govil-scraper, ``tendex_l4/extract.py``,
-released for porting into heocr under Apache-2.0 by decision 0020, item 4).
+Ported code (see NOTICE).
 """
 
 from __future__ import annotations

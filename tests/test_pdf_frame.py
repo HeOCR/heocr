@@ -91,7 +91,7 @@ class RotatedPageTest(unittest.TestCase):
         self.addCleanup(patcher.stop)
         os.environ.pop("TESSDATA_PREFIX", None)
 
-    def page(self, rotate: int) -> bytes:
+    def page(self, rotate: int, turned: bool = False) -> bytes:
         """A word of the text layer over an image region whose only ink lies exactly under the word."""
         from PIL import Image, ImageDraw
 
@@ -100,17 +100,21 @@ class RotatedPageTest(unittest.TestCase):
         image = Image.new("L", (300 * k, 200 * k), 255)
         ImageDraw.Draw(image).rectangle([(240 - 50) * k + 2, (300 - 220) * k + 2, (300 - 50) * k - 2, (300 - 200) * k - 2], fill=0)
         text = [TextLine("שורה ראשונה של טקסט רגיל בעמוד", 545, 800), TextLine("שורה שנייה של טקסט רגיל בעמוד", 545, 780)]
-        return make_pdf([PdfPage(lines=[word] + text, rasters=[(50, 100, 300, 200, image)], rotate=rotate)])
+        return make_pdf([PdfPage(lines=[word] + text, rasters=[(50, 100, 300, 200, image)], **{"turn" if turned else "rotate": rotate})])
 
     def test_layer_text_masks_its_image_on_a_rotated_page(self) -> None:
         for rotate in (0, 90, 180, 270):
-            with self.subTest(rotate=rotate):
-                doc = heocr.extract(self.page(rotate), tesseract=FAKE_TESSERACT)
-                self.assertEqual(doc.pages[0].page_class, "T6")
-                # The mask covers the word's ink: nothing is left to OCR, and nothing is read twice.
-                self.assertEqual([u.reason for u in doc.unread], ["image_region_text_in_layer"])
-                self.assertEqual([b for b in doc.blocks if "from_image_region" in b.flags], [])
-                self.assertIn("מכרזים", doc.text)
+            for turned in (False, True):
+                with self.subTest(rotate=rotate, turned=turned):
+                    doc = heocr.extract(self.page(rotate, turned), tesseract=FAKE_TESSERACT)
+                    self._masked(doc)
+
+    def _masked(self, doc) -> None:
+        self.assertEqual(doc.pages[0].page_class, "T6")
+        # The mask covers the word's ink: nothing is left to OCR, and nothing is read twice.
+        self.assertEqual([u.reason for u in doc.unread], ["image_region_text_in_layer"])
+        self.assertEqual([b for b in doc.blocks if "from_image_region" in b.flags], [])
+        self.assertIn("מכרזים", doc.text)
 
     def test_a_rotated_text_layer_page_reports_the_frame_of_its_boxes(self) -> None:
         doc = heocr.extract(self.page(90), ocr=False)
@@ -120,6 +124,37 @@ class RotatedPageTest(unittest.TestCase):
         for block in doc.blocks:
             self.assertLessEqual(block.bbox[2], page.width)
             self.assertLessEqual(block.bbox[3], page.height)
+
+
+class DisplayedFrameTest(unittest.TestCase):
+    """A rotated page whose text is upright on screen (its content turned in user space) is read as
+    displayed: the same text, tables and boxes as the same page unrotated."""
+
+    def test_an_upright_page_reads_the_same_at_every_rotation(self) -> None:
+        plain = read(page())
+        for turn in (90, 180, 270):
+            with self.subTest(turn=turn):
+                turned = read(page(turn=turn))
+                self.assertEqual(shape(turned), shape(plain))
+                self.assertEqual(turned.unread, [])
+                self.assertEqual((turned.pages[0].width, turned.pages[0].height), (595.0, 842.0))
+                self.assertNotIn("text_sideways_on_screen", turned.pages[0].flags)
+                self.assertIn("page_rotated", turned.pages[0].flags)
+
+    def test_a_page_sideways_on_screen_is_still_read_and_flagged(self) -> None:
+        plain = read(page())
+        sideways = read(page(rotate=90))  # upright in user space, sideways on screen
+        self.assertEqual(shape(sideways), shape(plain))
+        self.assertIn("text_sideways_on_screen", sideways.pages[0].flags)
+
+    def test_a_mixed_page_reads_its_majority_and_counts_the_rest(self) -> None:
+        extra = [(ch, 60 + 7 * n, 300) for n, ch in enumerate("שוליים")]  # drawn outside the turn: sideways on screen
+        doc = read(PdfPage(lines=lines_block(BODY * 3, top=760), turn=90, glyphs=extra))
+        self.assertNotIn("text_sideways_on_screen", doc.pages[0].flags)
+        for line in BODY:
+            self.assertIn(line, doc.text)
+        (entry,) = [u for u in doc.unread if u.reason == "rotated_text_not_read"]
+        self.assertIn(f"{len(extra)} characters", entry.detail)
 
 
 if __name__ == "__main__":

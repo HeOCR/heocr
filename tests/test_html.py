@@ -189,7 +189,7 @@ class HiddenTest(unittest.TestCase):
 
 class ScriptRenderedTest(unittest.TestCase):
     def test_a_page_filled_in_by_script_is_unread_not_empty(self) -> None:
-        doc = heocr.extract(H.govil_skeleton())
+        doc = heocr.extract(H.script_filled_skeleton())
         self.assertEqual(heocr.validate(doc.to_dict()), [])
         self.assertEqual([u.reason for u in doc.unread], ["html_rendered_by_script"])
         self.assertIn("3 script elements", doc.unread[0].detail)
