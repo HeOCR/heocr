@@ -18,7 +18,7 @@ BLOCK_KINDS = ("text", "heading", "list_item", "table", "figure")
 # "navigation": site menus, breadcrumbs and "skip to content" links (D4f); kept, out of the body flow.
 # "notes": a slide's speaker notes (D4e).
 ROLES = ("body", "header", "footer", "footnote", "endnote", "comment", "textbox", "navigation", "notes")
-SOURCES = ("text_layer", "office_xml", "converted_docx", "html", "ocr", "none")
+SOURCES = ("text_layer", "office_xml", "converted_docx", "converted_xlsx", "converted_pptx", "html", "ocr", "none")
 PAGE_CLASSES = ("T1", "T2", "T3", "T4", "T5", "T6", "empty")
 DIRECTIONS = ("rtl", "ltr")
 UNREAD_SCOPES = ("document", "page", "block")

@@ -19,18 +19,29 @@ import heocr
 from heocr import convert
 from tests.synth.cfb import make_cfb
 from tests.synth.docx import Docx, para
+from tests.synth.pptx import Deck, Slide, shape
+from tests.synth.pptx import para as slide_para
+from tests.synth.xlsx import Sheet, Workbook, c, row
 
 FAKE = [sys.executable, str(Path(__file__).parent / "synth" / "fake_soffice.py")]
 DOC = make_cfb(["WordDocument", "1Table"])
 RTF = b"{\\rtf1\\ansi {\\rtlch \\u1513?\\u1500?\\u1493?\\u1501?}}"
 
 
-def odt() -> bytes:
+def odf(kind: str = "text") -> bytes:
     out = io.BytesIO()
     with zipfile.ZipFile(out, "w") as z:
-        z.writestr("mimetype", "application/vnd.oasis.opendocument.text", compress_type=zipfile.ZIP_STORED)
+        z.writestr("mimetype", f"application/vnd.oasis.opendocument.{kind}", compress_type=zipfile.ZIP_STORED)
         z.writestr("content.xml", "<office:document-content/>")
     return out.getvalue()
+
+
+def odt() -> bytes:
+    return odf("text")
+
+
+XLS = make_cfb(["Workbook"])
+PPT = make_cfb(["PowerPoint Document"])
 
 
 class ConverterTest(unittest.TestCase):
@@ -41,7 +52,13 @@ class ConverterTest(unittest.TestCase):
         self.docx = Path(self.tmp.name) / "converted.docx"
         self.docx.write_bytes(Docx(body=[para("שלום עולם"), para("סעיף שני")], footnotes={1: "הערה"}).build())
         self.log = Path(self.tmp.name) / "calls.jsonl"
-        patcher = mock.patch.dict(os.environ, {"FAKE_SOFFICE_DOCX": str(self.docx), "FAKE_SOFFICE_LOG": str(self.log)})
+        self.xlsx = Path(self.tmp.name) / "converted.xlsx"
+        self.xlsx.write_bytes(Workbook(sheets=[Sheet("גיליון", rows=[row(1, [c("A1", inline="שם"), c("B1", inline="סכום")]), row(2, [c("A2", inline="עט"), c("B2", 5)])])]).build())
+        self.pptx = Path(self.tmp.name) / "converted.pptx"
+        self.pptx.write_bytes(Deck(slides=[Slide([shape([slide_para("שקף ראשון")], (50, 50, 300, 40))], notes=[slide_para("הערה")])]).build())
+        patcher = mock.patch.dict(os.environ, {
+            "FAKE_SOFFICE_DOCX": str(self.docx), "FAKE_SOFFICE_XLSX": str(self.xlsx), "FAKE_SOFFICE_PPTX": str(self.pptx), "FAKE_SOFFICE_LOG": str(self.log),
+        })
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -61,6 +78,30 @@ class ConverterTest(unittest.TestCase):
                 self.assertEqual(doc.options["convert"], {"engine": "libreoffice", "to": "docx"})
                 self.assertEqual(doc.unread, [])
                 self.assertEqual(heocr.validate(doc.to_dict()), [])
+
+    def test_spreadsheets_and_presentations_are_converted_and_read(self) -> None:
+        for name, body, target in (("ods", odf("spreadsheet"), "xlsx"), ("xls", XLS, "xlsx"), ("odp", odf("presentation"), "pptx"), ("ppt", PPT, "pptx")):
+            with self.subTest(name):
+                doc = heocr.extract(body, soffice=FAKE)
+                self.assertEqual(doc.format, name)
+                self.assertEqual({b.source for b in doc.blocks}, {f"converted_{target}"})
+                self.assertEqual(doc.options["convert"], {"engine": "libreoffice", "to": target})
+                self.assertIn("converted_by_libreoffice", doc.flags)
+                self.assertEqual(doc.unread, [])
+                self.assertEqual(heocr.validate(doc.to_dict()), [])
+                if target == "xlsx":
+                    (table,) = [b for b in doc.blocks if b.kind == "table"]
+                    self.assertEqual([[x.text for x in r] for r in table.cells], [["שם", "סכום"], ["עט", "5"]])
+                else:
+                    self.assertEqual([(b.text, b.role, b.slide) for b in doc.blocks], [("שקף ראשון", "body", 1), ("הערה", "notes", 1)])
+        conversions = [call[call.index("--convert-to") + 1] for call in self.calls() if "--convert-to" in call]
+        self.assertEqual(conversions, ["xlsx:Calc MS Excel 2007 XML"] * 2 + ["pptx:Impress MS PowerPoint 2007 XML"] * 2)
+
+    def test_a_converter_output_of_the_wrong_kind_is_unread(self) -> None:
+        with mock.patch.dict(os.environ, {"FAKE_SOFFICE_XLSX": str(self.docx)}):  # LibreOffice "wrote" a DOCX
+            doc = heocr.extract(XLS, soffice=FAKE)
+        self.assertEqual([u.reason for u in doc.unread], ["conversion_failed"])
+        self.assertIn("not the expected XLSX file", doc.unread[0].detail)
 
     def test_every_call_has_its_own_profile_and_never_exports_text(self) -> None:
         heocr.extract(DOC, soffice=FAKE)
