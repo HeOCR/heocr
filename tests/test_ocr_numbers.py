@@ -102,14 +102,55 @@ class NumberWordsTest(unittest.TestCase):
         [logged] = doc.blocks[0].checks["number_readings"]
         self.assertEqual((logged["first"], logged["second"], logged["wider"]), ("1.", "3.2.1.", True))
 
+    def read_lines(self, lines: list[list[str]], answers: list[str], confidence: str = "8.0") -> heocr.Document:
+        """A page of several lines, right to left, 100 px apart; one-word calls answer ``answers`` in turn."""
+        rows = [HEADER]
+        for ln, words in enumerate(lines, 1):
+            right = 2250
+            for n, w in enumerate(words, 1):
+                rows.append(f"5\t1\t1\t1\t{ln}\t{n}\t{right - 250}\t{100 * ln}\t250\t60\t90.0\t{w}")
+                right -= 300
+        path = Path(self.tmp.name) / "lines.tsv"
+        path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+        state = str(Path(self.tmp.name) / "seq-lines")
+        Path(state).unlink(missing_ok=True)
+        env = {"FAKE_TSV": str(path), "FAKE_WORD_SEQ": "|".join(answers), "FAKE_WORD_STATE": state, "FAKE_CONF": confidence}
+        with mock.patch.dict(os.environ, env):
+            return heocr.extract(make_pdf([PdfPage(images=[(0, 0, 595, 842)])]), tesseract=FAKE)
+
     def test_a_cut_label_read_whole_with_low_confidence_is_used(self) -> None:
         # set C pdf_t3_pua_font: heb reads "2.2.4." at a line's start as "4."; eng reads the same crop
-        # "2.2.4" but with confidence 8. A deeper label that ends with heb's level is used anyway.
-        doc = self.read(["4.", "דיווח", "עיתי"], "2.2.4", "8.0")
-        self.assertEqual(doc.blocks[0].text, "2.2.4. דיווח עיתי")
-        [logged] = doc.blocks[0].checks["number_readings"]
+        # "2.2.4" but with confidence 8. A deeper label that ends with heb's level and follows the
+        # label before it ("2.2.") is used anyway.
+        doc = self.read_lines([["2.2.", "הגדרות"], ["4.", "דיווח", "עיתי"]], ["2.2", "2.2.4"])
+        self.assertEqual(doc.text.splitlines(), ["2.2. הגדרות", "2.2.4. דיווח עיתי"])
+        [logged] = [r for b in doc.blocks for r in (b.checks or {}).get("number_readings", [])]
         self.assertEqual((logged["first"], logged["second"], logged["label_levels"]), ("4.", "2.2.4.", True))
+        self.assertNotIn("used", logged)
         self.assertEqual(heocr.validate(doc.to_dict()), [])
+
+    def test_a_cut_label_out_of_sequence_is_not_used_and_is_logged(self) -> None:
+        # "23.2" between "3.1." and "3.3." follows neither: heb's "2." stays.
+        doc = self.read_lines([["3.1.", "אחת"], ["2.", "שתיים"], ["3.3.", "שלוש"]], ["3.1", "23.2", "3.3"])
+        self.assertEqual(doc.text.splitlines(), ["3.1. אחת", "2. שתיים", "3.3. שלוש"])
+        [logged] = [r for b in doc.blocks for r in (b.checks or {}).get("number_readings", [])]
+        self.assertEqual((logged["first"], logged["second"], logged["used"]), ("2.", "23.2.", False))
+        self.assertNotIn("numbers_from_second_reading", [f for b in doc.blocks for f in b.flags])
+        self.assertEqual(heocr.validate(doc.to_dict()), [])
+
+    def test_a_cut_label_with_no_known_neighbour_is_not_used(self) -> None:
+        doc = self.read(["4.", "דיווח", "עיתי"], "2.2.4", "8.0")
+        self.assertEqual(doc.blocks[0].text, "4. דיווח עיתי")
+
+    def test_label_follows(self) -> None:
+        from heocr.pdf.reader import _label_follows as follows
+        self.assertTrue(follows((2, 2), (2, 2, 4)))
+        self.assertTrue(follows((2, 1, 3), (2, 2)))
+        self.assertTrue(follows((2, 3, 5), (3, 1)))
+        self.assertTrue(follows((3, 1), (3, 2, 6)))
+        self.assertFalse(follows((3, 1), (23, 2)))
+        self.assertFalse(follows((2, 2), (2, 2)))
+        self.assertFalse(follows((2, 2), (2, 4)))
 
     def test_a_low_confidence_reading_is_used_only_as_the_same_label_deeper(self) -> None:
         for words, second in ((["4.", "דיווח"], "2.2.5"), (["4.", "דיווח"], "12,000"), (["4.", "דיווח"], "4"),
