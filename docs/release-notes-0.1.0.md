@@ -73,7 +73,7 @@ The registered run uses a fresh synthetic set, drawn after the candidate was fix
 
 _Test-split veto: TBD (eval)._
 
-The gate's registration, its amendments and the full per-baseline results are published by HeOCR's evaluation track. _Link: TBD._
+The gate's method and its verdicts are summarised publicly on [heocr.github.io/benchmarks.html](https://heocr.github.io/benchmarks.html), in its "release gate" section. The registration itself is kept with HeOCR's evaluation records.
 
 ## Known limitations
 
