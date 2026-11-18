@@ -262,6 +262,23 @@ class NumberWordsTest(unittest.TestCase):
         self.assertFalse(starts((2, 2), (2, 2, 4)))
         self.assertFalse(starts((11, 1), (12, 2)))
 
+    def test_a_cut_label_read_as_noise_is_read_again_on_more_crops(self) -> None:
+        # set C pdf_t5_office: heb read ".1.1.1" as "1.", and the number model read heb's box as noise
+        # ("iWeeg"). Crops reaching left, and stretched, read the label among noise ("Yo.1.1.1"); the
+        # deeper label they read, ending with heb's level, goes to the guard and follows "1.1.".
+        with mock.patch.dict(os.environ, {"FAKE_LINE": "Yo.1.1.1"}):
+            doc = self.read_lines([["1.1.", "הגדרות"], ["1.", "תחולה"]], ["1.1", NOTHING])
+        self.assertEqual(doc.blocks[0].text.splitlines()[1].split()[0], "1.1.1.")
+        (logged,) = [r for r in doc.blocks[0].checks["number_readings"] if r["first"] == "1."]
+        self.assertEqual((logged["second"], logged["label_levels"]), ("1.1.1.", True))
+        # A label that does not end with heb's level is no candidate; nothing is used with the switch off.
+        with mock.patch.dict(os.environ, {"FAKE_LINE": "Yo.1.1.2"}):
+            doc = self.read_lines([["1.1.", "הגדרות"], ["1.", "תחולה"]], ["1.1", NOTHING])
+        self.assertEqual(doc.blocks[0].text.splitlines()[1].split()[0], "1.")
+        with mock.patch.dict(os.environ, {"FAKE_LINE": "Yo.1.1.1"}), mock.patch("heocr.pdf.reader.LABEL_CROPS", False):
+            doc = self.read_lines([["1.1.", "הגדרות"], ["1.", "תחולה"]], ["1.1", NOTHING])
+        self.assertEqual(doc.blocks[0].text.splitlines()[1].split()[0], "1.")
+
     def test_label_follows(self) -> None:
         from heocr.pdf.reader import _label_follows as follows
         self.assertTrue(follows((2, 2), (2, 2, 4)))
