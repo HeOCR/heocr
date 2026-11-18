@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import os
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
+from heocr import contract
 from heocr.contract import MAX_PAGES, Document, Unread
 from heocr.convert import CONVERSIONS, CONVERT_TIMEOUT
 from heocr.identify import identify
@@ -46,6 +48,7 @@ def extract(
     soffice: str | Sequence[str] | None = None,
     convert_timeout: float | None = None,
     max_pages: int = MAX_PAGES,
+    time_limit: float | None = None,
 ) -> Document:
     """Read a document and return its ``heocr_document.v1`` record.
 
@@ -78,9 +81,21 @@ def extract(
     ``max_pages`` bounds the pages (PDF pages, image frames) read from one document: 2,000 by
     default, since every page may cost an OCR run. The rest are recorded as one unread entry
     (``page_limit``) and the document is flagged ``page_limit_reached``.
+
+    ``time_limit`` is a safety net, in seconds, for the whole document (conversion and OCR
+    included); there is none by default, so a record does not depend on the machine's speed.
+    It is checked before each page, image frame, embedded image and page of number checks: a
+    step under way finishes (each Tesseract and LibreOffice call has its own timeout), and what
+    is left is recorded as unread (``time_limit``), never dropped, with the document flagged
+    ``time_limit_reached``. Numbers left unchecked flag ``numbers_not_checked``.
     """
+    started = contract._now()
     if isinstance(max_pages, bool) or not isinstance(max_pages, int) or max_pages < 1:
         raise ValueError("max_pages must be a positive integer")
+    if time_limit is not None and (
+        isinstance(time_limit, bool) or not isinstance(time_limit, (int, float)) or not math.isfinite(time_limit) or time_limit <= 0
+    ):
+        raise ValueError("time_limit must be a positive number of seconds, or None")
     if check_numbers not in (False, "suspect", "tables", "all"):
         raise ValueError("check_numbers must be 'suspect', 'tables', 'all' or False")
     if ocr:
@@ -112,6 +127,9 @@ def extract(
     )
     doc._max_pages = max_pages
     doc.options["max_pages"] = max_pages
+    if time_limit is not None:
+        doc.options["time_limit"] = time_limit
+        doc._time_limit, doc._deadline = float(time_limit), started + time_limit
     doc._ocr_settings = {"cmd": tesseract, "lang": ocr_lang, "psm": ocr_psm, "model": ocr_model} if ocr else None
     if kind.format in CONVERSIONS:
         doc.options["convert"] = {"engine": "libreoffice", "to": CONVERSIONS[kind.format][1]} if convert else False

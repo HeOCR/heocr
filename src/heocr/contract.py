@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -183,6 +184,27 @@ def page_limit(doc: "Document", total: int) -> int:
     return limit
 
 
+_now = time.monotonic  # the clock of the per-document time limit (tests replace it)
+
+
+def time_up(doc: "Document") -> bool:
+    """Whether the document's time limit (``extract(time_limit=...)``) has passed; never without one."""
+    return doc._deadline is not None and _now() >= doc._deadline
+
+
+def time_limit_reached(doc: "Document", detail: str, *, scope: str = "document", page: int | None = None) -> None:
+    """Record what the time limit left unread, and flag the document once."""
+    doc.unread.append(Unread(scope=scope, reason="time_limit", page=page, detail=f"{detail}: the time limit of {doc._time_limit:g} s was reached"))
+    if "time_limit_reached" not in doc.flags:
+        doc.flags.append("time_limit_reached")
+
+
+def pages_left_unread(doc: "Document", index: int, total: int) -> None:
+    """Pages ``index``..``total - 1`` not read: the time limit was reached before page ``index``."""
+    span = f"page {total}" if index == total - 1 else f"pages {index + 1}-{total}"
+    time_limit_reached(doc, f"{span} of {total} not read")
+
+
 @dataclass
 class Unread:
     """Something the pipeline saw but did not read, and why. Never dropped silently."""
@@ -223,6 +245,8 @@ class Document:
     _ocr_error: str | None = field(default=None, repr=False, compare=False)
     _convert_settings: dict[str, Any] | None = field(default=None, repr=False, compare=False)  # LibreOffice: cmd, timeout
     _max_pages: int = field(default=MAX_PAGES, repr=False, compare=False)  # pages read at most
+    _time_limit: float | None = field(default=None, repr=False, compare=False)  # seconds for the whole document
+    _deadline: float | None = field(default=None, repr=False, compare=False)  # _now() value when it runs out
     _number_engine: Any = field(default=None, repr=False, compare=False)  # the second reading of numbers (eng)
     _number_error: str | None = field(default=None, repr=False, compare=False)
     _font_codes: dict = field(default_factory=dict, repr=False, compare=False)  # (font, letter) -> code
@@ -350,6 +374,10 @@ def validate(payload: Any) -> list[str]:
         errors.append("options.ocr must be false or an object")
     elif "max_pages" in options and not (isinstance(options["max_pages"], int) and not isinstance(options["max_pages"], bool) and options["max_pages"] > 0):
         errors.append("options.max_pages must be a positive integer")
+    elif "time_limit" in options and not (
+        isinstance(options["time_limit"], (int, float)) and not isinstance(options["time_limit"], bool) and math.isfinite(options["time_limit"]) and options["time_limit"] > 0
+    ):
+        errors.append("options.time_limit must be a positive number of seconds")
     elif "convert" in options and not (options["convert"] is False or isinstance(options["convert"], dict)):
         errors.append("options.convert must be false or an object")
     elif options.get("check_numbers", False) not in (False, "suspect", "tables", "all"):

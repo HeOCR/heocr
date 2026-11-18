@@ -20,7 +20,7 @@ import defusedxml
 from defusedxml import ElementTree
 
 from heocr import repairs
-from heocr.contract import Block, Cell, Document, Unread, cap_span
+from heocr.contract import Block, Cell, Document, Unread, cap_span, time_limit_reached, time_up
 from heocr.docx.numbering import W, Numbering
 from heocr.ocr import OcrUnavailable, block_ocr, engine_for, unavailable_reason
 from heocr.ocr.regions import MAX_RENDER_PIXELS, MIN_REGION_PX, REGION_MIN_CONFIDENCE, RENDER_DPI, has_ink, short_for_ink
@@ -83,6 +83,9 @@ def image_blocks(doc: Document, data: bytes, role: str, note_id: str | None, *, 
     engine = engine_for(doc)
     if engine is None:
         return unread("image_not_read", unavailable_reason(doc))
+    if time_up(doc):
+        time_limit_reached(doc, "an embedded image not read", scope="block")
+        return [Block(kind="figure", role=role, source=source, tool=tool, note_id=note_id, flags=["time_limit"])]
     image, dpi, problem = _open_image(data)
     if image is None:
         return unread("image_format_not_supported", problem)

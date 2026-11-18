@@ -43,6 +43,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--soffice", help="the LibreOffice program (soffice), when it is not on the PATH")
     parser.add_argument("--convert-timeout", type=float, metavar="SECONDS", help="time limit for one LibreOffice conversion (default: 180)")
     parser.add_argument("--max-pages", type=int, default=MAX_PAGES, metavar="N", help=f"read at most N pages or image frames (default: {MAX_PAGES}); the rest are reported unread")
+    parser.add_argument("--time-limit", type=float, metavar="SECONDS", help="stop reading a document after SECONDS (none by default); what is left is reported unread")
     parser.add_argument("--ocr-lang", default="heb", help="Tesseract language list (default: heb; e.g. heb+eng)")
     parser.add_argument("--psm", type=int, default=3, help="Tesseract page segmentation mode (default: 3)")
     parser.add_argument("--tesseract", help="the tesseract program, when it is not on the PATH")
@@ -90,6 +91,7 @@ def main(argv: list[str] | None = None) -> int:
             soffice=args.soffice,
             convert_timeout=args.convert_timeout,
             max_pages=args.max_pages,
+            time_limit=args.time_limit,
         )
     except (OSError, ValueError) as exc:
         print(f"heocr: {exc}", file=sys.stderr)

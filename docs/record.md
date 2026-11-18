@@ -12,7 +12,7 @@ and how v1 may change is in [contract-v1.md](contract-v1.md).
 | `schema` | `"heocr_document.v1"` |
 | `producer` | `name` (`heocr`), `version`, and `components`: every external tool and model used, with its version or hash |
 | `document` | `sha256`, `bytes`, `format` (decided from the content), `format_evidence`, and `page_count` when known. **Never a file name or path.** |
-| `options` | The options the record was made with: `repairs`, `ocr`, `convert`, `max_pages`, `check_numbers` |
+| `options` | The options the record was made with: `repairs`, `ocr`, `convert`, `max_pages`, `check_numbers`, and `time_limit` when one is set |
 | `pages` | One entry per page, slide or image frame, in order (below) |
 | `blocks` | The text, in reading order (below) |
 | `unread` | What was not read, and why (below) |
@@ -89,6 +89,7 @@ Flags are open lists of strings: a later v1 may add more. The main ones, by what
 - **Repairs:**
   - `brackets_mirrored`, `brackets_kept_valid_as_read`, `rtl_brackets_unverified`;
   - `bullet_symbol_mapped`, `font_cp1255_shifted`, `unmapped_characters`.
+- **Limits:** `page_limit_reached`, `time_limit_reached` (the rest is in `unread`).
 - **Office and web:**
   - `hidden_text_dropped`, `white_text_dropped`, `hidden_rows_read`, `hidden_columns_read`, `hidden_sheets_read`, `hidden_slides_read`;
   - `converted_by_libreoffice`;
@@ -122,6 +123,7 @@ Reasons are an open list. Those in use:
 | `text_outside_page` | Characters drawn outside the page's visible box |
 | `html_rendered_by_script`, `html_too_large`, `html_truncated` | A web page filled in by JavaScript, or over a limit |
 | `page_limit`, `sheet_truncated`, `merges_not_applied`, `sheet_missing`, `sheet_not_read`, `slide_missing` | A limit reached, or a part missing |
+| `time_limit` | The document's time limit (`time_limit`) was reached: the pages, frames or embedded images not yet read |
 | `chart_not_read`, `smartart_not_read`, `xlsx_drawing_not_read`, `embedded_content_not_read`, `docx_altchunk_not_read` | Charts, drawings and embedded objects |
 
 What is **no loss** is counted in `coverage`, not listed here: an image region whose text is already in the layer (`image_regions_text_in_layer`), a blank one (`image_regions_blank`), the scan under a kept OCR layer (`image_regions_layer_scan`), and a repeated image (`image_regions_repeated`).

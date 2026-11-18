@@ -39,6 +39,7 @@
         "ocr": {"oneOf": [{"const": false}, {"type": "object"}]},
         "convert": {"oneOf": [{"const": false}, {"type": "object"}]},
         "max_pages": {"type": "integer", "minimum": 1},
+        "time_limit": {"type": "number", "exclusiveMinimum": 0},
         "check_numbers": {"enum": [false, "suspect", "tables", "all"]}
       }
     },

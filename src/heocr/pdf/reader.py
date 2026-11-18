@@ -16,7 +16,7 @@ import unicodedata
 from dataclasses import dataclass, field
 
 from heocr import repairs
-from heocr.contract import Block, Cell, Document, Line, Page, Unread, page_limit
+from heocr.contract import Block, Cell, Document, Line, Page, Unread, page_limit, pages_left_unread, time_up
 from heocr.ocr import OcrUnavailable, block_ocr, engine_for, number_engine_for, unavailable_reason
 from heocr.ocr.regions import (  # noqa: F401  (re-exported for callers of the PDF route)
     INK_LEVEL,
@@ -574,6 +574,9 @@ def read_pdf(body: bytes, doc: Document) -> None:
             doc.flags.append("font_cp1255_shifted")
         font_maps = _learn_font_maps(doc, pdf) if doc.options.get("repairs", True) else {}
         for index in range(pages):
+            if time_up(doc):
+                pages_left_unread(doc, index, pages)
+                break
             page = pdf[index]
             try:
                 _read_page(doc, index, page, eth_fonts, font_maps, doc._shifted_fonts)
@@ -687,6 +690,10 @@ def _check_numbers(doc: Document, pdf, scope: str = "suspect") -> None:
     totals: dict[int, list[int]] = {}
     touched: dict[int, Block] = {}
     for index, items in sorted(candidates.items()):
+        if time_up(doc):
+            # The text is read, so nothing is unread: its numbers on this page and after are not checked.
+            doc.flags += [f for f in ("numbers_not_checked", "time_limit_reached") if f not in doc.flags]
+            break
         page = pdf[index]
         try:
             image, scale = _render(page, frame_of(page))

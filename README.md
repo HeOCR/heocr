@@ -91,7 +91,7 @@ Every entry has a scope (`document`, `page` or `block`), a reason, and where pos
 | `rotated_text_not_read` | Characters drawn at an angle other than vertical. Vertical text (90 or 270 degrees: a margin note, a stamp's caption) is read as its own lines after the page's body, flagged `rotated_text` |
 | `text_outside_page` | Characters drawn outside the page's visible box |
 | `html_rendered_by_script` | A web page whose content is filled in by JavaScript; print it to PDF from a browser |
-| `page_limit`, `sheet_truncated`, `html_truncated`, `merges_not_applied`, `image_too_large` | A limit was reached (below) |
+| `page_limit`, `time_limit`, `sheet_truncated`, `html_truncated`, `merges_not_applied`, `image_too_large` | A limit was reached (below) |
 | `docx_unreadable`, `xlsx_unreadable`, `pptx_unreadable`, `html_unreadable`, `image_unreadable` | A file that does not parse |
 | `chart_not_read`, `smartart_not_read`, `xlsx_drawing_not_read`, `embedded_content_not_read` | Charts, drawings, frames and embedded objects |
 
@@ -100,6 +100,7 @@ Every entry has a scope (`document`, `page` or `block`), a reason, and where pos
 Each limit, when reached, gives an `unread` entry or a flag:
 
 - **pages or image frames:** 2,000 (`max_pages`);
+- **time per document:** none by default; `time_limit` (seconds, `--time-limit`) is a safety net, checked before each page, frame and embedded image, and the step under way finishes;
 - **input size:** 512 MB;
 - **LibreOffice:** 180 s per conversion (`convert_timeout`); the conversion's processes are stopped;
 - **HTML:** 64M characters, 2M elements, nesting depth 100 (flattened, with no text lost);
