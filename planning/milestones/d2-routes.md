@@ -26,8 +26,10 @@
   - No route needs a copyleft library.
 - **Models (decision 0014):**
   - Only weights with open terms, with no NC, ND or field-of-use clauses.
-  - Nothing is bundled.
-  - A download is explicit and pinned by sha256.
+  - ~~Nothing is bundled.~~ **Reversed by the lead on 2026-11-18** ([D6](../proposals/d6-model-routing.md), "Lead's decisions", item 1):
+    the default OCR models (with their Apache-2.0 notices) and their CC0 word list are bundled in the wheel, pinned by sha256.
+    Every other model, and every VLM model, is still not bundled.
+  - A download is explicit and pinned by sha256. Nothing is ever downloaded implicitly.
 - **Repairs are not normalization** (heocr-engine decision 0002):
   - A repair restores a character the source meant, by a listed rule, logged per block.
   - With repairs off, the output is the extracted text, byte for byte.
