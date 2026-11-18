@@ -298,6 +298,47 @@ class NumberWordsTest(unittest.TestCase):
                 self.assertEqual([l.words[0].text for l in ls], ["1.1.1.", "1.1.2."] if used else ["1.", "2."])
                 self.assertTrue(all(r.get("crops") for l in ls for r in l.number_readings))
 
+    def test_crop_candidates_vouch_for_each_other_through_the_cut_labels_between(self) -> None:
+        # set C pdf_t5_office: on a page whose labels heb all cut, two crop candidates few crops agree on
+        # ("1.4." and "1.4.2.") stand two lines apart, with a cut label between that heb read as "1.".
+        # Stepping strictly through it (1.4, then 1.4.1, then 1.4.2) one reaches the other: both are used.
+        from heocr.ocr.tesseract import OcrLine, OcrWord
+        from heocr.pdf.reader import _label_sequence
+
+        def lines(labels):
+            out = []
+            for n, label in enumerate(labels):
+                words = [OcrWord(label, [2000, 100 * n, 2050, 100 * n + 40], 90.0), OcrWord("סעיף", [1800, 100 * n, 1990, 100 * n + 40], 90.0)]
+                out.append(OcrLine(" ".join(w.text for w in words), [1800, 100 * n, 2050, 100 * n + 40], words=words))
+            return out
+
+        for cut, used in (("1.", True), ("3.", False)):
+            with self.subTest(cut=cut):
+                ls = lines(["4.", cut, "2."])
+                pending = {id(ls[0].words[0]): ("1.4.", 40.0, False, True), id(ls[2].words[0]): ("1.4.2.", 20.0, False, True)}
+                _label_sequence(ls, pending, "eng")
+                self.assertEqual([l.words[0].text for l in ls], ["1.4.", cut, "1.4.2."] if used else ["4.", cut, "2."])
+                if used:  # the first is vouched for through the cut label; the second then follows it
+                    self.assertEqual([r.get("through_cut_labels", False) for l in ls for r in l.number_readings], [True, False])
+        with mock.patch("heocr.pdf.reader.LABEL_CARRY", False):
+            ls = lines(["4.", "1.", "2."])
+            _label_sequence(ls, {id(ls[0].words[0]): ("1.4.", 40.0, False, True), id(ls[2].words[0]): ("1.4.2.", 20.0, False, True)}, "eng")
+        self.assertEqual([l.words[0].text for l in ls], ["4.", "1.", "2."])
+
+    def test_label_steps_and_reaches(self) -> None:
+        from heocr.pdf.reader import _label_reaches as reaches
+        from heocr.pdf.reader import _label_steps as steps
+
+        self.assertEqual(steps((1, 4), 1), {(1, 4, 1), (2, 1)})
+        self.assertEqual(steps((1, 3, 2), 4), {(1, 4)})
+        self.assertEqual(steps((1, 1, 1), 2), {(2,), (1, 2), (1, 1, 2)})
+        self.assertEqual(steps((2, 1, 3), 1), {(2, 1, 3, 1), (2, 2, 1), (3, 1), (3, 1, 1)})
+        self.assertTrue(reaches((1, 4), (1, 4, 2), [1]))
+        self.assertTrue(reaches((1, 4), (1, 5), [1, None, 2]))  # a line without a label is passed over
+        self.assertFalse(reaches((1, 4), (1, 4, 2), [3]))
+        self.assertFalse(reaches((1, 4), (1, 4, 2), []))  # with no cut label between, nothing new vouches
+        self.assertFalse(reaches((1, 4), (1, 4, 2), [None]))
+
     def test_label_follows(self) -> None:
         from heocr.pdf.reader import _label_follows as follows
         self.assertTrue(follows((2, 2), (2, 2, 4)))

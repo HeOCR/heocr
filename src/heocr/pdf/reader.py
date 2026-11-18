@@ -1540,6 +1540,46 @@ def _label_starts_numbering(prev: tuple[int, ...], nxt: tuple[int, ...]) -> bool
 
 
 LABEL_CHAIN = True  # two neighbouring candidates in strict sequence vouch for each other
+LABEL_CARRY = True  # ... also through the cut labels between them, by the last levels heb kept
+LABEL_CARRY_MAX = 16  # labels the numbering may allow at once on the way; more, and nothing is vouched for
+
+
+def _cut_label_level(text: str) -> int | None:
+    """The last level of a label at a line's start ("4." of a cut "2.2.4.", or of "2.2.4." itself), else None."""
+    if not text.endswith(".") or not (_LABEL_ONE_LEVEL.match(text) or _LABEL_DEEPER.match(text)):
+        return None
+    return _label_levels(text)[-1]
+
+
+def _label_steps(prev: tuple[int, ...], last: int) -> set[tuple[int, ...]]:
+    """The labels that can follow ``prev`` in strict sequence (``_label_starts_numbering``) and end with
+    level ``last``: one level deeper ("2.2" then "2.2.1"), or the next number at one of its levels
+    ("1.3.2" then "1.4", "2" or "1.3.3"), possibly opening deeper levels at 1 ("2.1.3" then "2.2.1")."""
+    out: set[tuple[int, ...]] = set()
+    if last == 1:
+        out.add(prev + (1,))
+    for k, value in enumerate(prev):
+        if value + 1 == last:
+            out.add(prev[:k] + (last,))
+        if last == 1:
+            out.update(prev[:k] + (value + 1,) + (1,) * m for m in range(1, len(prev) - k))
+    return out
+
+
+def _label_reaches(first: tuple[int, ...], second: tuple[int, ...], lasts: list[int | None]) -> bool:
+    """Whether label ``second`` follows ``first`` in strict sequence through the label lines between,
+    whose last levels are ``lasts`` (lines without a label, None, are passed over). There must be at
+    least one: with none, this is ``_label_starts_numbering`` between neighbours, and adds nothing."""
+    if all(last is None for last in lasts):
+        return False
+    possible = {first}
+    for last in lasts:
+        if last is None:
+            continue
+        possible = {nxt for prev in possible for nxt in _label_steps(prev, last)}
+        if not possible or len(possible) > LABEL_CARRY_MAX:
+            return False
+    return any(second in _label_steps(prev, second[-1]) for prev in possible)
 
 
 def _label_sequence(lines, pending: dict[int, tuple[str, float]], model: str) -> int:
@@ -1550,7 +1590,10 @@ def _label_sequence(lines, pending: dict[int, tuple[str, float]], model: str) ->
     On a page whose labels are all cut there is no known label: with ``LABEL_CHAIN``, a candidate is
     also used when the nearest label line before or after it is another candidate in strict sequence
     with it (``_label_starts_numbering``: "1.1.1" then "1.1.2", not "3.1.8" then "3.2.9"); such a use
-    is logged with ``chained: true``.
+    is logged with ``chained: true``. With ``LABEL_CARRY``, the two may also stand apart, with cut labels
+    between them: stepping strictly from one through the last levels heb kept on those lines must reach
+    the other ("1.4." then a cut "1." then "1.4.2."). That evidence is more than two neighbours', so it
+    holds for crop candidates few crops agree on too; such a use is logged ``through_cut_labels: true``.
     Otherwise heb's reading stays, and the rejected reading is logged with ``used: false``.
     Returns the number of words replaced."""
     starts = [(line, max(line.words, key=lambda w: w.bbox[2])) for line in lines if line.words]
@@ -1567,12 +1610,20 @@ def _label_sequence(lines, pending: dict[int, tuple[str, float]], model: str) ->
         levels = _label_levels(reading)
         following = next((k for k in known[i + 1 :] if k), None)
         used = (previous is not None and _label_follows(previous, levels)) or (following is not None and _label_follows(levels, following))
-        chained = False
-        if not used and LABEL_CHAIN and (not from_crops or confidence >= LABEL_CROPS_CHAIN_MIN_SHARE):
+        chained = carried = False
+        if not used and LABEL_CHAIN:
             at = labelled.index(i)
             before = candidate[labelled[at - 1]] if at > 0 else None
             after = candidate[labelled[at + 1]] if at + 1 < len(labelled) else None
-            chained = (before is not None and _label_starts_numbering(before, levels)) or (after is not None and _label_starts_numbering(levels, after))
+            if not from_crops or confidence >= LABEL_CROPS_CHAIN_MIN_SHARE:
+                chained = (before is not None and _label_starts_numbering(before, levels)) or (after is not None and _label_starts_numbering(levels, after))
+            if not chained and LABEL_CARRY:
+                # The cut labels between two candidates kept their last levels, which heb reads right:
+                # stepping through them, strictly, from one candidate must reach the other.
+                lasts = lambda a, b: [_cut_label_level(w.text) for _, w in starts[a + 1 : b]]
+                chained = (before is not None and _label_reaches(before, levels, lasts(labelled[at - 1], i))) or (
+                    after is not None and _label_reaches(levels, after, lasts(i, labelled[at + 1])))
+                carried = chained
             used = chained
         if word.text[-1] in ".:" and reading[-1].isdigit():
             reading += word.text[-1]
@@ -1581,7 +1632,7 @@ def _label_sequence(lines, pending: dict[int, tuple[str, float]], model: str) ->
         if not used:
             line.number_readings.append({**entry, "used": False})
             continue
-        line.number_readings.append({**entry, **({"chained": True} if chained else {})})
+        line.number_readings.append({**entry, **({"chained": True} if chained else {}), **({"through_cut_labels": True} if carried else {})})
         word.text = reading
         line.numbers_replaced += 1
         line.text = " ".join(w.text for w in line.words)
