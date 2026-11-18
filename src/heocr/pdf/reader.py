@@ -34,6 +34,7 @@ from heocr.ocr.regions import (  # noqa: F401  (re-exported for callers of the P
     paper_level,
     short_for_ink,
     skew_angle,
+    text_rows,
     unrotate_box,
 )
 from heocr.pdf.classify import FIGURE_IMAGE, PAGE_IMAGE, classify, object_stats, stream_signals, text_signals
@@ -1867,7 +1868,27 @@ def _ocr_regions(
     if not boxes:
         return counts
     digest_of = {id(b): d for b, d in zip(boxes, digests or [])}
-    large = [b for b in boxes if ocr_wanted and (b[2] - b[0]) * (b[3] - b[1]) >= REGION_MIN_PAGE_SHARE * width * height]
+    sized = [b for b in boxes if (b[2] - b[0]) * (b[3] - b[1]) >= REGION_MIN_PAGE_SHARE * width * height]
+    if ocr_wanted:
+        large = sized
+    else:
+        # Images under a T6 share of the page are mostly logos and icons, counted and not read. A
+        # region that holds lines of text is read all the same (set B pdf_t6_region: a table drawn as
+        # an image, 3-9% of the page, was skipped and lost with no flag): the layer's own characters
+        # are masked out first, and the rest must look like text rows (text_rows).
+        large = []
+        if sized:
+            image, scale = _render(page, frame_of(page))
+            for box in sized:
+                crop = [int(box[0] * scale), int(box[1] * scale), int(box[2] * scale + 0.999), int(box[3] * scale + 0.999)]
+                if crop[2] - crop[0] < MIN_REGION_PX or crop[3] - crop[1] < MIN_REGION_PX:
+                    continue
+                inside = [d for d in drawn_boxes if d[0] < box[2] and d[2] > box[0] and d[1] < box[3] and d[3] > box[1]]
+                region, _ = mask_layer_text(image.crop(crop), (crop[0] / scale, crop[1] / scale), scale, inside)
+                if text_rows(region):
+                    large.append(box)
+            if large:
+                counts["image_regions_text_below_figure_share"] = len(large)
     counts["image_regions_small"] = len(boxes) - len(large)
     if layer_is_ocr:
         scans = [b for b in large if (b[2] - b[0]) * (b[3] - b[1]) >= PAGE_IMAGE * width * height]
@@ -1966,7 +1987,8 @@ def _ocr_regions(
             # Logos and drawings yield stray marks at low confidence; they are reported, not emitted.
             unread("image_region_ocr_low_confidence", box, f"mean confidence {confidence}")
             return
-        # Region text follows the page's text-layer blocks; its place in the reading order is not resolved.
+        # Region text is placed among the page's text-layer blocks by its top edge (_place_region); where it
+        # cannot be, it follows them, flagged.
         flags = ("from_image_region", "reading_order_region_appended") + (("layer_text_masked",) if masked else ())
         short, share = short_for_ink(region, result)
         if short:
@@ -1998,7 +2020,32 @@ def _ocr_regions(
         record = doc._regions_read.get(digest_of.get(id(box), ""))
         if record is not None and record["box"] is box:
             record["blocks"] = [copy.deepcopy(b) for b in doc.blocks[mark:]]
+        if _place_region(doc, index, mark, box):
+            counts["image_regions_placed"] = counts.get("image_regions_placed", 0) + 1
     return counts
+
+
+def _place_region(doc: Document, index: int, mark: int, box) -> bool:
+    """Move a region's blocks (``doc.blocks[mark:]``) from the page's end to its place in the reading
+    order: before the first of the page's earlier blocks in its column (overlapping it across) whose
+    top is below the region's top, else after the last of them. Placed blocks are flagged
+    ``reading_order_region_placed`` instead of ``reading_order_region_appended``. A region beside no
+    block of the page (a figure in an empty column) stays appended. Returns whether it moved."""
+    new = doc.blocks[mark:]
+    if not new:
+        return False
+    column = [i for i in range(mark) if doc.blocks[i].page == index and doc.blocks[i].bbox is not None
+              and min(doc.blocks[i].bbox[2], box[2]) > max(doc.blocks[i].bbox[0], box[0])]
+    if not column:
+        return False
+    at = next((i for i in column if doc.blocks[i].bbox[1] > box[1]), column[-1] + 1)
+    if at >= mark:
+        return False
+    del doc.blocks[mark:]
+    doc.blocks[at:at] = new
+    for block in new:
+        block.flags = [("reading_order_region_placed" if f == "reading_order_region_appended" else f) for f in block.flags]
+    return True
 
 
 # A grid found in an image region is a table only when it holds records: charts, photos and

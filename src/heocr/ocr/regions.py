@@ -165,3 +165,34 @@ def unrotate_box(box, angle: float, center: tuple[float, float]) -> list[float]:
         dx, dy = x - cx, y - cy
         points.append((cx + dx * ca - dy * sa, cy + dx * sa + dy * ca))
     return [min(p[0] for p in points), min(p[1] for p in points), max(p[0] for p in points), max(p[1] for p in points)]
+
+
+TEXT_ROW_INK = 0.02  # a pixel row is inked when this share of it is dark
+TEXT_ROWS_MIN = 2  # bands of inked rows, separated by blank rows, that make a region look like text
+TEXT_ROW_MAX_SHARE = 0.6  # no band taller than this share of the region: one solid blob is a picture
+
+
+def text_rows(image) -> int:
+    """Bands of inked pixel rows, separated by blank rows, in a grey image, when it looks like lines
+    of text: at least ``TEXT_ROWS_MIN`` bands, none taller than ``TEXT_ROW_MAX_SHARE`` of the image.
+    0 when it does not (a logo, a photograph, a blob)."""
+    from PIL import Image
+
+    gray = image.convert("L")
+    w, h = gray.size
+    if w < 8 or h < 8:
+        return 0
+    ink = gray.point(lambda v: 255 if v < INK_LEVEL else 0)
+    rows = ink.resize((1, h), Image.BOX).tobytes()
+    bands, run = [], 0
+    for v in rows:
+        if v / 255 >= TEXT_ROW_INK:
+            run += 1
+        elif run:
+            bands.append(run)
+            run = 0
+    if run:
+        bands.append(run)
+    if len(bands) < TEXT_ROWS_MIN or max(bands) > TEXT_ROW_MAX_SHARE * h:
+        return 0
+    return len(bands)

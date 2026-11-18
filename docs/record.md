@@ -69,7 +69,7 @@ Flags are open lists of strings: a later v1 may add more. The main ones, by what
 
 - **Reading order:**
   - `reading_order_unresolved_columns`, `reading_order_row_major_unverified`, `reading_order_column_major_unverified`;
-  - `reading_order_region_appended`, `reading_order_rotated_appended`;
+  - `reading_order_region_appended`, `reading_order_region_placed` (an image region's text, placed among the layer's blocks by its top edge), `reading_order_rotated_appended`;
   - `bidi_ambiguous_ltr_run`.
 - **The page's text layer:**
   - `text_layer_is_ocr`, `foreign_ocr_layer`, `ocr_layer_disagrees`, `ocr_layer_disagrees_kept`, `ocr_layer_unchecked`;
