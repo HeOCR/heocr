@@ -1892,7 +1892,9 @@ def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids, n
                             empty -= 1
                         text = half["text"]
                         second = None  # settled: the half-resolution reading is confirmed by its own evidence
-                if checked and second is not None:
+                # A third reading that agrees with the cell's text confirms it (set C: every such cell read right).
+                confirmed = half is not None and half["text"] == text.strip()
+                if checked and second is not None and not confirmed:
                     if _unconfirmed(first, second):
                         # Two independent readings that disagree, neither confident: the cell's text
                         # is a guess, and the record says so (fixed rule, not tuned to a measure).
