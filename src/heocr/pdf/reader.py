@@ -2030,7 +2030,8 @@ def _place_region(doc: Document, index: int, mark: int, box) -> bool:
     order, by the box its text covers (the union of those blocks; the image's box only when they have
     none: a full-slide background image would put a bottom logo strip's text at the page top). They go
     before the first of the page's earlier blocks in their column (overlapping them across) whose top
-    is below the text's top; else after the last of them, and past any later block of the page whose
+    is below the text's top, and before any blocks of the page just before that one which start at or
+    below the text's bottom; else after the last of them, and past any later block of the page whose
     bottom is above the text's top. Placed blocks are flagged ``reading_order_region_placed`` instead
     of ``reading_order_region_appended``. Text beside no block of the page (a figure in an empty
     column), or below all of them, stays at the end. Returns whether it moved."""
@@ -2045,6 +2046,11 @@ def _place_region(doc: Document, index: int, mark: int, box) -> bool:
     if not column:
         return False
     at = next((i for i in column if doc.blocks[i].bbox[1] > box[1]), None)
+    if at is not None:
+        # The text's column can start below an earlier block of another column: step back over the
+        # page's blocks before it that start at or below the text's bottom (a top-of-page region).
+        while at > 0 and doc.blocks[at - 1].page == index and doc.blocks[at - 1].bbox is not None and doc.blocks[at - 1].bbox[1] >= box[3]:
+            at -= 1
     if at is None:
         at = column[-1] + 1
         while at < mark and doc.blocks[at].page == index and doc.blocks[at].bbox is not None and doc.blocks[at].bbox[3] <= box[1]:
