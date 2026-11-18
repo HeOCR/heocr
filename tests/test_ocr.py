@@ -297,6 +297,30 @@ class OcrRouteTest(unittest.TestCase):
         self.assertEqual(kinds[0], "layer")
         self.assertEqual(kinds[-1], "region")
 
+    def test_a_full_page_backgrounds_text_is_placed_by_where_the_text_is(self) -> None:
+        # Dev slide pages: a full-slide background image holds a logo strip at its bottom. Placed by the
+        # image's box, its text went before the slide's title; it is placed by the box its text covers.
+        from PIL import Image, ImageDraw
+
+        background = Image.new("L", (1240, 1754), 255)
+        draw = ImageDraw.Draw(background)
+        for y in (1580, 1640):
+            draw.rectangle([200, y, 1040, y + 30], fill=40)  # the strip's two lines of "text"
+        tsv = Path(self.tmp.name) / "strip.tsv"
+        tsv.write_text("\n".join([
+            "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext",
+            "5\t1\t1\t1\t1\t1\t1300\t3160\t600\t60\t95.0\tשלום",
+            "5\t1\t1\t1\t1\t2\t500\t3160\t700\t60\t95.0\tעולם",
+            "5\t1\t1\t1\t2\t1\t500\t3280\t1400\t60\t95.0\tשורה",
+        ]) + "\n", encoding="utf-8")
+        page = PdfPage(lines=lines_block(HEBREW), rasters=[(0, 0, 595, 842, background)])
+        with mock.patch.dict(os.environ, {"FAKE_TSV": str(tsv)}):
+            doc = heocr.extract(make_pdf([page]), tesseract=FAKE)
+        kinds = ["region" if "from_image_region" in b.flags else "layer" for b in doc.blocks]
+        self.assertIn("region", kinds)
+        self.assertEqual(kinds[0], "layer")
+        self.assertEqual(kinds[-1], "region")
+
     def test_t6_regions_go_to_region_ocr(self) -> None:
         page = PdfPage(lines=lines_block(HEBREW), images=[(50, 100, 495, 300), (500, 20, 4, 4)])
         doc = heocr.extract(make_pdf([page]), tesseract=FAKE)

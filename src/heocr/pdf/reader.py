@@ -2027,18 +2027,28 @@ def _ocr_regions(
 
 def _place_region(doc: Document, index: int, mark: int, box) -> bool:
     """Move a region's blocks (``doc.blocks[mark:]``) from the page's end to its place in the reading
-    order: before the first of the page's earlier blocks in its column (overlapping it across) whose
-    top is below the region's top, else after the last of them. Placed blocks are flagged
-    ``reading_order_region_placed`` instead of ``reading_order_region_appended``. A region beside no
-    block of the page (a figure in an empty column) stays appended. Returns whether it moved."""
+    order, by the box its text covers (the union of those blocks; the image's box only when they have
+    none: a full-slide background image would put a bottom logo strip's text at the page top). They go
+    before the first of the page's earlier blocks in their column (overlapping them across) whose top
+    is below the text's top; else after the last of them, and past any later block of the page whose
+    bottom is above the text's top. Placed blocks are flagged ``reading_order_region_placed`` instead
+    of ``reading_order_region_appended``. Text beside no block of the page (a figure in an empty
+    column), or below all of them, stays at the end. Returns whether it moved."""
     new = doc.blocks[mark:]
     if not new:
         return False
+    boxes = [b.bbox for b in new if b.bbox is not None]
+    if boxes:
+        box = [min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes)]
     column = [i for i in range(mark) if doc.blocks[i].page == index and doc.blocks[i].bbox is not None
               and min(doc.blocks[i].bbox[2], box[2]) > max(doc.blocks[i].bbox[0], box[0])]
     if not column:
         return False
-    at = next((i for i in column if doc.blocks[i].bbox[1] > box[1]), column[-1] + 1)
+    at = next((i for i in column if doc.blocks[i].bbox[1] > box[1]), None)
+    if at is None:
+        at = column[-1] + 1
+        while at < mark and doc.blocks[at].page == index and doc.blocks[at].bbox is not None and doc.blocks[at].bbox[3] <= box[1]:
+            at += 1
     if at >= mark:
         return False
     del doc.blocks[mark:]
