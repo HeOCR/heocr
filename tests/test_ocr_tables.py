@@ -373,6 +373,46 @@ class OcrTableTest(unittest.TestCase):
         (table,) = [b for b in doc.blocks if b.kind == "table"]
         return doc, table.cells[1][2]
 
+    def half_case(self, heb: str, eng: str | None, half: str, half_conf: str = "60.0", eng_conf: str = "40.0"):
+        """Cell 70 read by heb as ``heb``, by the number model as ``eng`` at full resolution and ``half`` at half."""
+        texts = {**TEXTS, 70: heb}
+        cells = Path(self.tmp.name) / "cells.json"
+        cells.write_text(json.dumps({str(k): v for k, v in texts.items()}), encoding="utf-8")
+        self.numbers_setup({70: eng or "", 100: "200"})
+        halves = Path(self.tmp.name) / "cells_half.json"
+        halves.write_text(json.dumps({"70": half, "100": "200"}), encoding="utf-8")
+        env = {"FAKE_CELLS_ENG_HALF": str(halves), "FAKE_CELLS_CONF": eng_conf, "FAKE_CELLS_CONF_HALF": half_conf, "FAKE_CELLS_CONF_HEB": "60.0"}
+        with mock.patch.dict(os.environ, env):
+            doc = heocr.extract(scanned_pdf(scan(LEVELS)), tesseract=FAKE)
+        (table,) = [b for b in doc.blocks if b.kind == "table"]
+        return doc, table.cells[1][2]
+
+    def test_a_number_cell_takes_its_half_resolution_reading_on_its_own_evidence(self) -> None:
+        # set C pdf_t5_table*: heb read a date as a lone letter, and eng at 300 dpi as noise; at half
+        # resolution eng reads it whole. A whole date or grouped amount is taken on its form.
+        doc, cell = self.half_case("ו", None, "17.12.2025")
+        self.assertEqual(cell.text, "17.12.2025")
+        self.assertIn("number_read_at_half_resolution", cell.flags)
+        self.assertEqual(cell.readings[-1]["text"], "17.12.2025")
+        self.assertEqual(heocr.validate(doc.to_dict()), [])
+        # A plain number is taken when the full-resolution reading agrees, or when it is confident.
+        doc, cell = self.half_case("92", "52", "52")
+        self.assertEqual(cell.text, "52")
+        doc, cell = self.half_case("92", "32", "52", half_conf="90.0")
+        self.assertEqual(cell.text, "52")
+
+    def test_an_unsupported_half_resolution_reading_is_not_taken(self) -> None:
+        doc, cell = self.half_case("92", "32", "52", half_conf="60.0")
+        self.assertNotEqual(cell.text, "52")
+        self.assertNotIn("number_read_at_half_resolution", cell.flags)
+
+    def test_a_text_cell_is_not_read_at_half_resolution(self) -> None:
+        doc, cell = self.half_case("סכום כולל", None, "1994", half_conf="95.0")
+        self.assertEqual(cell.text, "סכום כולל")
+        with mock.patch("heocr.pdf.reader.CELL_HALF_READING", False):
+            doc, cell = self.half_case("ו", None, "17.12.2025")
+        self.assertEqual(cell.text, "ו")
+
     def test_a_cell_whose_two_readings_differ_and_neither_is_confident_is_unconfirmed(self) -> None:
         doc, cell = self.unconfirmed_case("752.25", "1409", "60.0", "40.0")
         self.assertEqual(cell.text, "752.25")  # nothing chosen: the first reading stays

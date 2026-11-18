@@ -16,6 +16,8 @@ text) "reads" the image: the most common grey level darker than paper (0 exclude
 rulings) is looked up, within 4 levels, and its text is the answer. A level not in the map is
 ink that could not be read: the answer is empty. A call in ``eng`` (the number model) uses
 $FAKE_CELLS_ENG instead, when it is set, at confidence $FAKE_CELLS_CONF (default 90; heb cells at $FAKE_CELLS_CONF_HEB).
+An ``eng`` cell call below 200 dpi (a half-resolution reading) uses $FAKE_CELLS_ENG_HALF at
+$FAKE_CELLS_CONF_HALF, and finds nothing when it is not set.
 """
 
 import json
@@ -61,6 +63,15 @@ def main(argv: list[str]) -> int:
     lang = argv[argv.index("-l") + 1] if "-l" in argv else "heb"
     if lang == "eng" and os.environ.get("FAKE_CELLS_ENG"):
         cells = os.environ["FAKE_CELLS_ENG"]
+    dpi = int(argv[argv.index("--dpi") + 1]) if "--dpi" in argv else 300
+    if lang == "eng" and psm in ("6", "7") and cells and dpi < 200:
+        # A cell read at half resolution: $FAKE_CELLS_ENG_HALF when set, else nothing found, so that a
+        # test of the full-resolution readings is not decided by this one.
+        cells = os.environ.get("FAKE_CELLS_ENG_HALF") or ""
+        if not cells:
+            with open(base + ".tsv", "w", encoding="utf-8") as stream:
+                stream.write("level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext\n")
+            return 0
     if psm in ("6", "7") and cells:
         from PIL import Image
 
@@ -74,7 +85,10 @@ def main(argv: list[str]) -> int:
             text = mapping[near[0]] if near else ""
         rows = ["level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext"]
         for n, token in enumerate(text.split(), 1):
-            rows.append(f"5\t1\t1\t1\t1\t{n}\t2\t2\t40\t20\t{os.environ.get('FAKE_CELLS_CONF', '90.0') if lang == 'eng' else os.environ.get('FAKE_CELLS_CONF_HEB', '90.0')}\t{token}")
+            conf = os.environ.get("FAKE_CELLS_CONF", "90.0") if lang == "eng" else os.environ.get("FAKE_CELLS_CONF_HEB", "90.0")
+            if lang == "eng" and dpi < 200:
+                conf = os.environ.get("FAKE_CELLS_CONF_HALF", conf)
+            rows.append(f"5\t1\t1\t1\t1\t{n}\t2\t2\t40\t20\t{conf}\t{token}")
         with open(base + ".tsv", "w", encoding="utf-8") as stream:
             stream.write("\n".join(rows) + "\n")
         return 0
