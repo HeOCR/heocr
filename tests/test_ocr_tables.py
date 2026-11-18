@@ -449,6 +449,37 @@ class OcrTableTest(unittest.TestCase):
         self.assertTrue(cell_has_faint_ink(faint))
         self.assertFalse(cell_has_faint_ink(blank))
 
+    def test_a_half_resolution_reading_that_agrees_confirms_the_cell(self) -> None:
+        # set C: of the cells flagged unconfirmed after the half-resolution reading, two in three were read
+        # right. When that third reading agrees with the cell's text, the cell is not flagged (every such
+        # cell was right); when it differs, the flag stays.
+        doc, cell = self.half_case("752.25", "1409", "752.25")
+        self.assertEqual(cell.text, "752.25")
+        self.assertNotIn("table_cell_unconfirmed", cell.flags)
+        self.assertFalse([u for u in doc.unread if u.reason == "table_cell_unconfirmed"])
+        doc, cell = self.half_case("752.25", "1409", "52")
+        self.assertIn("table_cell_unconfirmed", cell.flags)
+
+    def test_a_cell_with_no_digit_in_a_column_of_numbers_is_flagged(self) -> None:
+        # set C pdf_t5_table: heb read "4,370" as "סזכ,./" in a column of amounts; nothing else flagged
+        # the page, so the row was lost silently. Such a cell is flagged on its own (a header is not).
+        from types import SimpleNamespace
+
+        from heocr.contract import Cell
+        from heocr.pdf.reader import _flag_cells_out_of_column
+
+        texts = [["פריט", "סכום"], ["ציוד", "1,200"], ["שירות", "סזכ,./"], ["ייעוץ", "3,450"], ["ליווי", "980"]]
+        rows = [[Cell(a), Cell(b)] for a, b in texts]
+        grid = SimpleNamespace(rows=[[{"col": 1, "box": [10, 20 * r, 50, 20 * r + 18], "placeholder": False},
+                                      {"col": 0, "box": [60, 20 * r, 120, 20 * r + 18], "placeholder": False}] for r in range(len(texts))],
+                               bbox=[10, 0, 120, 100])
+        doc = SimpleNamespace(_rtl=True, unread=[])
+        _flag_cells_out_of_column(doc, 0, grid, rows, (0.0, 0.0))
+        flagged = [(r, c) for r, row in enumerate(rows) for c, cell in enumerate(row) if "table_cell_not_a_number" in (cell.flags or [])]
+        self.assertEqual(flagged, [(2, 1)])
+        (entry,) = doc.unread
+        self.assertEqual((entry.reason, entry.scope, entry.bbox), ("table_cell_not_a_number", "block", [60, 40, 120, 58]))  # the cell's own box (row 2, second in reading order)
+
     def test_a_cell_whose_two_readings_differ_and_neither_is_confident_is_unconfirmed(self) -> None:
         doc, cell = self.unconfirmed_case("752.25", "1409", "60.0", "40.0")
         self.assertEqual(cell.text, "752.25")  # nothing chosen: the first reading stays

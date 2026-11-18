@@ -1892,7 +1892,9 @@ def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids, n
                             empty -= 1
                         text = half["text"]
                         second = None  # settled: the half-resolution reading is confirmed by its own evidence
-                if checked and second is not None:
+                # A third reading that agrees with the cell's text confirms it (set C: every such cell read right).
+                confirmed = half is not None and half["text"] == text.strip()
+                if checked and second is not None and not confirmed:
                     if _unconfirmed(first, second):
                         # Two independent readings that disagree, neither confident: the cell's text
                         # is a guess, and the record says so (fixed rule, not tuned to a measure).
@@ -1918,6 +1920,7 @@ def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids, n
                 bbox = [min(b[0] for b in boxes) + ox, min(b[1] for b in boxes) + oy, max(b[2] for b in boxes) + ox, max(b[3] for b in boxes) + oy]
                 doc.unread.append(Unread(scope="page", reason="table_row_ink_unread", page=index, bbox=bbox, detail=f"{inked} inked cells, OCR read none"))
             rows.append(out_row)
+        _flag_cells_out_of_column(doc, index, grid, rows, (ox, oy))
         flags = ["ruled_table", "ocr_unverified", *grid.flags]
         if unread_cells:
             flags.append("table_cells_ink_unread")
@@ -1956,6 +1959,35 @@ CELL_HALF_READING = True
 _GARBLED_CELL = re.compile(r"[=\]\[<>*+^~\\]|[ךםןףץ][\u05d0-\u05ea]|₪[\u05d0-\u05ea]|[\u05d0-\u05ea]₪|\d[\u05d0-\u05ea]{2,}|[\u05d0-\u05ea]{2,}\d|[\u05d0-\u05ea][.,/]+\d")
 CELL_HALF_MIN_CONFIDENCE = 85.0  # alone, without the other evidence below
 _CELL_NUMBER_SHAPE = re.compile(r"^[\d.,/%₪\-]+$")
+
+
+NUMBER_COLUMN_SHARE = 2 / 3  # a column whose body cells mostly hold digits is a column of numbers
+NUMBER_COLUMN_MIN_CELLS = 3
+
+
+def _flag_cells_out_of_column(doc: Document, index: int, grid, rows: list[list[Cell]], offset) -> None:
+    """In a column of numbers (``NUMBER_COLUMN_SHARE`` of its read body cells hold a digit), a body cell
+    read with no digit at all is a misreading: heb read "4,370" as "סזכ,./" and "877" as letters (set C
+    pdf_t5_table*: 18 such cells, every one read wrong). It is flagged ``table_cell_not_a_number`` with
+    its own unread entry, whatever the other cells' readings. The first row (a header) is not checked."""
+    ox, oy = offset
+    boxes = [sorted(row, key=lambda cell: -cell["col"] if doc._rtl else cell["col"]) for row in grid.rows]
+    width = max((len(r) for r in rows), default=0)
+    for col in range(width):
+        body = [r[col] for r in rows[1:] if col < len(r) and r[col].text.strip()]
+        if len(body) < NUMBER_COLUMN_MIN_CELLS or sum(any(ch.isdigit() for ch in c.text) for c in body) < NUMBER_COLUMN_SHARE * len(body):
+            continue
+        for r, row in enumerate(rows[1:], 1):
+            if col >= len(row):
+                continue
+            cell = row[col]
+            if not cell.text.strip() or any(ch.isdigit() for ch in cell.text) or "table_cell_garbled" in (cell.flags or []):
+                continue
+            cell.flags = list(cell.flags or []) + ["table_cell_not_a_number"]
+            box = boxes[r][col]["box"] if col < len(boxes[r]) and boxes[r][col].get("box") else grid.bbox
+            doc.unread.append(Unread(scope="block", reason="table_cell_not_a_number", page=index,
+                                     bbox=[box[0] + ox, box[1] + oy, box[2] + ox, box[3] + oy],
+                                     detail=f"row {r}, column {col}: no digit in a column of numbers"))
 
 
 def _number_like_cell(text: str) -> bool:
