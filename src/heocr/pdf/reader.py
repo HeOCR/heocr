@@ -1987,7 +1987,8 @@ def _ocr_regions(
             # Logos and drawings yield stray marks at low confidence; they are reported, not emitted.
             unread("image_region_ocr_low_confidence", box, f"mean confidence {confidence}")
             return
-        # Region text follows the page's text-layer blocks; its place in the reading order is not resolved.
+        # Region text is placed among the page's text-layer blocks by its top edge (_place_region); where it
+        # cannot be, it follows them, flagged.
         flags = ("from_image_region", "reading_order_region_appended") + (("layer_text_masked",) if masked else ())
         short, share = short_for_ink(region, result)
         if short:
@@ -2019,7 +2020,32 @@ def _ocr_regions(
         record = doc._regions_read.get(digest_of.get(id(box), ""))
         if record is not None and record["box"] is box:
             record["blocks"] = [copy.deepcopy(b) for b in doc.blocks[mark:]]
+        if _place_region(doc, index, mark, box):
+            counts["image_regions_placed"] = counts.get("image_regions_placed", 0) + 1
     return counts
+
+
+def _place_region(doc: Document, index: int, mark: int, box) -> bool:
+    """Move a region's blocks (``doc.blocks[mark:]``) from the page's end to its place in the reading
+    order: before the first of the page's earlier blocks in its column (overlapping it across) whose
+    top is below the region's top, else after the last of them. Placed blocks are flagged
+    ``reading_order_region_placed`` instead of ``reading_order_region_appended``. A region beside no
+    block of the page (a figure in an empty column) stays appended. Returns whether it moved."""
+    new = doc.blocks[mark:]
+    if not new:
+        return False
+    column = [i for i in range(mark) if doc.blocks[i].page == index and doc.blocks[i].bbox is not None
+              and min(doc.blocks[i].bbox[2], box[2]) > max(doc.blocks[i].bbox[0], box[0])]
+    if not column:
+        return False
+    at = next((i for i in column if doc.blocks[i].bbox[1] > box[1]), column[-1] + 1)
+    if at >= mark:
+        return False
+    del doc.blocks[mark:]
+    doc.blocks[at:at] = new
+    for block in new:
+        block.flags = [("reading_order_region_placed" if f == "reading_order_region_appended" else f) for f in block.flags]
+    return True
 
 
 # A grid found in an image region is a table only when it holds records: charts, photos and

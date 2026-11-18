@@ -270,6 +270,33 @@ class OcrRouteTest(unittest.TestCase):
                 self.assertEqual(c["image_regions_small"], 0 if read else 1)
                 self.assertEqual(c.get("image_regions_text_below_figure_share", 0), 1 if read else 0)
 
+    def test_a_regions_text_is_placed_by_its_top_edge(self) -> None:
+        # set B pdf_t6_region: a table drawn as an image mid-page was read, but its text followed the
+        # whole page's layer text, so every such page scored twice its text in CER. It is placed among
+        # the layer's blocks by its top edge, in its column, and flagged as placed.
+        from PIL import Image, ImageDraw
+
+        table = Image.new("L", (800, 200), 255)
+        draw = ImageDraw.Draw(table)
+        for y in (20, 80, 140):
+            draw.rectangle([20, y, 760, y + 30], fill=40)
+        page = PdfPage(lines=lines_block(HEBREW[:2]) + lines_block(HEBREW[3:], top=300.0), rasters=[(50, 400, 495, 75, table)])
+        doc = heocr.extract(make_pdf([page]), tesseract=FAKE)
+        kinds = ["region" if "from_image_region" in b.flags else "layer" for b in doc.blocks]
+        self.assertEqual(kinds[0], "layer")
+        self.assertEqual(kinds[-1], "layer")
+        self.assertIn("region", kinds)
+        regions = [b for b in doc.blocks if "from_image_region" in b.flags]
+        self.assertTrue(all("reading_order_region_placed" in b.flags and "reading_order_region_appended" not in b.flags for b in regions))
+        self.assertEqual(doc.pages[0].coverage["image_regions_placed"], 1)
+
+    def test_a_region_below_all_the_text_follows_it(self) -> None:
+        page = PdfPage(lines=lines_block(HEBREW), images=[(50, 100, 495, 300)])
+        doc = heocr.extract(make_pdf([page]), tesseract=FAKE)
+        kinds = ["region" if "from_image_region" in b.flags else "layer" for b in doc.blocks]
+        self.assertEqual(kinds[0], "layer")
+        self.assertEqual(kinds[-1], "region")
+
     def test_t6_regions_go_to_region_ocr(self) -> None:
         page = PdfPage(lines=lines_block(HEBREW), images=[(50, 100, 495, 300), (500, 20, 4, 4)])
         doc = heocr.extract(make_pdf([page]), tesseract=FAKE)
