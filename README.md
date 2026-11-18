@@ -9,7 +9,7 @@
 
 Every decision is recorded in the output. Text that could not be read is reported in `unread`, never dropped silently.
 
-> Status: development, milestones D1–D4 done. Nothing is on PyPI yet. The first release (D5) waits for the D-bench evaluation.
+> Status: release candidate 0.1.0rc1. Milestones D1–D4 are done, and D5 is in its release gate. Nothing is on PyPI yet: the first release, 0.1.0, waits for the D-bench release gate's verdict.
 
 ## Quickstart
 
