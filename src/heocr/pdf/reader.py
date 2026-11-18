@@ -1420,7 +1420,7 @@ def _reread_number_words(numbers, image, result, dpi: int) -> tuple[int, int]:
                     # level, is decided by its neighbours like any low-confidence one.
                     found = _label_from_crops(numbers, image, word, dpi)
                     if found is not None:
-                        pending[id(word)] = found
+                        pending[id(word)] = (found[0], found[1], False, True)
                         continue
             except OcrUnavailable:
                 return reread, replaced
@@ -1446,6 +1446,9 @@ def _reread_number_words(numbers, image, result, dpi: int) -> tuple[int, int]:
 
 
 LABEL_CROPS = True  # a cut label heb's box reads as noise is read again on a few more crops
+# A crop candidate vouched for only by another candidate (LABEL_CHAIN) needs most crops to agree on it:
+# on set B, those that one or two of five crops read were 27 right to 10 wrong.
+LABEL_CROPS_CHAIN_MIN_SHARE = 60.0
 _LABEL_IN_READING = re.compile(r"\d{1,2}(?:\.\d{1,2})+")
 
 
@@ -1527,12 +1530,13 @@ def _label_sequence(lines, pending: dict[int, tuple[str, float]], model: str) ->
         if id(word) not in pending:
             previous = known[i] or previous
             continue
-        reading, confidence = pending[id(word)]
+        reading, confidence, *extra = pending[id(word)]
+        from_crops = len(extra) > 1 and extra[1]
         levels = _label_levels(reading)
         following = next((k for k in known[i + 1 :] if k), None)
         used = (previous is not None and _label_follows(previous, levels)) or (following is not None and _label_follows(levels, following))
         chained = False
-        if not used and LABEL_CHAIN:
+        if not used and LABEL_CHAIN and (not from_crops or confidence >= LABEL_CROPS_CHAIN_MIN_SHARE):
             at = labelled.index(i)
             before = candidate[labelled[at - 1]] if at > 0 else None
             after = candidate[labelled[at + 1]] if at + 1 < len(labelled) else None
@@ -1541,7 +1545,7 @@ def _label_sequence(lines, pending: dict[int, tuple[str, float]], model: str) ->
         if word.text[-1] in ".:" and reading[-1].isdigit():
             reading += word.text[-1]
         entry = {"first": word.text, "second": reading, "first_confidence": word.confidence, "second_confidence": confidence,
-                 "model": model, "wider": False, "label_levels": True}
+                 "model": model, "wider": False, "label_levels": True, **({"crops": True} if from_crops else {})}
         if not used:
             line.number_readings.append({**entry, "used": False})
             continue

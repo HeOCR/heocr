@@ -279,6 +279,25 @@ class NumberWordsTest(unittest.TestCase):
             doc = self.read_lines([["1.1.", "הגדרות"], ["1.", "תחולה"]], ["1.1", NOTHING])
         self.assertEqual(doc.blocks[0].text.splitlines()[1].split()[0], "1.")
 
+    def test_crop_candidates_vouch_for_each_other_only_when_most_crops_agree(self) -> None:
+        from heocr.ocr.tesseract import OcrLine, OcrWord
+        from heocr.pdf.reader import _label_sequence
+
+        def lines():
+            out = []
+            for n, (label, text) in enumerate((("1.", "הגדרות"), ("2.", "תחולה"))):
+                words = [OcrWord(label, [2000, 100 * n, 2050, 100 * n + 40], 90.0), OcrWord(text, [1800, 100 * n, 1990, 100 * n + 40], 90.0)]
+                out.append(OcrLine(" ".join(w.text for w in words), [1800, 100 * n, 2050, 100 * n + 40], words=words))
+            return out
+
+        for share, used in ((20.0, False), (80.0, True)):
+            with self.subTest(share=share):
+                ls = lines()
+                pending = {id(ls[0].words[0]): ("1.1.1.", share, False, True), id(ls[1].words[0]): ("1.1.2.", share, False, True)}
+                _label_sequence(ls, pending, "eng")
+                self.assertEqual([l.words[0].text for l in ls], ["1.1.1.", "1.1.2."] if used else ["1.", "2."])
+                self.assertTrue(all(r.get("crops") for l in ls for r in l.number_readings))
+
     def test_label_follows(self) -> None:
         from heocr.pdf.reader import _label_follows as follows
         self.assertTrue(follows((2, 2), (2, 2, 4)))
