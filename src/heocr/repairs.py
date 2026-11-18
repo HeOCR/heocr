@@ -61,8 +61,10 @@ RTL_BRACKET_ORDER = Rule(
     example=(")באופן השוואתי(", "(באופן השוואתי)"),
     formats=("pdf",),
     evidence=(
-        "in the document's RTL text-layer lines, mirroring every bracket makes the bracket order valid in at "
-        "least 3 lines and in more than 3 times as many as reading them as they are (decided per document); "
+        "in the document's RTL text-layer lines, mirroring every bracket (but a Latin text's own) makes the "
+        "bracket order valid in at least 3 lines that are not valid as read, and in more than 3 times as many as "
+        "reading them as they are does the other way round (decided per document; a line valid both ways does not "
+        "vote); "
         "a paragraph balanced as read and broken when mirrored is left as read"
     ),
 )
@@ -317,13 +319,14 @@ def latin_wrap_brackets(text: str) -> tuple[str, Counter]:
 
 
 def brackets_mirrored_in(units: list[str]) -> bool:
-    """The rtl_bracket_order evidence over a document's RTL lines."""
+    """The rtl_bracket_order evidence over a document's RTL lines. Only a line valid one way and not the
+    other votes: a line whose brackets are all a Latin reference's own ("(Annual Report)") reads valid
+    both ways, since mirroring keeps them, and says nothing about the Hebrew text's brackets."""
     as_read = mirrored = 0
     for text in units:
-        if bracket_order_valid(text):
-            as_read += 1
-        if bracket_order_valid(mirror_brackets(text)):
-            mirrored += 1
+        valid, valid_mirrored = bool(bracket_order_valid(text)), bool(bracket_order_valid(mirror_brackets(text)))
+        as_read += valid and not valid_mirrored
+        mirrored += valid_mirrored and not valid
     return mirrored >= 3 and mirrored > 3 * as_read
 
 
