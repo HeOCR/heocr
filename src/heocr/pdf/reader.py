@@ -1449,15 +1449,34 @@ def _label_follows(prev: tuple[int, ...], nxt: tuple[int, ...]) -> bool:
     return k < len(nxt) and nxt[k] == prev[k] + 1
 
 
+def _label_starts_numbering(prev: tuple[int, ...], nxt: tuple[int, ...]) -> bool:
+    """The strict form of ``_label_follows``, for two candidates that vouch for each other: a deeper
+    label starts its numbering at 1 ("2.2" then "2.2.1"), and the next number at a level restarts the
+    levels below it ("2.1.3" then "2.2" or "2.2.1", not "2.2.4")."""
+    k = next((i for i, (a, b) in enumerate(zip(prev, nxt)) if a != b), min(len(prev), len(nxt)))
+    if k == len(prev):
+        return len(nxt) > len(prev) and all(x == 1 for x in nxt[k:])
+    return k < len(nxt) and nxt[k] == prev[k] + 1 and all(x == 1 for x in nxt[k + 1 :])
+
+
+LABEL_CHAIN = True  # two neighbouring candidates in strict sequence vouch for each other
+
+
 def _label_sequence(lines, pending: dict[int, tuple[str, float]], model: str) -> int:
     """Decide the low-confidence deeper labels (``pending``: word id -> (reading, confidence)) by their
     neighbours. Lines are taken in reading order; a line's first (rightmost) word is a known label when
     it is already a deeper label. A candidate is used when it can follow the last label before it (known
     or used), or when the next known label can follow it ("23.2" between "3.1" and "3.3" cannot).
+    On a page whose labels are all cut there is no known label: with ``LABEL_CHAIN``, a candidate is
+    also used when the nearest label line before or after it is another candidate in strict sequence
+    with it (``_label_starts_numbering``: "1.1.1" then "1.1.2", not "3.1.8" then "3.2.9"); such a use
+    is logged with ``chained: true``.
     Otherwise heb's reading stays, and the rejected reading is logged with ``used: false``.
     Returns the number of words replaced."""
     starts = [(line, max(line.words, key=lambda w: w.bbox[2])) for line in lines if line.words]
     known = [_label_levels(w.text) if id(w) not in pending and _LABEL_DEEPER.match(w.text) else None for _, w in starts]
+    candidate = [_label_levels(pending[id(w)][0]) if id(w) in pending else None for _, w in starts]
+    labelled = [i for i in range(len(starts)) if known[i] or candidate[i]]
     replaced, previous = 0, None
     for i, (line, word) in enumerate(starts):
         if id(word) not in pending:
@@ -1467,6 +1486,13 @@ def _label_sequence(lines, pending: dict[int, tuple[str, float]], model: str) ->
         levels = _label_levels(reading)
         following = next((k for k in known[i + 1 :] if k), None)
         used = (previous is not None and _label_follows(previous, levels)) or (following is not None and _label_follows(levels, following))
+        chained = False
+        if not used and LABEL_CHAIN:
+            at = labelled.index(i)
+            before = candidate[labelled[at - 1]] if at > 0 else None
+            after = candidate[labelled[at + 1]] if at + 1 < len(labelled) else None
+            chained = (before is not None and _label_starts_numbering(before, levels)) or (after is not None and _label_starts_numbering(levels, after))
+            used = chained
         if word.text[-1] in ".:" and reading[-1].isdigit():
             reading += word.text[-1]
         entry = {"first": word.text, "second": reading, "first_confidence": word.confidence, "second_confidence": confidence,
@@ -1474,7 +1500,7 @@ def _label_sequence(lines, pending: dict[int, tuple[str, float]], model: str) ->
         if not used:
             line.number_readings.append({**entry, "used": False})
             continue
-        line.number_readings.append(entry)
+        line.number_readings.append({**entry, **({"chained": True} if chained else {})})
         word.text = reading
         line.numbers_replaced += 1
         line.text = " ".join(w.text for w in line.words)
