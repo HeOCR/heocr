@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import io
 
-from heocr.contract import Document, Page, Unread, page_limit
+from heocr.contract import Document, Page, Unread, page_limit, pages_left_unread, time_up
 from heocr.ocr.regions import MAX_RENDER_PIXELS, RENDER_DPI, has_ink
 
 MIN_DPI = 50  # a smaller declared resolution is a placeholder (JFIF's 1:1 aspect, 72 by default in some tools)
@@ -78,6 +78,9 @@ def read_image(body: bytes, doc: Document) -> None:
     doc.page_count = frames
     pages = page_limit(doc, frames)
     for index in range(pages):
+        if time_up(doc):
+            pages_left_unread(doc, index, pages)
+            break
         try:
             image.seek(index)
             frame = _grey(image.copy())
