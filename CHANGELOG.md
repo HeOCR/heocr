@@ -4,9 +4,10 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 [HeOCR/heocr](https://github.com/HeOCR/heocr). The milestones (D1–D5) are planned in
 [`planning/milestones/`](planning/milestones/).
 
-## Unreleased: 0.1.0 (D5, release readiness)
+## Unreleased → 0.1.0 (D5, release readiness)
 
-Nothing is on PyPI yet. The first release waits for the D-bench release gate.
+`0.1.0rc1` is the release candidate for the registered D-bench release gate. Nothing is on PyPI yet:
+0.1.0 is released only if the gate supports it.
 
 ### Record
 
@@ -19,7 +20,12 @@ Nothing is on PyPI yet. The first release waits for the D-bench release gate.
   - `deskewed`, with `signals.deskew_degrees`;
   - `numbers_from_second_reading` and `checks.number_readings`;
   - `font_cp1255_shifted`;
-  - `ocr_layer_disagrees_kept`, `ocr_layer_unchecked`.
+  - `ocr_layer_disagrees_kept`, `ocr_layer_unchecked`;
+  - `table_cell_garbled` and `table_cell_not_a_number` (cell flags and unread reasons), `faint_ink_read`, `number_read_at_half_resolution` [83, 85];
+  - `time_limit_reached`, the unread reason `time_limit` and `options.time_limit` [88];
+  - the repair rule `latin_wrap_brackets` [86];
+  - in `checks.number_readings`: `label_levels`, `crops`, `chained`, `through_cut_labels` and `page_pass` [77, 80, 82, 84, 89].
+- The JSON Schema and the frozen-contract rules [71]; a reference for the record, and CONTRIBUTING [72].
 - `image_region_text_in_layer` and `image_region_blank` are no longer unread entries. They are no loss, and are now counted in coverage [65].
 
 ### Gaps from the first D-bench report (synthetic and dev only)
@@ -30,15 +36,29 @@ Nothing is on PyPI yet. The first release waits for the D-bench release gate.
   - a kept OCR layer's scan is not read again, unless the layer leaves ink uncovered [62].
 - **Line building:**
   - the RTL word space after punctuation is kept;
-  - two numbers apart in an RTL line are two runs (UAX #9 N1) [58].
+  - two numbers apart in an RTL line are two runs (UAX #9 N1) [58];
+  - a full stop with equal gaps on both sides stands alone [73];
+  - a bracket between two numbers in an RTL line takes the paragraph's direction [75].
+- **Brackets around Latin text:**
+  - a Latin reference's brackets in RTL text are read as shown, and kept through the bracket repair [81];
+  - the two brackets of a Latin parenthetical split by a line wrap are paired [86];
+  - only lines valid one way and not the other vote on a document's bracket order [87].
 - **Numbers on OCR pages:**
   - words with digits get a second reading by the number model [59];
-  - so do number segments and split number pieces [70];
-  - scanned table cells take the number model's reading more often [60], and a cell whose two readings disagree is flagged [61].
+  - so do number segments and split number pieces [70], and a segment's reading replaces only the words its tokens cover [74];
+  - one number-model reading of each OCR page restores numbers heb cut, never adding any [80];
+  - cut section labels are read whole, guarded by the label sequence [77]: candidates vouch for each other in strict sequence [82], through the cut labels between them [89], and a label read as noise is read again on a few more crops [84];
+  - scanned table cells take the number model's reading more often [60], and a cell whose two readings disagree is flagged [61];
+  - number cells are read at half resolution too, faint cells are read, and garbled ones flagged [83].
 - **Flag precision:**
   - a repeated image is read once, and its later pages get a flagged copy [64];
   - no-loss region outcomes left `unread` [65];
-  - vertical layer text is read as its own lines [66].
+  - vertical layer text is read as its own lines [66];
+  - scanned table cells are flagged by uncertainty, not by a disagreement a third reading settles [85].
+- **Fonts and image regions:**
+  - an OCR reading a private-use code cannot stand for is not a vote [76];
+  - small images that hold text are read, and region text is placed in reading order by the box its text covers [78, 79].
+- **Safety:** a per-document time limit, off by default, with what is left recorded as unread (D5c) [88].
 - **Layout:**
   - a long repeated line is furniture only if one of its numbers varies [63];
   - bracket labels decide a paragraph's bracket order [67];
