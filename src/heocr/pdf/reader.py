@@ -41,7 +41,7 @@ from heocr.pdf.classify import FIGURE_IMAGE, PAGE_IMAGE, classify, object_stats,
 from heocr.pdf.frame import frame_of
 from heocr.pdf.lines import Atom, PageLines, build_lines, line_is_rtl, paragraphs
 from heocr.pdf.columns import UNRESOLVED, Segment, arrange
-from heocr.pdf.ocrtables import cell_crop, cell_has_ink, cell_psm, image_rulings, tables_in
+from heocr.pdf.ocrtables import cell_crop, cell_has_faint_ink, cell_has_ink, cell_psm, faint_cell_image, image_rulings, tables_in
 from heocr.pdf.tables import find_tables, rulings, table_blocks
 from heocr.textflags import is_private_use, text_flags
 
@@ -1800,9 +1800,13 @@ def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids, n
                     out_row.append(Cell("", colspan=cell["colspan"], flags=["merged_above"]))
                     continue
                 crop = cell_crop(image, cell["box"], scale)
+                faint = False
                 if not cell_has_ink(crop):
-                    out_row.append(Cell("", colspan=cell["colspan"], rowspan=cell["rowspan"]))
-                    continue
+                    if not cell_has_faint_ink(crop):
+                        out_row.append(Cell("", colspan=cell["colspan"], rowspan=cell["rowspan"]))
+                        continue
+                    # Ink too light for the ink test: read with its contrast stretched, and flagged so.
+                    crop, faint = faint_cell_image(crop), True
                 inked += 1
                 psm = cell_psm(crop)
                 psms[psm] += 1
@@ -1813,14 +1817,34 @@ def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids, n
                     cell_flags = []
                 except OcrUnavailable:
                     text, cell_flags = "", ["ocr_failed"]
+                if faint:
+                    cell_flags.append("faint_ink_read")
                 if not text.strip():
                     empty += 1
                     cell_flags.append("ocr_empty_with_ink")
                 readings = None
-                if text.strip() and numbers is not None and any(ch.isdigit() for ch in text):
-                    first = {"model": engine.lang, "text": text, "confidence": result.mean_confidence}
+                if numbers is not None and numbers is not engine and CELL_HALF_READING and _number_like_cell(text):
+                    # Read at half resolution first, before the cell's own second reading decides.
+                    half = _half_number_reading(numbers, crop, dpi)
+                else:
+                    half = None
+                second = None
+                first = {"model": engine.lang, "text": text, "confidence": result.mean_confidence if text.strip() else None}
+                checked = bool(text.strip()) and numbers is not None and any(ch.isdigit() for ch in text)
+                if checked:
                     text, readings, second = _second_number_reading(numbers, crop, dpi, psm, first, cell_flags, checks)
-                    if second is not None and _unconfirmed(first, second):
+                if half is not None:
+                    taken = _take_half_reading(half, text, second, numbers, crop, dpi)
+                    if taken:
+                        checks["read_by_number_model"] += 1
+                        cell_flags[:] = [f for f in cell_flags if f not in ("number_disagreement", "ocr_empty_with_ink")] + ["number_read_at_half_resolution"]
+                        readings = [r for r in (readings or [first, second]) if r is not None] + [half]
+                        if not text.strip():
+                            empty -= 1
+                        text = half["text"]
+                        second = None  # settled: the half-resolution reading is confirmed by its own evidence
+                if checked and second is not None:
+                    if _unconfirmed(first, second):
                         # Two independent readings that disagree, neither confident: the cell's text
                         # is a guess, and the record says so (fixed rule, not tuned to a measure).
                         cell_flags.append("table_cell_unconfirmed")
@@ -1829,6 +1853,14 @@ def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids, n
                         doc.unread.append(Unread(scope="block", reason="table_cell_unconfirmed", page=index,
                                                  bbox=[x0 + ox, y0 + oy, x1 + ox, y1 + oy],
                                                  detail=f"row {len(rows)}, column {len(out_row)}: two readings differ and neither is confident"))
+                if text.strip() and _GARBLED_CELL.search(text) and not any(f.startswith("number_read_") for f in cell_flags):
+                    # Letters and marks no table cell holds ("ססס,,1", "₪19ךדךד"): a misreading, flagged on the
+                    # cell itself, whatever the other cells' readings (set C: every such cell was wrong).
+                    cell_flags.append("table_cell_garbled")
+                    x0, y0, x1, y1 = cell["box"]
+                    doc.unread.append(Unread(scope="block", reason="table_cell_garbled", page=index,
+                                             bbox=[x0 + ox, y0 + oy, x1 + ox, y1 + oy],
+                                             detail=f"row {len(rows)}, column {len(out_row)}: OCR read letters and marks no cell holds"))
                 read += sum(1 for ch in text if not ch.isspace())
                 out_row.append(Cell(text, colspan=cell["colspan"], rowspan=cell["rowspan"], flags=cell_flags, readings=readings))
             unread_cells += empty
@@ -1862,6 +1894,61 @@ def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids, n
 
 
 _HEBREW_WORD_IN = re.compile(r"[\u05d0-\u05ea]{3,}")
+
+
+# A scanned table's number cells read once more at half resolution: at 300 dpi the number model reads a
+# cell's short line of digits poorly (dates as "Ze ANe2020"), at 150 it reads them well, as on a page
+# (set C pdf_t5_table*: of 153 number cells read wrong, 103 right this way, none of the right ones
+# made wrong, no text cell changed).
+CELL_HALF_READING = True
+# A misread cell: marks no table cell holds, a final letter inside a word, ₪ against a letter, digits
+# fused with two letters or more, or a letter glued to a digit by number punctuation ("ססס,,1" for 4,200).
+# On set C pdf_t5_table* 100 cells matched, all of them read wrong, and no cell read right.
+_GARBLED_CELL = re.compile(r"[=\]\[<>*+^~\\]|[ךםןףץ][\u05d0-\u05ea]|₪[\u05d0-\u05ea]|[\u05d0-\u05ea]₪|\d[\u05d0-\u05ea]{2,}|[\u05d0-\u05ea]{2,}\d|[\u05d0-\u05ea][.,/]+\d")
+CELL_HALF_MIN_CONFIDENCE = 85.0  # alone, without the other evidence below
+_CELL_NUMBER_SHAPE = re.compile(r"^[\d.,/%₪\-]+$")
+
+
+def _number_like_cell(text: str) -> bool:
+    """A cell heb read with no Hebrew word and no Latin letter: digits misread as letters ("סזכ,./" for
+    4,370), a lone letter ("ו" for a date), digits, or nothing at all though it has ink."""
+    return not _HEBREW_WORD_IN.search(text) and not re.search(r"[A-Za-z]", text)
+
+
+def _half_number_reading(numbers, crop, dpi: int) -> dict | None:
+    """The number model's one-line reading of a cell at half resolution, when it is number-shaped."""
+    from PIL import Image
+
+    gray = crop.convert("L")
+    w, h = gray.size
+    half = gray.resize((max(1, w // 2), max(1, h // 2)), Image.LANCZOS)
+    try:
+        result = numbers.recognize(half, dpi=max(1, dpi // 2), psm=7)
+    except OcrUnavailable:
+        return None
+    words = [w for line in result.lines for w in line.words if w.text.strip("|")]
+    text = " ".join(w.text for w in words)
+    if not words or not _CELL_NUMBER_SHAPE.match(text.replace(" ", "")):
+        return None
+    return {"model": numbers.lang, "text": text, "confidence": round(sum(w.confidence for w in words) / len(words), 2), "dpi": max(1, dpi // 2)}
+
+
+def _take_half_reading(half: dict, text: str, second: dict | None, numbers, crop, dpi: int) -> bool:
+    """Whether the half-resolution reading replaces the cell's text: it differs, and it agrees with the
+    number model's full-resolution reading, or is a whole date or grouped amount, or is read with
+    confidence at least ``CELL_HALF_MIN_CONFIDENCE``. On set C none of the three admitted a wrong
+    reading; without them most changes were wrong."""
+    if half["text"] == text.strip():
+        return False
+    if second is None:
+        try:
+            result = numbers.recognize(crop, dpi=dpi, psm=7)
+            full = " ".join(w.text for line in result.lines for w in line.words if w.text.strip("|"))
+        except OcrUnavailable:
+            full = ""
+    else:
+        full = " ".join(w for w in second["text"].split() if w.strip("|"))
+    return full == half["text"] or bool(_WELL_FORMED.match(half["text"])) or (half["confidence"] or 0) >= CELL_HALF_MIN_CONFIDENCE
 # A whole date (d.m.yyyy) or an amount in comma groups, nothing else in the cell.
 _WELL_FORMED = re.compile(r"^(?:\d{1,2}[./]\d{1,2}[./](?:\d{2}|\d{4})|\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?)$")
 WELL_FORMED_MIN_CONFIDENCE = 30.0
