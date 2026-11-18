@@ -1150,11 +1150,13 @@ _HEBREW_LETTER = re.compile(r"[\u05d0-\u05ea]")
 
 _LABEL_ONE_LEVEL = re.compile(r"^\d{1,2}\.?$")
 _LABEL_DEEPER = re.compile(r"^\d{1,2}(\.\d{1,2})+\.?$")
+# A deeper label read below NUMBER_WORD_MIN_CONFIDENCE is used only when it fits its neighbours' numbering.
+LABEL_SEQUENCE_GUARD = True
 
 
-def _number_reading(numbers, image, bbox, dpi: int) -> tuple[str, float] | None:
+def _number_reading(numbers, image, bbox, dpi: int, min_confidence: float = NUMBER_WORD_MIN_CONFIDENCE) -> tuple[str, float] | None:
     """The number model's reading of one word box and its confidence, when it is one number-shaped
-    word with confidence at least ``NUMBER_WORD_MIN_CONFIDENCE``; else None."""
+    word with confidence at least ``min_confidence``; else None."""
     x0, y0, x1, y1 = bbox
     crop = (max(0, int(x0) - NUMBER_WORD_PAD), max(0, int(y0) - NUMBER_WORD_PAD),
             min(image.size[0], int(x1) + NUMBER_WORD_PAD), min(image.size[1], int(y1) + NUMBER_WORD_PAD))
@@ -1162,7 +1164,7 @@ def _number_reading(numbers, image, bbox, dpi: int) -> tuple[str, float] | None:
         return None
     second = numbers.recognize(image.crop(crop), dpi=dpi, psm=NUMBER_WORD_PSM)
     words = [w for l in second.lines for w in l.words]
-    if len(words) != 1 or words[0].confidence < NUMBER_WORD_MIN_CONFIDENCE or not _NUMBER_WORD.match(words[0].text):
+    if len(words) != 1 or words[0].confidence < min_confidence or not _NUMBER_WORD.match(words[0].text):
         return None
     return words[0].text, words[0].confidence
 
@@ -1359,6 +1361,7 @@ def _reread_number_words(numbers, image, result, dpi: int) -> tuple[int, int]:
     ``NUMBER_WORD_MIN_CONFIDENCE``. Words with Hebrew letters ("2ב", "ו-3") keep their first reading.
     ``result``'s lines are updated in place. Returns (words read again, words replaced)."""
     reread = replaced = 0
+    pending: dict[int, tuple[str, float]] = {}
     for line in result.lines:
         changed = False
         try:
@@ -1375,12 +1378,26 @@ def _reread_number_words(numbers, image, result, dpi: int) -> tuple[int, int]:
         for word in line.words:
             if id(word) in done or not any(ch.isdigit() for ch in word.text) or _HEBREW_LETTER.search(word.text):
                 continue
-            wider = False
+            wider = levels = False
+            at_start = word is max(line.words, key=lambda w: w.bbox[2])
+            # "4." or "1.2." (a label with its stop, not a bare "4"): heb may keep only the last levels.
+            label = at_start and bool(_LABEL_ONE_LEVEL.match(word.text) or _LABEL_DEEPER.match(word.text)) and word.text.endswith(".")
             try:
-                found = _number_reading(numbers, image, word.bbox, dpi)
+                found = _number_reading(numbers, image, word.bbox, dpi, min_confidence=0.0 if label else NUMBER_WORD_MIN_CONFIDENCE)
                 reread += 1
                 reading, confidence = found if found is not None else (None, None)
-                if reading is not None and _LABEL_ONE_LEVEL.match(reading) and word is max(line.words, key=lambda w: w.bbox[2]):
+                if reading is not None and confidence < NUMBER_WORD_MIN_CONFIDENCE:
+                    # heb cuts a deeper label at a line's (RTL) start to its last levels ("2.2.4." as "4.",
+                    # "11.1.2." as "1.2."); the number model reads it whole, often with a low confidence on such
+                    # short crops. Below the floor its reading is kept only when it is a deeper label ending
+                    # with all of heb's levels.
+                    levels = bool(_LABEL_DEEPER.match(reading)) and reading.rstrip(".").endswith("." + word.text.rstrip("."))
+                    if not levels:
+                        reading = confidence = None
+                    elif LABEL_SEQUENCE_GUARD:
+                        pending[id(word)] = (reading, confidence)
+                        continue  # decided with its neighbours, once the page's lines are read
+                if reading is not None and _LABEL_ONE_LEVEL.match(reading) and at_start:
                     # A one-level label at a line's (RTL) start: heb's box often covers only the part of a
                     # deeper label it read ("1." of "1.1.1."). One more reading reaches into the blank
                     # beside it, up to the next word, and is used only when it is a deeper label.
@@ -1402,14 +1419,64 @@ def _reread_number_words(numbers, image, result, dpi: int) -> tuple[int, int]:
                 # Every replacement is logged with both readings (decision 0002), as a cell's are: a
                 # reviewer can audit it, a consumer can revert it.
                 line.number_readings.append({"first": word.text, "second": reading, "first_confidence": word.confidence,
-                                             "second_confidence": confidence, "model": numbers.lang, "wider": wider})
+                                             "second_confidence": confidence, "model": numbers.lang, "wider": wider,
+                                             **({"label_levels": True} if levels else {})})
                 word.text = reading
                 line.numbers_replaced += 1
                 replaced += 1
                 changed = True
         if changed:
             line.text = " ".join(w.text for w in line.words)
+    if pending:
+        replaced += _label_sequence(result.lines, pending, numbers.lang)
     return reread, replaced
+
+
+def _label_levels(text: str) -> tuple[int, ...]:
+    return tuple(int(x) for x in text.rstrip(".").split("."))
+
+
+def _label_follows(prev: tuple[int, ...], nxt: tuple[int, ...]) -> bool:
+    """Whether label ``nxt`` can follow ``prev`` in a numbered list: a deeper level of it ("2.2" then
+    "2.2.4"), or the next number at one of its levels ("2.1.3" then "2.2", "2.3.5" then "3.1")."""
+    k = next((i for i, (a, b) in enumerate(zip(prev, nxt)) if a != b), min(len(prev), len(nxt)))
+    if k == len(prev):
+        return len(nxt) > len(prev)
+    return k < len(nxt) and nxt[k] == prev[k] + 1
+
+
+def _label_sequence(lines, pending: dict[int, tuple[str, float]], model: str) -> int:
+    """Decide the low-confidence deeper labels (``pending``: word id -> (reading, confidence)) by their
+    neighbours. Lines are taken in reading order; a line's first (rightmost) word is a known label when
+    it is already a deeper label. A candidate is used when it can follow the last label before it (known
+    or used), or when the next known label can follow it ("23.2" between "3.1" and "3.3" cannot).
+    Otherwise heb's reading stays, and the rejected reading is logged with ``used: false``.
+    Returns the number of words replaced."""
+    starts = [(line, max(line.words, key=lambda w: w.bbox[2])) for line in lines if line.words]
+    known = [_label_levels(w.text) if id(w) not in pending and _LABEL_DEEPER.match(w.text) else None for _, w in starts]
+    replaced, previous = 0, None
+    for i, (line, word) in enumerate(starts):
+        if id(word) not in pending:
+            previous = known[i] or previous
+            continue
+        reading, confidence = pending[id(word)]
+        levels = _label_levels(reading)
+        following = next((k for k in known[i + 1 :] if k), None)
+        used = (previous is not None and _label_follows(previous, levels)) or (following is not None and _label_follows(levels, following))
+        if word.text[-1] in ".:" and reading[-1].isdigit():
+            reading += word.text[-1]
+        entry = {"first": word.text, "second": reading, "first_confidence": word.confidence, "second_confidence": confidence,
+                 "model": model, "wider": False, "label_levels": True}
+        if not used:
+            line.number_readings.append({**entry, "used": False})
+            continue
+        line.number_readings.append(entry)
+        word.text = reading
+        line.numbers_replaced += 1
+        line.text = " ".join(w.text for w in line.words)
+        replaced += 1
+        previous = levels
+    return replaced
 
 
 def _ocr_blocks(
@@ -1449,7 +1516,7 @@ def _ocr_blocks(
                 direction="rtl",
                 lines=lines,
                 ocr={**block_ocr(engine, group), "dpi": dpi, **({"number_words_replaced": replaced} if replaced else {})},
-                checks={"number_readings": [r for line in group for r in line.number_readings]} if replaced else None,
+                checks={"number_readings": [r for line in group for r in line.number_readings]} if replaced or any(line.number_readings for line in group) else None,
                 flags=["ocr_unverified", *flags] + (["render_dpi_reduced"] if dpi < RENDER_DPI else [])
                 + (["numbers_from_second_reading"] if replaced else []) + text_flags(text),
             )
