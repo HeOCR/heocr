@@ -86,6 +86,16 @@ class BracketTest(unittest.TestCase):
         self.assertNotIn("brackets_kept_valid_as_read", doc.blocks[-1].flags)
         self.assertEqual((repairs.bracket_labels("סעיף (ג) או (ד)"), repairs.bracket_labels("סעיף )ג( או )ד(")), (2, 0))
 
+    def test_latin_parentheticals_do_not_outvote_hebrew_ones(self) -> None:
+        # A glyph-mapped document whose Latin parentheticals read right either way: mirroring keeps a
+        # Latin text's own pair, so those lines say nothing about the Hebrew text's brackets.
+        latin = ["הדוח השנתי (Yearly Summary) פורסם", "לפי התקנון (Open Rules) נקבע", "במסמך (Service Guide) מופיע",
+                 "ההנחיה (Quality Notes) קובעת", "הנוהל (Data Policy) חל", "הטופס (Request Form) מצורף"]
+        texts = BRACKETED[:3] + latin
+        doc = heocr.extract(make_pdf([PdfPage(lines=paragraphs(texts))]), ocr=False)
+        self.assertEqual(lines_of(doc), texts)
+        self.assertTrue(repairs.brackets_mirrored_in([")א( קובע", ")ב( יגיש", ")ג( חל"] + latin))
+
     def test_logically_mapped_layer_is_left_alone(self) -> None:
         doc = heocr.extract(make_pdf([PdfPage(lines=paragraphs(BRACKETED), remap={"(": ")", ")": "("})]), ocr=False)
         self.assertEqual(lines_of(doc), BRACKETED)
