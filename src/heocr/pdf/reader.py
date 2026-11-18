@@ -585,6 +585,7 @@ def read_pdf(body: bytes, doc: Document) -> None:
         pdf.close()
     if doc.options.get("repairs", True):
         _repair_rtl_brackets(doc)
+        _repair_latin_wraps(doc)
     from heocr.pdf.furniture import mark_furniture
     from heocr.pdf.webprint import mark_site_footer, mark_site_menu
 
@@ -797,6 +798,30 @@ def _repair_rtl_brackets(doc: Document) -> None:
             block.text = "\n".join(line.text for line in block.lines)
             block.repairs += repairs.record(repairs.RTL_BRACKET_ORDER, changes)
             block.flags = [f for f in block.flags if f != "rtl_brackets_unverified"] + ["brackets_mirrored"]
+
+
+def _repair_latin_wraps(doc: Document) -> None:
+    """``latin_wrap_brackets`` in the RTL text-layer paragraphs and table cells, after the document's
+    bracket order is decided."""
+    for block in doc.blocks:
+        if block.source != "text_layer" or block.direction != "rtl":
+            continue
+        changes: Counter = Counter()
+        if block.kind == "table":
+            for row in block.cells or []:
+                for cell in row:
+                    if "\n" in cell.text:
+                        cell.text, changed = repairs.latin_wrap_brackets(cell.text)
+                        changes.update(changed)
+        elif block.lines and len(block.lines) > 1:
+            text, changed = repairs.latin_wrap_brackets("\n".join(line.text for line in block.lines))
+            if changed:
+                for line, part in zip(block.lines, text.split("\n")):
+                    line.text = part
+                block.text = text
+                changes.update(changed)
+        if changes:
+            block.repairs += repairs.record(repairs.LATIN_WRAP_BRACKETS, changes)
 
 
 ROTATED_SNAP_DEG = 10  # rotated characters within this of 90 or 270 degrees are read as vertical lines

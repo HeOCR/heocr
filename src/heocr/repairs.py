@@ -67,6 +67,24 @@ RTL_BRACKET_ORDER = Rule(
     ),
 )
 
+LATIN_WRAP_BRACKETS = Rule(
+    rule_id="latin_wrap_brackets",
+    reason=(
+        "A Latin parenthetical inside Hebrew text that wraps onto the next line leaves one bracket on each "
+        "line; neither line holds its partner, so either may come out with its mirrored glyph."
+    ),
+    example=("ההסכם נחתם במסגרת )framework agreements,\nSection 12) ולכן", "ההסכם נחתם במסגרת (framework agreements,\nSection 12) ולכן"),
+    formats=("pdf",),
+    evidence=(
+        "two consecutive lines of one paragraph or table cell, both with Hebrew letters: the first ends in a "
+        "stretch with no Hebrew letter holding exactly one round bracket, with no letter or digit between "
+        "the last Hebrew letter and it; the next starts with such a stretch holding exactly one, with no "
+        "letter or digit between it and the first Hebrew letter; a Latin letter or § lies between the two; "
+        "the rest of each line holds an even number of round brackets; and the two do not read as a pair"
+    ),
+)
+
+
 FONT_PRIVATE_USE_BY_OCR = Rule(
     rule_id="font_private_use_by_ocr",
     reason="Some fonts map Hebrew letters to private-use codes and name no glyphs; the page itself shows the letter.",
@@ -133,7 +151,7 @@ def cp1255_letter(code: int) -> str | None:
 
 RULES: dict[str, Rule] = {
     rule.rule_id: rule
-    for rule in (SYMBOL_FONT_BULLET, DIRECTION_MARKS, LATIN1_ETH_NUN, RTL_BRACKET_ORDER, FONT_PRIVATE_USE_BY_OCR, REVERSED_DIGIT_GROUPS, CP1255_SHIFTED_FONT)
+    for rule in (SYMBOL_FONT_BULLET, DIRECTION_MARKS, LATIN1_ETH_NUN, RTL_BRACKET_ORDER, LATIN_WRAP_BRACKETS, FONT_PRIVATE_USE_BY_OCR, REVERSED_DIGIT_GROUPS, CP1255_SHIFTED_FONT)
 }
 
 
@@ -257,6 +275,45 @@ def continues_latin(previous: str) -> bool:
     Hebrew letter holds a Latin letter or § and an odd number of round brackets ("(Art." wrapped)."""
     tail = _LATIN_END.search(previous).group()
     return bool(re.search(r"[A-Za-z§]", tail)) and (tail.count("(") + tail.count(")")) % 2 == 1
+
+
+_ROUND = re.compile(r"[()]")
+_HEBREW_LETTER = re.compile(r"[\u05d0-\u05ea]")
+_HEAD = re.compile(r"^[^\u05d0-\u05ea]*")
+
+
+def latin_wrap_brackets(text: str) -> tuple[str, Counter]:
+    """Pair the two brackets of a Latin parenthetical split by a line wrap ("(framework agreements," /
+    "Section 12)") in a paragraph's or cell's lines, joined by newlines: the first opens, the second
+    closes. The conditions are ``LATIN_WRAP_BRACKETS.evidence``; whether the document mirrored its
+    brackets does not matter, since a lone bracket has no partner to check it against."""
+    lines = text.split("\n")
+    changes: Counter = Counter()
+    for k in range(len(lines) - 1):
+        first, second = lines[k], lines[k + 1]
+        if not (_HEBREW_LETTER.search(first) and _HEBREW_LETTER.search(second)):
+            continue
+        tail_at, head_end = _LATIN_END.search(first).start(), _HEAD.match(second).end()
+        tail, head = first[tail_at:], second[:head_end]
+        opens = [m.start() for m in _ROUND.finditer(tail)]
+        closes = [m.start() for m in _ROUND.finditer(head)]
+        if len(opens) != 1 or len(closes) != 1:
+            continue
+        o, c = opens[0], closes[0]
+        if re.search(r"\w", tail[:o]) or re.search(r"\w", head[c + 1 :]):
+            continue  # a bracket hugs the Latin run on its Hebrew side, or it is not this reference's
+        if len(_ROUND.findall(first[:tail_at])) % 2 or len(_ROUND.findall(second[head_end:])) % 2:
+            continue  # it may pair with a bracket elsewhere on its line
+        if not re.search(r"[A-Za-z§]", tail[o + 1 :] + head[:c]):
+            continue
+        if tail[o] == "(" and head[c] == ")":
+            continue
+        for ch, want in ((tail[o], "("), (head[c], ")")):
+            if ch != want:
+                changes[(f"U+{ord(ch):04X}", want)] += 1
+        lines[k] = first[: tail_at + o] + "(" + first[tail_at + o + 1 :]
+        lines[k + 1] = second[:c] + ")" + second[c + 1 :]
+    return "\n".join(lines), changes
 
 
 def brackets_mirrored_in(units: list[str]) -> bool:

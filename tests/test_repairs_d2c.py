@@ -1,4 +1,5 @@
 import io
+from collections import Counter
 import unittest
 import zipfile
 
@@ -97,6 +98,45 @@ class BracketTest(unittest.TestCase):
         self.assertFalse(repairs.brackets_mirrored_in([")א(", ")ב(", ")ג(", "(ד)"]))  # 3 is not > 3 x 1
 
 
+class LatinWrapTest(unittest.TestCase):
+    # Invented text in the shape of real documents' references: a Latin parenthetical inside Hebrew
+    # text, wrapped so that each line holds one of its brackets.
+    WRAP = ["התקשרויות מיוחדות (framework agreements,", "Section 12) ולכן חל עליו"]
+
+    def test_a_wrapped_latin_parenthetical_reads_right_from_either_producer(self) -> None:
+        for remap in ({}, {"(": ")", ")": "("}):
+            page = PdfPage(lines=paragraphs(BRACKETED) + lines_block(self.WRAP, top=500), remap=remap)
+            doc = heocr.extract(make_pdf([page]), ocr=False)
+            block = doc.blocks[-1]
+            self.assertEqual([line.text for line in block.lines], self.WRAP)
+            self.assertEqual(block.text, "\n".join(self.WRAP))
+            self.assertIn("latin_wrap_brackets", [r["rule"] for r in block.repairs])
+
+    def test_either_bracket_or_both_are_set(self) -> None:
+        right = "הליך (open tender\nrules) שבו"
+        for wrong in ("הליך )open tender\nrules) שבו", "הליך (open tender\nrules( שבו",
+                      "הליך )open tender\nrules( שבו"):
+            self.assertEqual(repairs.latin_wrap_brackets(wrong)[0], right)
+        self.assertEqual(repairs.latin_wrap_brackets(right), (right, Counter()))
+        self.assertEqual(repairs.latin_wrap_brackets("לפי )–Sections 4\n9( אשר")[0], "לפי (–Sections 4\n9) אשר")
+
+    def test_only_a_lone_pair_hugging_the_latin_run_is_paired(self) -> None:
+        for text in (
+            "המונח Fair Use) FU\nPolicy) ועוד",  # Latin before the first bracket: not the run's edge
+            "במדד (Quality\nMeasures (QM index, שמטרתו",  # Latin after the second
+            "(הערה מהדוח )Yearly\nSummary) ועוד",  # the first line holds another bracket it may pair with
+            "המונח )12\n34) קובע",  # no Latin letter between them
+            "המונח )framework agreements,",  # one line
+            "המונח )a (b\nc) קובע",  # two brackets in the first line's Latin end
+        ):
+            self.assertEqual(repairs.latin_wrap_brackets(text), (text, Counter()), text)
+
+    def test_off_with_repairs_off(self) -> None:
+        page = PdfPage(lines=lines_block(self.WRAP), remap={"(": ")", ")": "("})
+        doc = heocr.extract(make_pdf([page]), ocr=False, repairs=False)
+        self.assertNotIn("latin_wrap_brackets", [r["rule"] for b in doc.blocks for r in b.repairs])
+
+
 class DirectionMarksTest(unittest.TestCase):
     def test_removed_in_paragraphs_and_cells(self) -> None:
         d = Docx(body=[para("בסעיף ‏2.2 להלן"), table([["‎סכום", "100 ₪"]])])
@@ -124,7 +164,7 @@ class DigitGroupsTest(unittest.TestCase):
 
 class RuleListTest(unittest.TestCase):
     def test_new_rules_are_documented(self) -> None:
-        for rule_id in ("direction_marks", "latin1_eth_nun", "rtl_bracket_order"):
+        for rule_id in ("direction_marks", "latin1_eth_nun", "rtl_bracket_order", "latin_wrap_brackets"):
             rule = repairs.RULES[rule_id]
             self.assertTrue(rule.reason and rule.evidence and rule.formats)
             before, after = rule.example
