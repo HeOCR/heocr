@@ -16,6 +16,7 @@ flagged ``bidi_ambiguous_ltr_run``.
 
 from __future__ import annotations
 
+import re
 import statistics
 import unicodedata
 from dataclasses import dataclass, field
@@ -264,9 +265,10 @@ def line_is_rtl(text: str, page_rtl: bool) -> bool:
     return page_rtl
 
 
-def _latin_around(types: list[str], texts: list[str], i: int, j: int) -> bool:
+def _latin_around(types: list[str], texts: list[str], i: int, j: int, lead: bool = False) -> bool:
     """Whether the non-Hebrew stretch around units ``i``..``j`` (up to the nearest R unit on each
-    side) holds a Latin letter or a section sign."""
+    side) holds a Latin letter or a section sign. With ``lead``, a stretch that reaches the line's
+    right end (an RTL line's logical start) continues the previous line's Latin text."""
     k = i - 1
     while k >= 0 and types[k] != "R":
         if types[k] == "L" or "§" in texts[k]:
@@ -277,11 +279,63 @@ def _latin_around(types: list[str], texts: list[str], i: int, j: int) -> bool:
         if types[k] == "L" or "§" in texts[k]:
             return True
         k += 1
+    if lead and k == len(types):
+        return True
     return any("§" in texts[k] for k in range(i, j))
 
 
-def logical_text(component: list[Atom], page_rtl: bool = True) -> tuple[str, str, list[str]]:
-    """Inverse bidi for one visual line segment: (text, direction, flags)."""
+SUB_LEVEL_UNITS = 3  # a sub-level in brackets after a number ("76(1)", "77(2)(a)", "(iv)") holds at most this many glyphs
+
+
+def _latin_brackets(texts: list[str], types: list[str], resolved: list[str], lead: bool) -> None:
+    """Brackets of a Latin reference inside an RTL line ("Article 76(1)", "§75(1)", "(Annual Report)").
+
+    The page shows them as written, but producers map their glyphs either way, sometimes both ways
+    in one document: a sub-level after a number may come as ")1(" and a Latin parenthetical as
+    "(Annual Report(". Within a stretch of non-Hebrew units that holds a Latin letter or § (or, with
+    ``lead``, continues the previous line's):
+
+    - a sub-level attached to a number or letter (``SUB_LEVEL_UNITS`` glyphs at most, between two
+      brackets) is part of the Latin run, read "(" then ")" left to right as it is shown;
+    - the brackets hugging the run on both sides, when the layer gives the same character for
+      both, are a pair: the right one opens it, as an RTL paragraph shows it.
+    """
+    n = len(texts)
+    i = 0
+    while i < n:
+        if types[i] == "R":
+            i += 1
+            continue
+        j = i
+        while j < n and types[j] != "R":
+            j += 1
+        if any(types[k] == "L" or "§" in texts[k] for k in range(i, j)) or (lead and j == n):
+            attached: set[int] = set()
+            k = i + 1
+            while k < j:
+                if texts[k] in "()" and texts[k] and (types[k - 1] in ("L", "EN") or (k - 1) in attached):
+                    m = k + 1
+                    while m < j and m - k - 1 < SUB_LEVEL_UNITS and types[m] in ("L", "EN"):
+                        m += 1
+                    if k + 1 < m < j and texts[m] in "()" and texts[m]:
+                        texts[k], texts[m] = "(", ")"
+                        for x in range(k, m + 1):
+                            resolved[x] = "L"
+                        attached.update((k, m))
+                        k = m + 1
+                        continue
+                k += 1
+            core = [k for k in range(i, j) if types[k] in ("L", "EN") or k in attached]
+            if core:
+                p, q = core[0] - 1, core[-1] + 1
+                if p >= i and q < j and texts[p] in "()" and texts[p] and texts[p] == texts[q]:
+                    texts[p], texts[q] = ")", "("
+        i = j
+
+
+def logical_text(component: list[Atom], page_rtl: bool = True, latin_lead: bool = False) -> tuple[str, str, list[str]]:
+    """Inverse bidi for one visual line segment: (text, direction, flags). ``latin_lead``: the line
+    continues a Latin reference from the line before it in its paragraph or cell."""
     units = _units(component)
     texts = [u for u, _ in units]
     types = [_unit_type(u) for u in texts]
@@ -308,7 +362,8 @@ def logical_text(component: list[Atom], page_rtl: bool = True) -> tuple[str, str
         while j < n and ltr_like[j] == "N":
             j += 1
         left = ltr_like[i - 1] if i > 0 else base
-        right = ltr_like[j] if j < n else base
+        # A line that continues a Latin reference starts (at its right end) inside that Latin run.
+        right = ltr_like[j] if j < n else ("L" if rtl and latin_lead else base)
         side = left if left == right else base
         if rtl and i > 0 and j < n and types[i - 1] == "EN" and types[j] == "EN" and texts[i] == " ":
             # Two numbers apart in an RTL line, the space on the left of what lies between them: the
@@ -317,7 +372,7 @@ def logical_text(component: list[Atom], page_rtl: bool = True) -> tuple[str, str
             # Punctuation that touches the left number ("1, 2" drawn left to right) keeps one run.
             side = base
         elif (rtl and i > 0 and j < n and types[i - 1] == "EN" and types[j] == "EN" and any(texts[k] in _BRACKETS for k in range(i, j))
-              and not _latin_around(types, texts, i, j)):
+              and not _latin_around(types, texts, i, j, latin_lead)):
             # A bracket between two numbers in an RTL line: "11(5)" is shown as "(5)11". A bracket pair
             # takes the paragraph's direction when it holds a number (UAX #9 N0, numbers counting as R),
             # so the brackets are not part of either number's run. Not inside a Latin run ("Article
@@ -326,6 +381,8 @@ def logical_text(component: list[Atom], page_rtl: bool = True) -> tuple[str, str
         for k in range(i, j):
             resolved[k] = side
         i = j
+    if rtl:
+        _latin_brackets(texts, types, resolved, latin_lead)
     flags: list[str] = []
     order = list(range(n))
     run_type = "L" if rtl else "R"
@@ -417,6 +474,19 @@ def build_lines(atoms: list[Atom], rtl: bool | None = None) -> PageLines:
     return PageLines(lines, flags, invalid == 0 and not has_columns, has_columns, clear_two)
 
 
+def carry_latin_context(lines: list[BuiltLine]) -> None:
+    """Re-read an RTL line that continues a Latin reference from the line before it (a paragraph's or
+    a table cell's): "(Art. 76(2))" wrapped in a narrow cell leaves "76(2))" alone on a line with no
+    Latin letter, where the bracket rules for Hebrew text would apply."""
+    from heocr.repairs import continues_latin
+
+    for previous, line in zip(lines, lines[1:]):
+        if line.direction == "rtl" and continues_latin(previous.text):
+            text, _, flags = logical_text(line.atoms, True, latin_lead=True)
+            if text != line.text:
+                line.text, line.flags = text, flags
+
+
 def paragraphs(page: PageLines) -> list[list[BuiltLine]]:
     """Group consecutive lines into paragraphs by vertical gap, column slot and direction."""
     if not page.lines:
@@ -441,4 +511,6 @@ def paragraphs(page: PageLines) -> list[list[BuiltLine]]:
             groups.append([line])
         else:
             groups[-1].append(line)
+    for group in groups:
+        carry_latin_context(group)
     return groups
