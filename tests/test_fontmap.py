@@ -10,6 +10,7 @@ import heocr
 from heocr.ocr.tesseract import OcrLine
 from heocr.pdf import fontmap
 from heocr.pdf.lines import Atom
+from tests.synth.fake_tesseract import NOTHING
 from tests.synth.pdf import PdfPage, lines_block, make_pdf
 
 FAKE = [sys.executable, str(Path(__file__).parent / "synth" / "fake_tesseract.py")]
@@ -138,7 +139,7 @@ class PdfRouteTest(unittest.TestCase):
 
     def test_too_little_evidence_falls_back_to_page_ocr(self) -> None:
         lines = ["שלום עולם נאה", "שלום ראשון"]  # ם occurs 3 times, only twice in a word OCR can confirm
-        with mock.patch.dict(os.environ, {"FAKE_WORD": ""}):
+        with mock.patch.dict(os.environ, {"FAKE_WORD": NOTHING}):
             doc = heocr.extract(make_pdf([PdfPage(lines=lines_block(lines), remap={"ם": CODE}, font_name="SynthDavid")]), tesseract=FAKE)
         page = doc.pages[0]
         self.assertEqual((page.page_class, page.route), ("T3", "ocr"))

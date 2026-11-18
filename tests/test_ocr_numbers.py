@@ -14,6 +14,7 @@ from pathlib import Path
 from unittest import mock
 
 import heocr
+from tests.synth.fake_tesseract import NOTHING
 from tests.synth.pdf import PdfPage, make_pdf
 
 FAKE = [sys.executable, str(Path(__file__).parent / "synth" / "fake_tesseract.py")]
@@ -47,7 +48,7 @@ class NumberWordsTest(unittest.TestCase):
         return str(path)
 
     def read(self, words: list[str], second: str, confidence: str = "90.0", gaps: list[int] | None = None, **kwargs) -> heocr.Document:
-        with mock.patch.dict(os.environ, {"FAKE_TSV": self.page(words, gaps), "FAKE_WORD": second, "FAKE_CONF": confidence}):
+        with mock.patch.dict(os.environ, {"FAKE_TSV": self.page(words, gaps), "FAKE_WORD": second or NOTHING, "FAKE_CONF": confidence}):
             return heocr.extract(make_pdf([PdfPage(images=[(0, 0, 595, 842)])]), tesseract=FAKE, **kwargs)
 
     def second_readings(self) -> list[str]:
@@ -114,7 +115,7 @@ class NumberWordsTest(unittest.TestCase):
         path.write_text("\n".join(rows) + "\n", encoding="utf-8")
         state = str(Path(self.tmp.name) / "seq-lines")
         Path(state).unlink(missing_ok=True)
-        env = {"FAKE_TSV": str(path), "FAKE_WORD_SEQ": "|".join(answers), "FAKE_WORD_STATE": state, "FAKE_CONF": confidence}
+        env = {"FAKE_TSV": str(path), "FAKE_WORD_SEQ": "|".join(a or NOTHING for a in answers), "FAKE_WORD_STATE": state, "FAKE_CONF": confidence}
         with mock.patch.dict(os.environ, env):
             return heocr.extract(make_pdf([PdfPage(images=[(0, 0, 595, 842)])]), tesseract=FAKE)
 
@@ -166,8 +167,15 @@ class NumberWordsTest(unittest.TestCase):
             rows.append(f"5\t1\t1\t1\t{n}\t1\t{x0 // 2}\t{y0 // 2}\t{(x1 - x0) // 2}\t{(y1 - y0) // 2}\t{conf}\t{text}")
         path = Path(self.tmp.name) / "page-eng.tsv"
         path.write_text("\n".join(rows) + "\n", encoding="utf-8")
-        with mock.patch.dict(os.environ, {"FAKE_PAGE_TSV_ENG": str(path), "FAKE_WORD": "", "FAKE_LINE": ""}):
-            return self.read_lines(lines, [""])
+        with mock.patch.dict(os.environ, {"FAKE_PAGE_TSV_ENG": str(path), "FAKE_WORD": NOTHING, "FAKE_LINE": NOTHING}):
+            doc = self.read_lines(lines, [""])
+        # Every crop re-read finds nothing here, so any change is the page pass's own: a crop answered
+        # with the page's reading (as when Windows dropped an empty $FAKE_WORD) could not pass for it.
+        others = [r for b in doc.blocks for r in (b.checks or {}).get("number_readings") or [] if not r.get("page_pass")]
+        self.assertEqual(others, [])
+        words = sum(len(ws) for ws in lines)
+        self.assertLessEqual(sum(len(line.text.split()) for b in doc.blocks for line in b.lines or []), words)  # never adds a word
+        return doc
 
     def page_readings(self, doc: heocr.Document) -> list[dict]:
         return [r for b in doc.blocks for r in (b.checks or {}).get("number_readings") or [] if r.get("page_pass")]
