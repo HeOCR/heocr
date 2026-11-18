@@ -262,6 +262,42 @@ class NumberWordsTest(unittest.TestCase):
         self.assertFalse(starts((2, 2), (2, 2, 4)))
         self.assertFalse(starts((11, 1), (12, 2)))
 
+    def test_a_cut_label_read_as_noise_is_read_again_on_more_crops(self) -> None:
+        # set C pdf_t5_office: heb read ".1.1.1" as "1.", and the number model read heb's box as noise
+        # ("iWeeg"). Crops reaching left, and stretched, read the label among noise ("Yo.1.1.1"); the
+        # deeper label they read, ending with heb's level, goes to the guard and follows "1.1.".
+        with mock.patch.dict(os.environ, {"FAKE_LINE": "Yo.1.1.1"}):
+            doc = self.read_lines([["1.1.", "הגדרות"], ["1.", "תחולה"]], ["1.1", NOTHING])
+        self.assertEqual(doc.blocks[0].text.splitlines()[1].split()[0], "1.1.1.")
+        (logged,) = [r for r in doc.blocks[0].checks["number_readings"] if r["first"] == "1."]
+        self.assertEqual((logged["second"], logged["label_levels"]), ("1.1.1.", True))
+        # A label that does not end with heb's level is no candidate; nothing is used with the switch off.
+        with mock.patch.dict(os.environ, {"FAKE_LINE": "Yo.1.1.2"}):
+            doc = self.read_lines([["1.1.", "הגדרות"], ["1.", "תחולה"]], ["1.1", NOTHING])
+        self.assertEqual(doc.blocks[0].text.splitlines()[1].split()[0], "1.")
+        with mock.patch.dict(os.environ, {"FAKE_LINE": "Yo.1.1.1"}), mock.patch("heocr.pdf.reader.LABEL_CROPS", False):
+            doc = self.read_lines([["1.1.", "הגדרות"], ["1.", "תחולה"]], ["1.1", NOTHING])
+        self.assertEqual(doc.blocks[0].text.splitlines()[1].split()[0], "1.")
+
+    def test_crop_candidates_vouch_for_each_other_only_when_most_crops_agree(self) -> None:
+        from heocr.ocr.tesseract import OcrLine, OcrWord
+        from heocr.pdf.reader import _label_sequence
+
+        def lines():
+            out = []
+            for n, (label, text) in enumerate((("1.", "הגדרות"), ("2.", "תחולה"))):
+                words = [OcrWord(label, [2000, 100 * n, 2050, 100 * n + 40], 90.0), OcrWord(text, [1800, 100 * n, 1990, 100 * n + 40], 90.0)]
+                out.append(OcrLine(" ".join(w.text for w in words), [1800, 100 * n, 2050, 100 * n + 40], words=words))
+            return out
+
+        for share, used in ((20.0, False), (80.0, True)):
+            with self.subTest(share=share):
+                ls = lines()
+                pending = {id(ls[0].words[0]): ("1.1.1.", share, False, True), id(ls[1].words[0]): ("1.1.2.", share, False, True)}
+                _label_sequence(ls, pending, "eng")
+                self.assertEqual([l.words[0].text for l in ls], ["1.1.1.", "1.1.2."] if used else ["1.", "2."])
+                self.assertTrue(all(r.get("crops") for l in ls for r in l.number_readings))
+
     def test_label_follows(self) -> None:
         from heocr.pdf.reader import _label_follows as follows
         self.assertTrue(follows((2, 2), (2, 2, 4)))

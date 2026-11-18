@@ -1413,6 +1413,15 @@ def _reread_number_words(numbers, image, result, dpi: int) -> tuple[int, int]:
                     if deeper is not None and _LABEL_DEEPER.match(deeper[0]) and deeper[0].rstrip(".").endswith(reading.rstrip(".")):
                         reading, confidence = deeper
                         wider = True
+                if label and LABEL_CROPS and _LABEL_ONE_LEVEL.match(word.text) and (reading is None or not _LABEL_DEEPER.match(reading)) and id(word) not in pending:
+                    # heb's box over a cut label often reads as noise to the number model too ("iWeeg" for
+                    # ".1.1.1"). A few more crops (contrast stretched, and reaching left into the label's
+                    # dropped levels) usually hold it: the deeper label most of them read, ending with heb's
+                    # level, is decided by its neighbours like any low-confidence one.
+                    found = _label_from_crops(numbers, image, word, dpi)
+                    if found is not None:
+                        pending[id(word)] = (found[0], found[1], False, True)
+                        continue
             except OcrUnavailable:
                 return reread, replaced
             if reading is None:
@@ -1434,6 +1443,45 @@ def _reread_number_words(numbers, image, result, dpi: int) -> tuple[int, int]:
     if pending:
         replaced += _label_sequence(result.lines, pending, numbers.lang)
     return reread, replaced
+
+
+LABEL_CROPS = True  # a cut label heb's box reads as noise is read again on a few more crops
+# A crop candidate vouched for only by another candidate (LABEL_CHAIN) needs most crops to agree on it:
+# on set B, those that one or two of five crops read were 27 right to 10 wrong.
+LABEL_CROPS_CHAIN_MIN_SHARE = 60.0
+_LABEL_IN_READING = re.compile(r"\d{1,2}(?:\.\d{1,2})+")
+
+
+def _label_from_crops(numbers, image, word, dpi: int) -> tuple[str, float] | None:
+    """The deeper label most of a few crops of a cut label read, as (reading, share of crops that read
+    it x 100); None when no crop reads a deeper label ending with heb's level. The crops: heb's box
+    with its contrast stretched, and boxes reaching one and two line heights left (where an RTL label's
+    dropped levels sit), plain and stretched. A reading may carry noise around the label ("Yo.1.1.1"):
+    the label is searched in it."""
+    from PIL import ImageOps
+
+    x0, y0, x1, y1 = word.bbox
+    h = y1 - y0
+    level = "." + word.text.rstrip(".")
+    found = []
+    boxes = [((x0 - NUMBER_WORD_PAD, y0 - NUMBER_WORD_PAD, x1 + NUMBER_WORD_PAD, y1 + NUMBER_WORD_PAD), True)]
+    boxes += [((x0 - k * h, y0 - 8, x1 + 8, y1 + 8), stretch) for k in (1, 2) for stretch in (False, True)]
+    for (bx0, by0, bx1, by1), stretch in boxes:
+        box = (max(0, int(bx0)), max(0, int(by0)), min(image.size[0], int(bx1)), min(image.size[1], int(by1)))
+        if box[2] <= box[0] or box[3] <= box[1]:
+            continue
+        crop = image.crop(box).convert("L")
+        if stretch:
+            crop = ImageOps.autocontrast(crop, cutoff=1)
+        result = numbers.recognize(crop, dpi=dpi, psm=7)
+        text = "".join(w.text for line in result.lines for w in line.words if w.text.strip("|"))
+        match = _LABEL_IN_READING.search(text)
+        if match and ("." + match.group()).endswith(level):
+            found.append(match.group() + ".")
+    if not found:
+        return None
+    best, count = Counter(found).most_common(1)[0]
+    return best, round(100.0 * count / len(boxes), 1)
 
 
 def _label_levels(text: str) -> tuple[int, ...]:
@@ -1482,12 +1530,13 @@ def _label_sequence(lines, pending: dict[int, tuple[str, float]], model: str) ->
         if id(word) not in pending:
             previous = known[i] or previous
             continue
-        reading, confidence = pending[id(word)]
+        reading, confidence, *extra = pending[id(word)]
+        from_crops = len(extra) > 1 and extra[1]
         levels = _label_levels(reading)
         following = next((k for k in known[i + 1 :] if k), None)
         used = (previous is not None and _label_follows(previous, levels)) or (following is not None and _label_follows(levels, following))
         chained = False
-        if not used and LABEL_CHAIN:
+        if not used and LABEL_CHAIN and (not from_crops or confidence >= LABEL_CROPS_CHAIN_MIN_SHARE):
             at = labelled.index(i)
             before = candidate[labelled[at - 1]] if at > 0 else None
             after = candidate[labelled[at + 1]] if at + 1 < len(labelled) else None
@@ -1496,7 +1545,7 @@ def _label_sequence(lines, pending: dict[int, tuple[str, float]], model: str) ->
         if word.text[-1] in ".:" and reading[-1].isdigit():
             reading += word.text[-1]
         entry = {"first": word.text, "second": reading, "first_confidence": word.confidence, "second_confidence": confidence,
-                 "model": model, "wider": False, "label_levels": True}
+                 "model": model, "wider": False, "label_levels": True, **({"crops": True} if from_crops else {})}
         if not used:
             line.number_readings.append({**entry, "used": False})
             continue
