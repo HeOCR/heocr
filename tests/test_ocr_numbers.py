@@ -236,6 +236,32 @@ class NumberWordsTest(unittest.TestCase):
         self.assertEqual(doc.blocks[0].text.splitlines()[1], "4. דיווח")
         self.assertNotIn("page_number_tokens", doc.pages[0].coverage)
 
+    def test_cut_labels_with_no_known_neighbour_vouch_for_each_other_in_strict_sequence(self) -> None:
+        # set B pdf_t5_scan: on a page whose labels heb all cut, no known label anchors the guard. Two
+        # neighbouring candidates in strict sequence ("1.1.1" then "1.1.2") are used; the first is logged
+        # chained, and the second then follows it.
+        doc = self.read_lines([["1.", "הגדרות"], ["2.", "תחולה"]], ["1.1.1", "1.1.2"])
+        self.assertEqual([l.split()[0] for l in doc.blocks[0].text.splitlines()], ["1.1.1.", "1.1.2."])
+        logged = doc.blocks[0].checks["number_readings"]
+        self.assertEqual([r.get("chained", False) for r in logged], [True, False])  # the second follows the first, now used
+        # A loose step ("3.1.8" then "3.2.9": a new section that does not restart at 1) vouches for nothing.
+        doc = self.read_lines([["8.", "הגדרות"], ["9.", "תחולה"]], ["3.1.8", "3.2.9"])
+        self.assertEqual([l.split()[0] for l in doc.blocks[0].text.splitlines()], ["8.", "9."])
+        with mock.patch("heocr.pdf.reader.LABEL_CHAIN", False):
+            doc = self.read_lines([["1.", "הגדרות"], ["2.", "תחולה"]], ["1.1.1", "1.1.2"])
+        self.assertEqual([l.split()[0] for l in doc.blocks[0].text.splitlines()], ["1.", "2."])
+
+    def test_label_starts_numbering(self) -> None:
+        from heocr.pdf.reader import _label_starts_numbering as starts
+
+        self.assertTrue(starts((1, 1, 1), (1, 1, 2)))
+        self.assertTrue(starts((2, 2), (2, 2, 1)))
+        self.assertTrue(starts((2, 1, 3), (2, 2)))
+        self.assertTrue(starts((2, 1, 3), (2, 2, 1)))
+        self.assertFalse(starts((3, 1, 8), (3, 2, 9)))
+        self.assertFalse(starts((2, 2), (2, 2, 4)))
+        self.assertFalse(starts((11, 1), (12, 2)))
+
     def test_label_follows(self) -> None:
         from heocr.pdf.reader import _label_follows as follows
         self.assertTrue(follows((2, 2), (2, 2, 4)))
