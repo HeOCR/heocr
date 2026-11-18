@@ -14,6 +14,7 @@ from pathlib import Path
 from unittest import mock
 
 import heocr
+from tests.synth.fake_tesseract import NOTHING
 from tests.synth.pdf import PdfPage, make_pdf
 
 FAKE = [sys.executable, str(Path(__file__).parent / "synth" / "fake_tesseract.py")]
@@ -47,7 +48,7 @@ class NumberWordsTest(unittest.TestCase):
         return str(path)
 
     def read(self, words: list[str], second: str, confidence: str = "90.0", gaps: list[int] | None = None, **kwargs) -> heocr.Document:
-        with mock.patch.dict(os.environ, {"FAKE_TSV": self.page(words, gaps), "FAKE_WORD": second, "FAKE_CONF": confidence}):
+        with mock.patch.dict(os.environ, {"FAKE_TSV": self.page(words, gaps), "FAKE_WORD": second or NOTHING, "FAKE_CONF": confidence}):
             return heocr.extract(make_pdf([PdfPage(images=[(0, 0, 595, 842)])]), tesseract=FAKE, **kwargs)
 
     def second_readings(self) -> list[str]:
@@ -114,7 +115,7 @@ class NumberWordsTest(unittest.TestCase):
         path.write_text("\n".join(rows) + "\n", encoding="utf-8")
         state = str(Path(self.tmp.name) / "seq-lines")
         Path(state).unlink(missing_ok=True)
-        env = {"FAKE_TSV": str(path), "FAKE_WORD_SEQ": "|".join(answers), "FAKE_WORD_STATE": state, "FAKE_CONF": confidence}
+        env = {"FAKE_TSV": str(path), "FAKE_WORD_SEQ": "|".join(a or NOTHING for a in answers), "FAKE_WORD_STATE": state, "FAKE_CONF": confidence}
         with mock.patch.dict(os.environ, env):
             return heocr.extract(make_pdf([PdfPage(images=[(0, 0, 595, 842)])]), tesseract=FAKE)
 
@@ -149,6 +150,91 @@ class NumberWordsTest(unittest.TestCase):
     def test_a_cut_label_with_no_known_neighbour_is_not_used(self) -> None:
         doc = self.read(["4.", "דיווח", "עיתי"], "2.2.4", "8.0")
         self.assertEqual(doc.blocks[0].text, "4. דיווח עיתי")
+
+    def page_pass(self, lines: list[list[str]], tokens: list[tuple[str, str, list[tuple[int, int]]]]) -> heocr.Document:
+        """``lines`` read by heb as in ``read_lines``; every crop's second reading finds nothing, and the
+        number model's whole-page reading holds ``tokens``: (text, confidence, the (line, word) boxes of
+        heb's it spans, both 1-based). The page pass reads at half the render's resolution."""
+        boxes = {}
+        for ln, words in enumerate(lines, 1):
+            for n in range(1, len(words) + 1):
+                left = 2250 - 250 - 300 * (n - 1)
+                boxes[(ln, n)] = (left, 100 * ln, left + 250, 100 * ln + 60)
+        rows = [HEADER]
+        for n, (text, conf, over) in enumerate(tokens, 1):
+            x0, y0 = min(boxes[k][0] for k in over), min(boxes[k][1] for k in over)
+            x1, y1 = max(boxes[k][2] for k in over), max(boxes[k][3] for k in over)
+            rows.append(f"5\t1\t1\t1\t{n}\t1\t{x0 // 2}\t{y0 // 2}\t{(x1 - x0) // 2}\t{(y1 - y0) // 2}\t{conf}\t{text}")
+        path = Path(self.tmp.name) / "page-eng.tsv"
+        path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+        with mock.patch.dict(os.environ, {"FAKE_PAGE_TSV_ENG": str(path), "FAKE_WORD": NOTHING, "FAKE_LINE": NOTHING}):
+            doc = self.read_lines(lines, [""])
+        # Every crop re-read finds nothing here, so any change is the page pass's own: a crop answered
+        # with the page's reading (as when Windows dropped an empty $FAKE_WORD) could not pass for it.
+        others = [r for b in doc.blocks for r in (b.checks or {}).get("number_readings") or [] if not r.get("page_pass")]
+        self.assertEqual(others, [])
+        words = sum(len(ws) for ws in lines)
+        self.assertLessEqual(sum(len(line.text.split()) for b in doc.blocks for line in b.lines or []), words)  # never adds a word
+        return doc
+
+    def page_readings(self, doc: heocr.Document) -> list[dict]:
+        return [r for b in doc.blocks for r in (b.checks or {}).get("number_readings") or [] if r.get("page_pass")]
+
+    def test_the_page_pass_restores_a_cut_label_that_follows_its_neighbours(self) -> None:
+        # set B pdf_t5_scan: heb reads "2.2.4." as "4.", and the number model reads heb's crop of "4." as
+        # nothing; its whole-page reading has the label whole. It ends with heb's level and follows
+        # "2.2.", so it is used, at any confidence.
+        doc = self.page_pass([["2.2.", "הגדרות"], ["4.", "דיווח"]], [("2.2.", "70", [(1, 1)]), ("2.2.4.", "20", [(2, 1)])])
+        self.assertEqual(doc.blocks[0].text.splitlines()[1], "2.2.4. דיווח")
+        (logged,) = self.page_readings(doc)
+        self.assertEqual((logged["first"], logged["second"], logged["label_levels"]), ("4.", "2.2.4.", True))
+        self.assertNotIn("used", logged)
+        self.assertEqual(doc.pages[0].coverage["page_number_words_replaced"], 1)
+
+    def test_the_page_pass_label_out_of_sequence_is_logged_and_not_used(self) -> None:
+        doc = self.page_pass([["3.1.", "אחת"], ["2.", "שתיים"], ["3.3.", "שלוש"]], [("23.2.", "90", [(2, 1)])])
+        self.assertEqual(doc.blocks[0].text.splitlines()[1], "2. שתיים")
+        (logged,) = self.page_readings(doc)
+        self.assertEqual((logged["second"], logged["used"]), ("23.2.", False))
+
+    def test_the_page_pass_joins_a_split_amount(self) -> None:
+        doc = self.page_pass([["סכום", "385", ",000", "ש\"ח"]], [("385,000", "90", [(1, 2), (1, 3)])])
+        self.assertEqual(doc.blocks[0].text, "סכום 385,000 ש\"ח")
+        (logged,) = self.page_readings(doc)
+        self.assertEqual((logged["first"], logged["second"]), ("385 ,000", "385,000"))
+
+    def test_the_page_pass_never_adds_text(self) -> None:
+        # eng finds numbers in Hebrew words, stamps and rulings: a token over no number piece of heb's is dropped.
+        doc = self.page_pass([["תקנות", "הביטוח"]], [("1994", "95", [(1, 1)]), ("12", "95", [(1, 2)])])
+        self.assertEqual(doc.blocks[0].text, "תקנות הביטוח")
+        self.assertEqual(self.page_readings(doc), [])
+
+    def test_an_unsure_or_digit_dropping_page_token_is_not_used(self) -> None:
+        doc = self.page_pass([["סכום", "385", ",000"]], [("385,000", "30", [(1, 2), (1, 3)])])
+        self.assertEqual(doc.blocks[0].text, "סכום 385 ,000")
+        doc = self.page_pass([["סכום", "1385", ",000"]], [("385,000", "90", [(1, 2), (1, 3)])])
+        self.assertEqual(doc.blocks[0].text, "סכום 1385 ,000")
+
+    def test_a_page_token_adds_digits_only_as_a_date_or_amount(self) -> None:
+        # set B pdf_t5_scan: eng's page reading joins nearby ink to a plain number ("60" as "6019").
+        doc = self.page_pass([["סעיף", "60", "לחוק"]], [("6019", "90", [(1, 2)])])
+        self.assertEqual(doc.blocks[0].text, "סעיף 60 לחוק")
+        # set C office_numbers: a date heb read as its year alone is restored.
+        doc = self.page_pass([["עד", "2022", "יום"]], [("01.12.2022", "90", [(1, 2)])])
+        self.assertEqual(doc.blocks[0].text, "עד 01.12.2022 יום")
+
+    def test_a_page_token_changes_heb_digits_only_when_surer(self) -> None:
+        # At 150 dpi eng reads 3 as 5: heb's "354" at 90 stays against eng's "554" at 67.
+        doc = self.page_pass([["סעיף", "354", "לחוק"]], [("554", "67", [(1, 2)])])
+        self.assertEqual(doc.blocks[0].text, "סעיף 354 לחוק")
+        doc = self.page_pass([["סעיף", "354", "לחוק"]], [("554", "95", [(1, 2)])])
+        self.assertEqual(doc.blocks[0].text, "סעיף 554 לחוק")
+
+    def test_no_page_pass_when_it_is_off(self) -> None:
+        with mock.patch("heocr.pdf.reader.PAGE_NUMBER_PASS", False):
+            doc = self.page_pass([["2.2.", "הגדרות"], ["4.", "דיווח"]], [("2.2.4.", "90", [(2, 1)])])
+        self.assertEqual(doc.blocks[0].text.splitlines()[1], "4. דיווח")
+        self.assertNotIn("page_number_tokens", doc.pages[0].coverage)
 
     def test_label_follows(self) -> None:
         from heocr.pdf.reader import _label_follows as follows

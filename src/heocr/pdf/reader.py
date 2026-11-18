@@ -1480,6 +1480,106 @@ def _label_sequence(lines, pending: dict[int, tuple[str, float]], model: str) ->
     return replaced
 
 
+PAGE_NUMBER_PASS = True  # one more reading of each OCR page by the number model, for the numbers heb cut or misread
+PAGE_NUMBER_DPI = 150  # the page pass reads at this resolution: eng's page segmentation finds more numbers there than at 300
+PAGE_NUMBER_MIN_OVERLAP = 0.5  # a token covers a word when it overlaps this share of the lower one's height
+
+
+def _page_number_pass(numbers, image, result, dpi: int) -> tuple[int, int]:
+    """The whole page read once more by the number model (``--psm 3`` at ``PAGE_NUMBER_DPI``), for the
+    numbers no crop restored: heb cuts a label at a line's start to its last level ("1." of "2.3.1.")
+    and reads a short line's digits apart, where a crop of heb's box holds only what heb saw. Its
+    tokens never add text (eng finds numbers in stamps, rulings and Hebrew letters): each of heb's
+    number pieces (``_segment_piece``, with a digit) goes to the token over it, and a token replaces
+    the pieces it covers only on the rules of ``_reread_number_segments`` (a whole number shape,
+    confidence at least ``NUMBER_SEGMENT_MIN_CONFIDENCE``, every digit kept, a ₪ only by a date), and
+    two more: it adds digits only as a date or grouped amount (``_RUN_READING``), and it changes heb's
+    digits only when it is surer than heb's words. A
+    deeper label at a line's start replaces heb's label when it ends with heb's levels, at any
+    confidence, and only through the sequence guard (``_label_sequence``). Each replacement is logged
+    with ``page_pass: true``. Returns (tokens over heb's pieces, words replaced)."""
+    from PIL import Image
+
+    factor = PAGE_NUMBER_DPI / dpi
+    small = image if factor >= 1 else image.resize((max(1, round(image.size[0] * factor)), max(1, round(image.size[1] * factor))), Image.LANCZOS)
+    factor = small.size[0] / image.size[0]
+    tokens = [w for l in numbers.recognize(small, dpi=round(dpi * factor), psm=3).lines for w in l.words if any(ch.isdigit() for ch in w.text)]
+    for t in tokens:  # into the page image's pixels
+        t.bbox = [v / factor for v in t.bbox]
+
+    def overlap(w, t) -> float:
+        across = min(w.bbox[2], t.bbox[2]) - max(w.bbox[0], t.bbox[0])
+        down = min(w.bbox[3], t.bbox[3]) - max(w.bbox[1], t.bbox[1])
+        if across <= 0 or down < PAGE_NUMBER_MIN_OVERLAP * min(w.bbox[3] - w.bbox[1], t.bbox[3] - t.bbox[1]):
+            return 0.0
+        return across * down
+
+    found = replaced = 0
+    pending: dict[int, tuple[str, float]] = {}
+    for line in result.lines:
+        if not line.words:
+            continue
+        start = max(line.words, key=lambda w: w.bbox[2])
+        cover: dict[int, list] = {}
+        by_id = {}
+        for w in line.words:
+            if not (_segment_piece(w.text) and any(ch.isdigit() for ch in w.text)):
+                continue
+            best = max(tokens, key=lambda t: overlap(w, t), default=None)
+            if best is not None and overlap(w, best) > 0:
+                cover.setdefault(id(best), []).append(w)
+                by_id[id(best)] = best
+        changes = []
+        for key, covered in cover.items():
+            t = by_id[key]
+            found += 1
+            text = t.text.strip("|")
+            if [w.text for w in covered] == [text]:
+                continue
+            label = (covered == [start] and start.text.endswith(".") and bool(_LABEL_ONE_LEVEL.match(start.text) or _LABEL_DEEPER.match(start.text)))
+            if label:
+                reading = text if text.endswith(".") else text + "."
+                if _LABEL_DEEPER.match(reading) and reading.rstrip(".").endswith("." + start.text.rstrip(".")):
+                    if LABEL_SEQUENCE_GUARD:
+                        pending[id(start)] = (reading, t.confidence)
+                    else:
+                        changes.append((t, reading, covered))
+                continue
+            if not _SEGMENT_TOKEN.match(text) or t.confidence < NUMBER_SEGMENT_MIN_CONFIDENCE:
+                continue
+            digits = "".join(ch for ch in text if ch.isdigit())
+            first = "".join(ch for w in covered for ch in w.text if ch.isdigit())
+            if len(digits) < len(first):
+                continue
+            if len(digits) > len(first) and not _RUN_READING.match(text):
+                continue  # eng adds digits from nearby ink to a plain number ("60" as "6019"); a date or amount heb broke is restored
+            if digits != first and len(digits) == len(first) and t.confidence <= min(w.confidence for w in covered):
+                continue  # at 150 dpi eng confuses 3 and 5: a digit heb read surer than eng stays
+            if any("₪" in w.text for w in covered) and not _SEGMENT_DATE.match(text):
+                continue  # only a date may take a ₪'s place: an amount keeps its currency
+            changes.append((t, text, covered))
+        for t, text, covered in changes:
+            at = next((i for i, w in enumerate(line.words) if w is covered[0]), None)
+            if at is None:
+                continue
+            line.number_readings.append({"first": " ".join(w.text for w in covered), "second": text,
+                                         "first_confidence": min(w.confidence for w in covered), "second_confidence": t.confidence,
+                                         "model": numbers.lang, "wider": False, "page_pass": True})
+            line.words[:] = [w for w in line.words if not any(w is c for c in covered)]
+            line.words.insert(at, type(covered[0])(text, list(t.bbox), t.confidence))
+            line.numbers_replaced += 1
+            replaced += 1
+        if changes:
+            line.text = " ".join(w.text for w in line.words)
+    if pending:
+        first = {id(line): len(line.number_readings) for line in result.lines}
+        replaced += _label_sequence(result.lines, pending, numbers.lang)
+        for line in result.lines:
+            for entry in line.number_readings[first[id(line)]:]:
+                entry["page_pass"] = True
+    return found, replaced
+
+
 def _ocr_blocks(
     doc: Document, index: int, engine, result, render_scale: float, *, offset=(0.0, 0.0), flags=(), min_confidence: float | None = None
 ) -> int:
@@ -1590,6 +1690,12 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
     first = len(doc.blocks)
     numbers = number_engine_for(doc) if doc.options.get("check_numbers", "suspect") else None
     number_words = _reread_number_words(numbers, page_image, result, round(scale * 72)) if numbers is not None and numbers is not engine else None
+    page_numbers = None
+    if number_words is not None and PAGE_NUMBER_PASS:
+        try:
+            page_numbers = _page_number_pass(numbers, page_image, result, round(scale * 72))
+        except OcrUnavailable:
+            page_numbers = None
     read = _ocr_blocks(doc, index, engine, result, scale)
     if grids:
         t_blocks, in_cells = _ocr_tables(doc, index, engine, image, scale, grids, None if numbers is engine else numbers)
@@ -1619,6 +1725,7 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
              {"chars_total": text.chars_total, "chars_read": 0, "chars_ocr": read,
               "ink_outside_ocr_share": outside_share,
               **({"number_words_reread": number_words[0], "number_words_replaced": number_words[1]} if number_words else {}),
+              **({"page_number_tokens": page_numbers[0], "page_number_words_replaced": page_numbers[1]} if page_numbers else {}),
               "status": "ocr" if found and not short else "partial" if found else "unread"}, flags)
     )
 

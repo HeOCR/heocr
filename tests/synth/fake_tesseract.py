@@ -3,7 +3,12 @@
 It answers --version and --list-langs, and writes a TSV for a recognition call. The TSV comes
 from $FAKE_TSV (a file) or a built-in two-line Hebrew page; a single-word call (--psm 8)
 answers with $FAKE_WORD when it is set (or with the next of $FAKE_WORD_SEQ, "a|b", counted in
-$FAKE_WORD_STATE), and a single-line call (--psm 7) with $FAKE_LINE. Every call's arguments are appended
+$FAKE_WORD_STATE), and a single-line call (--psm 7) with $FAKE_LINE. A whole-page call in ``eng``
+(``--psm 3``) answers with $FAKE_PAGE_TSV_ENG (a file) when it is set; no crop call ever gets it.
+
+An empty variable counts as unset, on every OS: Windows drops empty variables from a child's
+environment, so a test cannot rely on one. "Nothing found" is $FAKE_WORD / $FAKE_LINE (or an entry of
+$FAKE_WORD_SEQ) set to ``NOTHING``. Every call's arguments are appended
 to $FAKE_LOG when it is set; $FAKE_FAIL=1 makes recognition fail.
 
 A table-cell call (--psm 6 or 7) with $FAKE_CELLS set (a JSON file mapping grey levels to
@@ -16,6 +21,8 @@ $FAKE_CELLS_ENG instead, when it is set, at confidence $FAKE_CELLS_CONF (default
 import json
 import os
 import sys
+
+NOTHING = "<nothing>"  # a single-word or one-line call that finds no text
 
 DEFAULT_TSV = "\n".join(
     [
@@ -33,6 +40,8 @@ DEFAULT_TSV = "\n".join(
 
 
 def main(argv: list[str]) -> int:
+    for key in [k for k, v in os.environ.items() if v == ""]:
+        del os.environ[key]  # as on Windows, where an empty variable never reaches the child
     log = os.environ.get("FAKE_LOG")
     if log:
         with open(log, "a", encoding="utf-8") as stream:
@@ -80,6 +89,8 @@ def main(argv: list[str]) -> int:
             stream.write(str(calls + 1))
     if psm == "7" and os.environ.get("FAKE_LINE") is not None:
         word = os.environ["FAKE_LINE"]
+    if word == NOTHING:
+        word = ""
     if psm in ("7", "8") and word is not None:
         # A single-word or one-line call: answer with $FAKE_WORD / $FAKE_LINE (empty means nothing found).
         # Tokens are laid out left to right across the image: evenly, or at $FAKE_LINE_SPANS
@@ -103,6 +114,8 @@ def main(argv: list[str]) -> int:
             stream.write("\n".join(rows) + "\n")
         return 0
     source = os.environ.get("FAKE_TSV")
+    if lang == "eng" and psm == "3" and os.environ.get("FAKE_PAGE_TSV_ENG"):
+        source = os.environ["FAKE_PAGE_TSV_ENG"]  # a whole-page call in the number model (the page number pass)
     tsv = open(source, encoding="utf-8").read() if source else DEFAULT_TSV
     with open(base + ".tsv", "w", encoding="utf-8") as stream:
         stream.write(tsv)
