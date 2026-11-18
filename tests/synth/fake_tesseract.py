@@ -3,7 +3,8 @@
 It answers --version and --list-langs, and writes a TSV for a recognition call. The TSV comes
 from $FAKE_TSV (a file) or a built-in two-line Hebrew page; a single-word call (--psm 8)
 answers with $FAKE_WORD when it is set (or with the next of $FAKE_WORD_SEQ, "a|b", counted in
-$FAKE_WORD_STATE), and a single-line call (--psm 7) with $FAKE_LINE. Every call's arguments are appended
+$FAKE_WORD_STATE), and a single-line call (--psm 7) with $FAKE_LINE. A whole-page call in ``eng``
+answers with $FAKE_PAGE_TSV_ENG (a file) when it is set. Every call's arguments are appended
 to $FAKE_LOG when it is set; $FAKE_FAIL=1 makes recognition fail.
 
 A table-cell call (--psm 6 or 7) with $FAKE_CELLS set (a JSON file mapping grey levels to
@@ -103,6 +104,8 @@ def main(argv: list[str]) -> int:
             stream.write("\n".join(rows) + "\n")
         return 0
     source = os.environ.get("FAKE_TSV")
+    if lang == "eng" and os.environ.get("FAKE_PAGE_TSV_ENG"):
+        source = os.environ["FAKE_PAGE_TSV_ENG"]  # a whole-page call in the number model (the page number pass)
     tsv = open(source, encoding="utf-8").read() if source else DEFAULT_TSV
     with open(base + ".tsv", "w", encoding="utf-8") as stream:
         stream.write(tsv)
