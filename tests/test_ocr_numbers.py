@@ -207,6 +207,21 @@ class NumberWordsTest(unittest.TestCase):
         doc = self.page_pass([["סכום", "1385", ",000"]], [("385,000", "90", [(1, 2), (1, 3)])])
         self.assertEqual(doc.blocks[0].text, "סכום 1385 ,000")
 
+    def test_a_page_token_adds_digits_only_as_a_date_or_amount(self) -> None:
+        # set B pdf_t5_scan: eng's page reading joins nearby ink to a plain number ("60" as "6019").
+        doc = self.page_pass([["סעיף", "60", "לחוק"]], [("6019", "90", [(1, 2)])])
+        self.assertEqual(doc.blocks[0].text, "סעיף 60 לחוק")
+        # set C office_numbers: a date heb read as its year alone is restored.
+        doc = self.page_pass([["עד", "2022", "יום"]], [("01.12.2022", "90", [(1, 2)])])
+        self.assertEqual(doc.blocks[0].text, "עד 01.12.2022 יום")
+
+    def test_a_page_token_changes_heb_digits_only_when_surer(self) -> None:
+        # At 150 dpi eng reads 3 as 5: heb's "354" at 90 stays against eng's "554" at 67.
+        doc = self.page_pass([["סעיף", "354", "לחוק"]], [("554", "67", [(1, 2)])])
+        self.assertEqual(doc.blocks[0].text, "סעיף 354 לחוק")
+        doc = self.page_pass([["סעיף", "354", "לחוק"]], [("554", "95", [(1, 2)])])
+        self.assertEqual(doc.blocks[0].text, "סעיף 554 לחוק")
+
     def test_no_page_pass_when_it_is_off(self) -> None:
         with mock.patch("heocr.pdf.reader.PAGE_NUMBER_PASS", False):
             doc = self.page_pass([["2.2.", "הגדרות"], ["4.", "דיווח"]], [("2.2.4.", "90", [(2, 1)])])

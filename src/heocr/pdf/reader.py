@@ -1492,7 +1492,9 @@ def _page_number_pass(numbers, image, result, dpi: int) -> tuple[int, int]:
     tokens never add text (eng finds numbers in stamps, rulings and Hebrew letters): each of heb's
     number pieces (``_segment_piece``, with a digit) goes to the token over it, and a token replaces
     the pieces it covers only on the rules of ``_reread_number_segments`` (a whole number shape,
-    confidence at least ``NUMBER_SEGMENT_MIN_CONFIDENCE``, every digit kept, a ₪ only by a date). A
+    confidence at least ``NUMBER_SEGMENT_MIN_CONFIDENCE``, every digit kept, a ₪ only by a date), and
+    two more: it adds digits only as a date or grouped amount (``_RUN_READING``), and it changes heb's
+    digits only when it is surer than heb's words. A
     deeper label at a line's start replaces heb's label when it ends with heb's levels, at any
     confidence, and only through the sequence guard (``_label_sequence``). Each replacement is logged
     with ``page_pass: true``. Returns (tokens over heb's pieces, words replaced)."""
@@ -1545,8 +1547,14 @@ def _page_number_pass(numbers, image, result, dpi: int) -> tuple[int, int]:
                 continue
             if not _SEGMENT_TOKEN.match(text) or t.confidence < NUMBER_SEGMENT_MIN_CONFIDENCE:
                 continue
-            if sum(ch.isdigit() for ch in text) < sum(ch.isdigit() for w in covered for ch in w.text):
+            digits = "".join(ch for ch in text if ch.isdigit())
+            first = "".join(ch for w in covered for ch in w.text if ch.isdigit())
+            if len(digits) < len(first):
                 continue
+            if len(digits) > len(first) and not _RUN_READING.match(text):
+                continue  # eng adds digits from nearby ink to a plain number ("60" as "6019"); a date or amount heb broke is restored
+            if digits != first and len(digits) == len(first) and t.confidence <= min(w.confidence for w in covered):
+                continue  # at 150 dpi eng confuses 3 and 5: a digit heb read surer than eng stays
             if any("₪" in w.text for w in covered) and not _SEGMENT_DATE.match(text):
                 continue  # only a date may take a ₪'s place: an amount keeps its currency
             changes.append((t, text, covered))
