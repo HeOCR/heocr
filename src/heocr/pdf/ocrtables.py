@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import re
 
-from heocr.ocr.regions import INK_LEVEL, has_ink
+from heocr.ocr.regions import INK_LEVEL, MIN_INK_PIXELS, MIN_INK_SHARE, has_ink, paper_level
 from heocr.pdf.tables import Rule, Table, _merge, find_tables
 
 MIN_RULE_PT = 40.0  # a ruling is at least this long (text strokes and underlined words are shorter)
@@ -118,6 +118,27 @@ def cell_crop(image, box, scale: float):
 
 def cell_has_ink(crop) -> bool:
     return crop is not None and has_ink(crop.convert("L"))
+
+
+FAINT_INK_DELTA = 40  # grey levels below the cell's own paper that count as faint ink
+
+
+def cell_has_faint_ink(crop) -> bool:
+    """Ink too light for ``has_ink`` (grey above ``INK_LEVEL``) but clearly darker than the cell's own
+    paper: a faint row of a scanned table (set C pdf_t5_table_faint: grey 165-196). Every faint text
+    cell there passes, and no empty cell."""
+    if crop is None:
+        return False
+    gray = crop.convert("L")
+    dark = sum(gray.histogram()[: max(0, paper_level(gray) - FAINT_INK_DELTA)])
+    return dark >= max(MIN_INK_PIXELS, MIN_INK_SHARE * gray.size[0] * gray.size[1])
+
+
+def faint_cell_image(crop):
+    """A faint cell's image with its contrast stretched, for OCR."""
+    from PIL import ImageOps
+
+    return ImageOps.autocontrast(crop.convert("L"), cutoff=1)
 
 
 def cell_lines(crop) -> int:

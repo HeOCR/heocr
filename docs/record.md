@@ -81,7 +81,7 @@ Flags are open lists of strings: a later v1 may add more. The main ones, by what
   - `from_image_region`, `layer_text_masked`, `repeated_image_text`.
 - **Tables:**
   - `ruled_table`, `unruled_table`, `ocr_tables`;
-  - `table_cells_ink_unread`, `table_cell_unconfirmed`, `merged_above`, `span_capped`.
+  - `table_cells_ink_unread`, `table_cell_unconfirmed`, `table_cell_garbled`, `faint_ink_read`, `number_read_at_half_resolution`, `merged_above`, `span_capped`.
 - **Numbers:**
   - `number_read_by_number_model`, `numbers_from_second_reading`;
   - `number_disagreement`, `numbers_unconfirmed`, `numbers_not_checked`, `numbers_read_with_main_model`;
@@ -116,6 +116,7 @@ Reasons are an open list. Those in use:
 | `image_not_read`, `image_too_small`, `image_too_large`, `image_blank`, `image_no_text_found`, `image_ocr_low_confidence`, `image_format_not_supported` | Embedded images and image files |
 | `table_row_ink_unread` | A table row with ink in its cells that OCR read none of |
 | `table_cell_unconfirmed` | A scanned table cell whose two readings disagree, neither confident; both readings are in the cell |
+| `table_cell_garbled` | A scanned table cell OCR read as letters and marks no cell holds (a final letter inside a word, ₪ against a letter, digits fused with letters) |
 | `rotated_text_not_read` | Characters drawn at an angle other than vertical |
 | `text_outside_page` | Characters drawn outside the page's visible box |
 | `html_rendered_by_script`, `html_too_large`, `html_truncated` | A web page filled in by JavaScript, or over a limit |

@@ -41,7 +41,7 @@ from heocr.pdf.classify import FIGURE_IMAGE, PAGE_IMAGE, classify, object_stats,
 from heocr.pdf.frame import frame_of
 from heocr.pdf.lines import Atom, PageLines, build_lines, line_is_rtl, paragraphs
 from heocr.pdf.columns import UNRESOLVED, Segment, arrange
-from heocr.pdf.ocrtables import cell_crop, cell_has_ink, cell_psm, image_rulings, tables_in
+from heocr.pdf.ocrtables import cell_crop, cell_has_faint_ink, cell_has_ink, cell_psm, faint_cell_image, image_rulings, tables_in
 from heocr.pdf.tables import find_tables, rulings, table_blocks
 from heocr.textflags import is_private_use, text_flags
 
@@ -1800,9 +1800,13 @@ def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids, n
                     out_row.append(Cell("", colspan=cell["colspan"], flags=["merged_above"]))
                     continue
                 crop = cell_crop(image, cell["box"], scale)
+                faint = False
                 if not cell_has_ink(crop):
-                    out_row.append(Cell("", colspan=cell["colspan"], rowspan=cell["rowspan"]))
-                    continue
+                    if not cell_has_faint_ink(crop):
+                        out_row.append(Cell("", colspan=cell["colspan"], rowspan=cell["rowspan"]))
+                        continue
+                    # Ink too light for the ink test: read with its contrast stretched, and flagged so.
+                    crop, faint = faint_cell_image(crop), True
                 inked += 1
                 psm = cell_psm(crop)
                 psms[psm] += 1
@@ -1813,6 +1817,8 @@ def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids, n
                     cell_flags = []
                 except OcrUnavailable:
                     text, cell_flags = "", ["ocr_failed"]
+                if faint:
+                    cell_flags.append("faint_ink_read")
                 if not text.strip():
                     empty += 1
                     cell_flags.append("ocr_empty_with_ink")
@@ -1847,6 +1853,14 @@ def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids, n
                         doc.unread.append(Unread(scope="block", reason="table_cell_unconfirmed", page=index,
                                                  bbox=[x0 + ox, y0 + oy, x1 + ox, y1 + oy],
                                                  detail=f"row {len(rows)}, column {len(out_row)}: two readings differ and neither is confident"))
+                if text.strip() and _GARBLED_CELL.search(text) and not any(f.startswith("number_read_") for f in cell_flags):
+                    # Letters and marks no table cell holds ("ססס,,1", "₪19ךדךד"): a misreading, flagged on the
+                    # cell itself, whatever the other cells' readings (set C: every such cell was wrong).
+                    cell_flags.append("table_cell_garbled")
+                    x0, y0, x1, y1 = cell["box"]
+                    doc.unread.append(Unread(scope="block", reason="table_cell_garbled", page=index,
+                                             bbox=[x0 + ox, y0 + oy, x1 + ox, y1 + oy],
+                                             detail=f"row {len(rows)}, column {len(out_row)}: OCR read letters and marks no cell holds"))
                 read += sum(1 for ch in text if not ch.isspace())
                 out_row.append(Cell(text, colspan=cell["colspan"], rowspan=cell["rowspan"], flags=cell_flags, readings=readings))
             unread_cells += empty
@@ -1887,6 +1901,10 @@ _HEBREW_WORD_IN = re.compile(r"[\u05d0-\u05ea]{3,}")
 # (set C pdf_t5_table*: of 153 number cells read wrong, 103 right this way, none of the right ones
 # made wrong, no text cell changed).
 CELL_HALF_READING = True
+# A misread cell: marks no table cell holds, a final letter inside a word, ₪ against a letter, digits
+# fused with two letters or more, or a letter glued to a digit by number punctuation ("ססס,,1" for 4,200).
+# On set C pdf_t5_table* 100 cells matched, all of them read wrong, and no cell read right.
+_GARBLED_CELL = re.compile(r"[=\]\[<>*+^~\\]|[ךםןףץ][\u05d0-\u05ea]|₪[\u05d0-\u05ea]|[\u05d0-\u05ea]₪|\d[\u05d0-\u05ea]{2,}|[\u05d0-\u05ea]{2,}\d|[\u05d0-\u05ea][.,/]+\d")
 CELL_HALF_MIN_CONFIDENCE = 85.0  # alone, without the other evidence below
 _CELL_NUMBER_SHAPE = re.compile(r"^[\d.,/%₪\-]+$")
 

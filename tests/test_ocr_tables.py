@@ -413,6 +413,42 @@ class OcrTableTest(unittest.TestCase):
             doc, cell = self.half_case("ו", None, "17.12.2025")
         self.assertEqual(cell.text, "ו")
 
+    def test_a_garbled_cell_is_flagged_on_its_own(self) -> None:
+        # set C pdf_t5_table: heb read "4,200" as "ססס,,1"; no number reading resolves it. The cell is
+        # flagged and recorded unread whatever the other cells' readings, so its row is never lost silently.
+        texts = {**TEXTS, 70: "ססס,,1"}
+        cells = Path(self.tmp.name) / "cells.json"
+        cells.write_text(json.dumps({str(k): v for k, v in texts.items()}), encoding="utf-8")
+        doc = heocr.extract(scanned_pdf(scan(LEVELS)), tesseract=FAKE)
+        (table,) = [b for b in doc.blocks if b.kind == "table"]
+        self.assertIn("table_cell_garbled", table.cells[1][2].flags)
+        (entry,) = [u for u in doc.unread if u.reason == "table_cell_garbled"]
+        self.assertEqual((entry.scope, entry.page, len(entry.bbox)), ("block", 0, 4))
+        self.assertFalse([c for row in table.cells for c in row if c is not table.cells[1][2] and "table_cell_garbled" in (c.flags or [])])
+        self.assertEqual(heocr.validate(doc.to_dict()), [])
+
+    def test_a_faint_row_is_read_or_flagged(self) -> None:
+        # set C pdf_t5_table_faint: a row printed in grey 165-196, lighter than the ink test's level, read
+        # as three empty cells with no flag. Its cells are read with their contrast stretched, flagged
+        # faint_ink_read; when OCR finds nothing, the row is recorded as ink unread.
+        doc = heocr.extract(scanned_pdf(scan([[40, 50, 60], [70, 80, 90], [185, 185, 185]])), tesseract=FAKE)
+        (table,) = [b for b in doc.blocks if b.kind == "table"]
+        faint = table.cells[2]
+        self.assertTrue(all("faint_ink_read" in (c.flags or []) for c in faint))
+        self.assertTrue([u for u in doc.unread if u.reason == "table_row_ink_unread"])
+
+    def test_faint_ink_is_told_from_blank_paper(self) -> None:
+        from PIL import Image, ImageDraw
+
+        from heocr.pdf.ocrtables import cell_has_faint_ink, cell_has_ink
+
+        blank = Image.new("L", (200, 60), 245)
+        faint = blank.copy()
+        ImageDraw.Draw(faint).rectangle([20, 20, 180, 40], fill=185)
+        self.assertFalse(cell_has_ink(faint))
+        self.assertTrue(cell_has_faint_ink(faint))
+        self.assertFalse(cell_has_faint_ink(blank))
+
     def test_a_cell_whose_two_readings_differ_and_neither_is_confident_is_unconfirmed(self) -> None:
         doc, cell = self.unconfirmed_case("752.25", "1409", "60.0", "40.0")
         self.assertEqual(cell.text, "752.25")  # nothing chosen: the first reading stays
