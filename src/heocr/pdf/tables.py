@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 
 from heocr import repairs
 from heocr.contract import Block, Cell
-from heocr.pdf.lines import Atom, build_lines
+from heocr.pdf.lines import Atom, build_lines, carry_latin_context
 
 TOOL = "heocr.pdf"
 STRAIGHT = 0.6  # pt: a piece this close to horizontal or vertical is a ruling piece
@@ -81,7 +81,9 @@ class CellRepairs:
     def text(self, atoms: list[Atom], rtl: bool, lines: list | None = None) -> str:
         """The cell's text; with ``lines``, each line's [text, bbox] is appended to it (number checks)."""
         texts = []
-        for line in build_lines(atoms, rtl=rtl).lines:
+        built = build_lines(atoms, rtl=rtl).lines
+        carry_latin_context(built)  # a cell is one paragraph: a reference may wrap in a narrow column
+        for line in built:
             text = line.text
             if self.on:
                 text, changes = repairs.symbol_font_bullet(text)

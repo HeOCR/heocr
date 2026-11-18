@@ -206,14 +206,57 @@ def bracket_labels(text: str) -> int:
     return len(_LABEL_PAIR.findall(text))
 
 
-def rtl_bracket_order(text: str) -> tuple[str, Counter]:
-    """Mirror every bracket. The per-document evidence is checked by the reader."""
+# Brackets of Latin text inside an RTL line ("Article 76(1)", "(Annual Report)", "§75(1)"): line building
+# reads them as shown (lines._latin_brackets), whatever the producer mapped; a pair it left balanced is
+# the Latin text's own.
+_LATIN_STRETCH = re.compile(r"[^\u05d0-\u05ea]+")
+_LATIN_END = re.compile(r"[^\u05d0-\u05ea]*$")
+
+
+def latin_sub_levels(text: str, lead: bool = False) -> set[int]:
+    """Positions of the brackets that are a Latin text's own in a logical RTL line: pairs balanced as
+    read within a stretch with no Hebrew letter that holds a Latin letter or §; with ``lead``, every
+    bracket of the stretch that starts the line, the end of a reference continued from the line before.
+    They are never mirrored."""
+    keep: set[int] = set()
+    for stretch in _LATIN_STRETCH.finditer(text):
+        body, at = stretch.group(), stretch.start()
+        if lead and at == 0:
+            keep.update(i for i, ch in enumerate(body) if ch in "()")
+            continue
+        if not re.search(r"[A-Za-z§]", body):
+            continue
+        opened: list[int] = []
+        for i, ch in enumerate(body):
+            if ch == "(":
+                opened.append(i)
+            elif ch == ")" and opened:
+                keep.update((at + opened.pop(), at + i))
+    return keep
+
+
+def mirror_brackets(text: str, lead: bool = False) -> str:
+    """Every bracket mirrored, except a Latin reference's sub-levels (``latin_sub_levels``)."""
+    keep = latin_sub_levels(text, lead)
+    return "".join(ch if i in keep else ch.translate(_MIRROR) for i, ch in enumerate(text))
+
+
+def rtl_bracket_order(text: str, lead: bool = False) -> tuple[str, Counter]:
+    """Mirror every bracket but a Latin reference's sub-levels. The per-document evidence is checked
+    by the reader. ``lead``: the line continues a Latin reference from the line before it."""
     changes: Counter = Counter()
-    for ch in "()[]{}":
-        count = text.count(ch)
-        if count:
-            changes[(f"U+{ord(ch):04X}", ch.translate(_MIRROR))] += count
-    return text.translate(_MIRROR), changes
+    keep = latin_sub_levels(text, lead)
+    for i, ch in enumerate(text):
+        if ch in "()[]{}" and i not in keep:
+            changes[(f"U+{ord(ch):04X}", ch.translate(_MIRROR))] += 1
+    return mirror_brackets(text, lead), changes
+
+
+def continues_latin(previous: str) -> bool:
+    """Whether a line ends inside a Latin reference the next line continues: its last stretch with no
+    Hebrew letter holds a Latin letter or § and an odd number of round brackets ("(Art." wrapped)."""
+    tail = _LATIN_END.search(previous).group()
+    return bool(re.search(r"[A-Za-z§]", tail)) and (tail.count("(") + tail.count(")")) % 2 == 1
 
 
 def brackets_mirrored_in(units: list[str]) -> bool:
@@ -222,7 +265,7 @@ def brackets_mirrored_in(units: list[str]) -> bool:
     for text in units:
         if bracket_order_valid(text):
             as_read += 1
-        if bracket_order_valid(text.translate(_MIRROR)):
+        if bracket_order_valid(mirror_brackets(text)):
             mirrored += 1
     return mirrored >= 3 and mirrored > 3 * as_read
 

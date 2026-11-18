@@ -762,12 +762,13 @@ def _repair_rtl_brackets(doc: Document) -> None:
                 flat = cell.text.replace("\n", " ")
                 if not any(ch in flat for ch in "()[]{}"):
                     continue
-                if repairs.bracket_order_valid(flat) and not repairs.bracket_order_valid(flat.translate(repairs.MIRROR)):
+                if repairs.bracket_order_valid(flat) and not repairs.bracket_order_valid(repairs.mirror_brackets(flat)):
                     continue  # the cell's own evidence wins, as for a paragraph
                 parts = []
                 for part in cell.text.split("\n"):
                     if line_is_rtl(part, True):
-                        part, changed = repairs.rtl_bracket_order(part)
+                        lead = bool(parts) and repairs.continues_latin(parts[-1])
+                        part, changed = repairs.rtl_bracket_order(part, lead)
                         changes.update(changed)
                     parts.append(part)
                 cell.text = "\n".join(parts)
@@ -776,7 +777,7 @@ def _repair_rtl_brackets(doc: Document) -> None:
             table.flags.append("brackets_mirrored")
     for block in blocks:
         flat = block.text.replace("\n", " ")
-        mirrored = flat.translate(repairs.MIRROR)
+        mirrored = repairs.mirror_brackets(flat)
         labels_say_mirror = repairs.bracket_labels(mirrored) > repairs.bracket_labels(flat)
         if repairs.bracket_order_valid(flat) and not repairs.bracket_order_valid(mirrored) and not labels_say_mirror:
             # The paragraph's own evidence wins: balanced as read, broken when mirrored (another
@@ -786,10 +787,12 @@ def _repair_rtl_brackets(doc: Document) -> None:
             block.flags.append("brackets_kept_valid_as_read")
             continue
         changes: Counter = Counter()
+        previous = ""
         for line in block.lines:
             if line.direction == "rtl":
-                line.text, changed = repairs.rtl_bracket_order(line.text)
+                line.text, changed = repairs.rtl_bracket_order(line.text, repairs.continues_latin(previous))
                 changes.update(changed)
+            previous = line.text
         if changes:
             block.text = "\n".join(line.text for line in block.lines)
             block.repairs += repairs.record(repairs.RTL_BRACKET_ORDER, changes)
