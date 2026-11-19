@@ -194,6 +194,18 @@ def _attach_marks(atoms: list[Atom], marks: list[Atom]) -> None:
     """
     letters = [a for a in atoms if not a.is_space]
     for mark in marks:
+        if MARK_SPLIT_STREAM_ORDER and not any(_on_letter(mark, letter) for letter in letters):
+            # A layer that gives each mark its own slot beside the letters (Internet Archive's OCR layers
+            # do: every character of a word gets an equal share of the word's box) places no mark on a
+            # letter. Its stream is in logical order, a mark right after its base: the mark joins the
+            # nearest letter before it in the stream, on its line, and that letter's box takes in the
+            # mark's slot, so the slot does not read as a gap between words.
+            before = [a for a in letters if a.index < mark.index and abs(a.cy - mark.cy) <= 0.5 * max(a.y1 - a.y0, 1.0)]
+            if before:
+                base = max(before, key=lambda a: a.index)
+                base.text += mark.text
+                base.x0, base.x1 = min(base.x0, mark.x0), max(base.x1, mark.x1)
+                continue
         best, best_key = None, None
         for letter in letters:
             inside = letter.x0 - 0.01 <= mark.cx <= letter.x1 + 0.01
@@ -204,6 +216,14 @@ def _attach_marks(atoms: list[Atom], marks: list[Atom]) -> None:
             atoms.append(mark)
         else:
             best.text += mark.text
+
+
+MARK_SPLIT_STREAM_ORDER = True  # a mark on no letter joins the letter before it in the stream (see _attach_marks)
+
+
+def _on_letter(mark: Atom, letter: Atom) -> bool:
+    """Whether a mark sits on a letter: its centre inside the letter's box, on the same line."""
+    return letter.x0 - 0.01 <= mark.cx <= letter.x1 + 0.01 and abs(letter.cy - mark.cy) <= 0.5 * max(letter.y1 - letter.y0, 1.0)
 
 
 def document_is_rtl(pdf, limit: int | None = None) -> bool | None:
