@@ -132,3 +132,50 @@ class DownloadTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BundledAndRoutesTest(unittest.TestCase):
+    """D6 plumbing: models bundled in the package, and the route table for ``ocr_model="auto"``."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        root = Path(self.tmp.name)
+        self.cache, self.bundled = root / "cache", root / "bundled"
+        self.cache.mkdir()
+        self.bundled.mkdir()
+        body = b"an invented model file"
+        self.model = models.ReleasedModel("heocr_test", hashlib.sha256(body).hexdigest(), len(body), "https://example.invalid/m", "10.0/none", "Apache-2.0", bundled=True)
+        self.body = body
+        for patch in (mock.patch.dict(os.environ, {"HEOCR_MODELS": str(self.cache)}),
+                      mock.patch.dict(models.MODELS, {"heocr_test": self.model}),
+                      mock.patch("heocr.models.bundled_dir", return_value=self.bundled)):
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def test_a_bundled_model_resolves_without_a_download(self) -> None:
+        with self.assertRaises(models.ModelError):
+            models.resolve("heocr_test")
+        (self.bundled / "heocr_test.traineddata").write_bytes(self.body)
+        path, name, released = models.resolve("heocr_test")
+        self.assertEqual((path.parent, name, released), (self.bundled, "heocr_test", self.model))
+
+    def test_the_download_cache_comes_before_the_bundled_copy(self) -> None:
+        (self.bundled / "heocr_test.traineddata").write_bytes(self.body)
+        (self.cache / "heocr_test.traineddata").write_bytes(self.body)
+        self.assertEqual(models.resolve("heocr_test")[0].parent, self.cache)
+
+    def test_a_bundled_copy_must_match_its_pin(self) -> None:
+        (self.bundled / "heocr_test.traineddata").write_bytes(b"not the released file")
+        with self.assertRaises(models.ModelError):
+            models.resolve("heocr_test")
+
+    def test_the_route_table_starts_at_stock_heb(self) -> None:
+        from heocr.ocr import routes
+
+        self.assertEqual(set(routes.ROUTES), set(routes.DOMAINS))
+        self.assertTrue(all(routes.model_for(d) is None for d in routes.DOMAINS))  # filled from evaluation's study
+        self.assertIn(routes.DEFAULT_DOMAIN, routes.DOMAINS)
+        with self.assertRaises(ValueError):
+            routes.model_for("handwriting")
+        self.assertTrue(all(m.domain == "unassigned" for name, m in models.MODELS.items() if name != "heocr_test"))
