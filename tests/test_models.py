@@ -179,3 +179,61 @@ class BundledAndRoutesTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             routes.model_for("handwriting")
         self.assertTrue(all(m.domain == "unassigned" for name, m in models.MODELS.items() if name != "heocr_test"))
+
+
+class AutoRouteTest(unittest.TestCase):
+    """``ocr_model="auto"`` (D6): one model per document, from the route table and, when it offers more than
+    one, a probe of a few of the first OCR page's lines. The text and the models are invented."""
+
+    setUp = ModelRouteTest.setUp  # the same fake Tesseract and tessdata, without rerunning that class's tests
+
+    def page_tsv(self, conf: str) -> dict:
+        rows = ["level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext"]
+        for ln, words in enumerate([["שורה", "ראשונה", "של", "דף"], ["שורה", "שנייה", "של", "דף"], ["שורה", "שלישית", "של", "דף"]], 1):
+            for n, w in enumerate(words, 1):
+                rows.append(f"5\t1\t1\t1\t{ln}\t{n}\t{1800 - 300 * n}\t{100 * ln}\t250\t60\t{conf}\t{w}")
+        path = Path(self.tmp.name) / "page.tsv"
+        path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+        return {"FAKE_TSV": str(path)}
+
+    def with_old_model(self):
+        body = b"an invented old-print model"
+        released = models.ReleasedModel("heocr_oldt", hashlib.sha256(body).hexdigest(), len(body), "https://example.invalid/o", "10.0/none", "Apache-2.0", domain="old")
+        self.cache.mkdir(exist_ok=True)
+        (self.cache / "heocr_oldt.traineddata").write_bytes(body)
+        return mock.patch.dict(models.MODELS, {"heocr_oldt": released}), mock.patch.dict("heocr.ocr.routes.ROUTES", {"modern": None, "old": "heocr_oldt"})
+
+    def recognition_langs(self) -> list[tuple[str, str]]:
+        calls = [json.loads(line) for line in self.log.read_text(encoding="utf-8").splitlines()]
+        return [(c[c.index("-l") + 1], c[c.index("--psm") + 1]) for c in calls if c and "-l" in c and "--psm" in c]
+
+    def test_one_candidate_needs_no_probe(self) -> None:
+        with mock.patch.dict(os.environ, self.page_tsv("80")):
+            doc = heocr.extract(SCAN, tesseract=FAKE, ocr_model="auto")
+        self.assertEqual(doc.options["ocr"]["model"], "auto")
+        self.assertTrue(doc.blocks)
+        self.assertEqual({tuple(sorted(b.ocr["model_route"].items())) for b in doc.blocks}, {(("domain", "modern"), ("mode", "auto"), ("reason", "single_candidate"))})
+        self.assertEqual({lang for lang, _ in self.recognition_langs()}, {"heb"})
+        self.assertEqual(heocr.validate(doc.to_dict()), [])
+
+    def test_the_probe_switches_to_a_clearly_better_model(self) -> None:
+        a, b = self.with_old_model()
+        env = {**self.page_tsv("60"), "FAKE_LINE_HEOCR_OLDT": "שורה ישנה של דף", "FAKE_CONF_HEOCR_OLDT": "95"}
+        with a, b, mock.patch.dict(os.environ, env):
+            doc = heocr.extract(SCAN, tesseract=FAKE, ocr_model="auto")
+        route = doc.blocks[0].ocr["model_route"]
+        self.assertEqual((route["domain"], route["reason"]), ("old", "probe"))
+        self.assertGreater(route["scores"]["old"], route["scores"]["modern"])
+        self.assertIn(("heocr_oldt", "3"), self.recognition_langs())  # the deciding page is read again by the chosen model
+        self.assertEqual(doc.blocks[0].ocr["lang"], "heocr_oldt")
+        self.assertEqual(heocr.validate(doc.to_dict()), [])
+
+    def test_a_close_call_keeps_the_fallback(self) -> None:
+        a, b = self.with_old_model()
+        env = {**self.page_tsv("60"), "FAKE_LINE_HEOCR_OLDT": "שורה ישנה של דף", "FAKE_CONF_HEOCR_OLDT": "62"}
+        with a, b, mock.patch.dict(os.environ, env):
+            doc = heocr.extract(SCAN, tesseract=FAKE, ocr_model="auto")
+        route = doc.blocks[0].ocr["model_route"]
+        self.assertEqual((route["domain"], route["reason"]), ("modern", "probe_unsure"))
+        self.assertNotIn(("heocr_oldt", "3"), self.recognition_langs())
+        self.assertEqual(doc.blocks[0].ocr["lang"], "heb")

@@ -129,6 +129,7 @@ class Tesseract:
     models: dict[str, str]  # language -> sha256 of its traineddata
     timeout: float = TIMEOUT
     released: object = None  # the heocr.models.ReleasedModel in use, if any
+    route: dict | None = None  # ocr_model="auto": how this engine was chosen (heocr.ocr.routes)
 
     @classmethod
     def find(

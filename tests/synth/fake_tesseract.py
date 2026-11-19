@@ -101,7 +101,9 @@ def main(argv: list[str]) -> int:
         word = answers[min(calls, len(answers) - 1)]
         with open(state, "w") as stream:
             stream.write(str(calls + 1))
-    if psm == "7" and os.environ.get("FAKE_LINE") is not None:
+    if psm == "7" and os.environ.get(f"FAKE_LINE_{lang.upper()}") is not None:
+        word = os.environ[f"FAKE_LINE_{lang.upper()}"]  # a single-line call in one language or model ($FAKE_LINE_<LANG>)
+    elif psm == "7" and os.environ.get("FAKE_LINE") is not None:
         word = os.environ["FAKE_LINE"]
     if word == NOTHING:
         word = ""
@@ -122,7 +124,7 @@ def main(argv: list[str]) -> int:
         confs = (os.environ.get("FAKE_CONFS") or "").split(",") if psm == "7" else []
         for n, token in enumerate(tokens, 1):
             a, b = edges[n - 1] if n - 1 < len(edges) else edges[-1]
-            conf = confs[n - 1] if n - 1 < len(confs) and confs[n - 1] else os.environ.get("FAKE_CONF", "95.0")
+            conf = confs[n - 1] if n - 1 < len(confs) and confs[n - 1] else os.environ.get(f"FAKE_CONF_{lang.upper()}", os.environ.get("FAKE_CONF", "95.0"))
             rows.append(f"5\t1\t1\t1\t1\t{n}\t{int(a * width) + 1}\t2\t{max(1, int((b - a) * width) - 2)}\t{max(1, height - 4)}\t{conf}\t{token}")
         with open(base + ".tsv", "w", encoding="utf-8") as stream:
             stream.write("\n".join(rows) + "\n")

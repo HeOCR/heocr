@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 
 from heocr import repairs
 from heocr.contract import Block, Cell, Document, Line, Page, Unread, page_limit, pages_left_unread, time_up
-from heocr.ocr import OcrUnavailable, block_ocr, engine_for, number_engine_for, unavailable_reason
+from heocr.ocr import OcrUnavailable, block_ocr, engine_for, number_engine_for, routes, unavailable_reason
 from heocr.ocr.tesseract import OcrResult
 from heocr.ocr.regions import (  # noqa: F401  (re-exported for callers of the PDF route)
     INK_LEVEL,
@@ -1991,6 +1991,10 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
         flags = flags + ["ocr_rest_blank"]
     try:
         result = OcrResult([]) if rest_blank else engine.recognize(page_image, dpi=round(scale * 72))
+        if routes.pending(doc) and routes.observe(doc, page_image, result, round(scale * 72), last_page=index + 1 >= min(doc.page_count or index + 1, doc._max_pages)):
+            # ocr_model="auto": the probe sampled this page and chose another model; the page is read again by it.
+            engine = engine_for(doc)
+            result = engine.recognize(page_image, dpi=round(scale * 72))
     except OcrUnavailable as exc:
         doc.pages.append(
             Page(index, width, height, page_class, "none", signals,
