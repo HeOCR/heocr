@@ -602,7 +602,20 @@ def grainy_paper(seed: int = 3):
     return Image.open(buffer).convert("L")
 
 
-@unittest.skipUnless(os.environ.get("HEOCR_TEST_TESSERACT") and shutil.which("tesseract"), "opt-in; needs Tesseract with heb")
+def tesseract_with_heb() -> bool:
+    """Whether a real Tesseract with ``heb`` is installed (the same lookup heocr itself makes)."""
+    if not shutil.which("tesseract") and not os.environ.get("HEOCR_TESSERACT"):
+        return False
+    from heocr.ocr.tesseract import OcrUnavailable, Tesseract
+
+    try:
+        Tesseract.find(lang="heb")
+    except OcrUnavailable:
+        return False
+    return True
+
+
+@unittest.skipUnless(tesseract_with_heb(), "needs Tesseract with heb installed")
 class GrainyPaperTest(unittest.TestCase):
     """Real Tesseract on invented grainy paper around a small ruled table (the T4 noise report)."""
 

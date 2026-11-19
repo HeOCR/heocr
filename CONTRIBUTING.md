@@ -30,7 +30,10 @@ python -m venv .venv && .venv/bin/pip install -e ".[test]"
 
 - **Run the suite in a fresh virtual environment** with the declared dependencies only before a pull request; that is how CI runs it.
 - **With the `test` extra installed** (`jsonschema`), every record the suite produces is also checked against the record's JSON Schema.
-- **The OCR tests use a fake Tesseract** (`tests/synth/fake_tesseract.py`), so the suite needs no OCR engine. Tests that need the real Tesseract or LibreOffice are opt-in and skipped otherwise.
+- **The OCR tests use a fake Tesseract** (`tests/synth/fake_tesseract.py`), so the suite needs no OCR engine.
+  - A few tests need the real Tesseract. The grainy-paper tests in `tests/test_ocr_tables.py` run whenever Tesseract with `heb` is installed.
+  - The others, and the LibreOffice tests, are opt-in (`HEOCR_TEST_TESSERACT=1`, `HEOCR_TEST_SOFFICE=1`).
+  - All of them are skipped otherwise, so CI without an OCR engine still passes. Before a release they all run (D5f).
 - **A change to what heocr reads** should come with:
   - a test that fails before it;
   - numbers before and after on the synthetic sets, or on `dev` as aggregate counts only.
