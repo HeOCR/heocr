@@ -1,6 +1,6 @@
 # heocr 0.1.0: release notes (draft)
 
-> **Draft.** The release candidate `0.1.0rc1` (commit `57e58de`) is in the registered D-bench release gate. The gate's verdicts below are placeholders until eval publishes them. 0.1.0 is released only if the gate supports it.
+> **Draft.** The release candidate `0.1.0rc1` (commit `57e58de`) went through the registered D-bench release gate. The verdicts are below. Whether and when 0.1.0 is published, with T4, T5 and T6 as not supported, is the maintainer's decision. The fixes since rc1 are in the [0.1.1 notes](release-notes-0.1.1.md).
 
 ## What heocr does
 
@@ -60,18 +60,18 @@ The registered run uses a fresh synthetic set, drawn after the candidate was fix
 
 | Cell | What it holds | Verdict |
 |---|---|---|
-| DOCX | Word files: text, numbering, numbered blocks | _TBD (eval)_ |
-| DOC | Legacy Word through LibreOffice | _TBD (eval)_ |
-| PDF T1 | Good text layers, including odd spacing, astral characters, vertical notes and kept OCR layers | _TBD (eval)_ |
-| PDF T2 | Text layers in visual order | _TBD (eval)_ |
-| PDF T3 | Broken font mappings (Latin-1 and private-use codes) | _TBD (eval)_ |
-| PDF T4 | Pages under someone else's OCR layer | _TBD (eval)_ |
-| PDF T5 | Scans and office documents rendered to images | _TBD (eval)_ |
-| PDF T6 | Text layers with image regions | _TBD (eval)_ |
-| PDF spread | Two pages side by side | _TBD (eval)_ |
-| Scanned tables | Ruled tables in scans, also faint and with merged cells | _TBD (eval)_ |
+| DOCX | Word files: text, numbering, numbered blocks | Supported |
+| DOC | Legacy Word through LibreOffice | Supported |
+| PDF T1 | Good text layers, including odd spacing, astral characters, vertical notes and kept OCR layers | Supported |
+| PDF T2 | Text layers in visual order | Supported |
+| PDF T3 | Broken font mappings (Latin-1 and private-use codes) | Supported |
+| PDF T4 | Pages under someone else's OCR layer | Not supported (character errors against stock Tesseract) |
+| PDF T5 | Scans and office documents rendered to images | Not supported (character errors against stock Tesseract; numbers against pymupdf4llm) |
+| PDF T6 | Text layers with image regions | Not supported (test-split veto: reversed amounts) |
+| PDF spread | Two pages side by side | Supported |
+| Scanned tables | Ruled tables in scans, also faint and with merged cells | Supported |
 
-_Test-split veto: TBD (eval)._
+_Test-split veto: PDF T6, for amounts in mixed-direction text reversed more often than stock Tesseract's interval allows._
 
 The gate's method and its verdicts are summarised publicly on [heocr.github.io/benchmarks.html](https://heocr.github.io/benchmarks.html), in its "release gate" section. The registration itself is kept with HeOCR's evaluation records.
 
