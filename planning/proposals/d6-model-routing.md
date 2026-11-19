@@ -60,6 +60,27 @@
 - **End-to-end per domain:** `auto` against each fixed candidate (stock, R7, P-hist winner, office winner), against oracle routing, and against the `a+b` multi-model mode.
 - **Bar to flip the default:** `auto` is at least as good as the best single model on every domain (within noise), never worse than the fallback on any domain, and the probe adds under about 10% to the runtime.
 
+### Evidence since: T5 office scans (2026-11-19)
+
+The release gate's T5 cell failed on number recall against pymupdf4llm. The diagnosis, on the open synthetic sets only, points at the model more than at heocr's number guards. pymupdf4llm 2.1 OCRs image-only pages itself, with Tesseract `eng`.
+
+**Number misses** on the 42 open synthetic office scans (set C T5 office and office-numbers cases), heocr's code at main with three page models (aggregates only: these cases are never shown as text):
+
+| Page model | Outline labels | Dates | Amounts | Other | All |
+|---|---|---|---|---|---|
+| stock `heb` (today's default) | 33.2% | 6.1% | 1.7% | 2.8% | 7.7% |
+| stock `heb` + label agreement (#99) | 32.5% | 6.1% | 1.7% | 2.8% | 7.6% |
+| office-print A/B v2, arm A | 12.3% | 1.2% | 0.8% | 3.0% | 3.5% |
+
+- **Arm A reads cut labels whole.** Outline labels intact go from 447 to 587 of 669, with no help from the number model's re-read.
+- **Evaluation's run** over the whole T5 cell of the open sets agrees: number misses 13.3% with the default against 4.0% with arm A.
+- So T5 numbers are a routing question. Evaluation's default-model study decides arm A against stock and R7, on dev and tuning sets.
+
+**Known cost of arm A** (carry into the study, document by document):
+- Against today's route it gains 271 numbers and loses 83, in 30 of the 42 documents.
+- The losses: outline labels 47 (mostly `9.9` and `9.9.9` shapes it reads differently), plain 4-digit and other numbers 29, amounts 5, dates 2.
+- A routed office model should keep both readings' strengths. One candidate is to let the existing number re-read (`eng`, which already arbitrates `heb` against `eng`) decide where the routed model and the default disagree on a number. It is measured per document before it is adopted, never assumed.
+
 ### Record changes (additive within v1)
 
 - `block.ocr.model_route`: `{"mode": "auto", "reason": "probe" | "born_digital" | "probe_unsure" | "explicit", "scores": {...}}`.
