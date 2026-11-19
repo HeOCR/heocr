@@ -12,8 +12,8 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
   - When the table offers one model, there is no probe.
   - Otherwise a probe samples up to 8 lines from up to 3 OCR pages, read again by each other candidate, and switches only when one scores clearly better. The deciding page is then read again by it.
   - Every OCR block records `ocr.model_route` (mode, domain, reason, and the probe's scores).
-  - The route table is empty until the models evaluation picked are released, so today `auto` reads with stock `heb`.
 - **Bundled models:** the models in `MODELS` gain a `domain` and a `bundled` flag, and a model shipped inside the package (`heocr/models_data/`) resolves without a download, after the download cache.
+- **HeOCR's own models ship inside the wheel:** `heocr_modern_v1` (modern and office print, [10.5281/zenodo.24371757](https://doi.org/10.5281/zenodo.24371757)) and `heocr_oldprint_v1` (old and rabbinic print, [10.5281/zenodo.24371759](https://doi.org/10.5281/zenodo.24371759)), both Apache-2.0, with their notices. The route table names them, so `--ocr-model auto` uses them. The default stays stock `heb`.
 
 ### Fixed
 
