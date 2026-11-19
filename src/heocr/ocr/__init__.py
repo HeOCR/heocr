@@ -16,10 +16,21 @@ if TYPE_CHECKING:  # pragma: no cover
 
 
 def engine_for(doc: "Document") -> Tesseract | None:
-    """The document's OCR engine, found once; None when OCR is off or unavailable (reason kept)."""
+    """The document's OCR engine, found once; None when OCR is off or unavailable (reason kept).
+
+    With ``ocr_model="auto"`` it is the engine of the model the route table and the probe chose for the
+    document (``heocr.ocr.routes``), or the fallback domain's while the probe is still sampling."""
     settings = doc._ocr_settings
     if settings is None:
         return None
+    if settings.get("model") == "auto":
+        from heocr.ocr import routes
+
+        model, route = routes.current(doc)
+        engine = engine_for_model(doc, model)
+        if engine is not None:
+            engine.route = route
+        return engine
     if doc._ocr_engine is None and doc._ocr_error is None:
         try:
             doc._ocr_engine = Tesseract.find(
@@ -29,6 +40,23 @@ def engine_for(doc: "Document") -> Tesseract | None:
         except OcrUnavailable as exc:
             doc._ocr_error = str(exc)
     return doc._ocr_engine
+
+
+def engine_for_model(doc: "Document", model: str | None) -> Tesseract | None:
+    """The engine for one model (None: stock ``lang``), found once per document; None when unavailable."""
+    settings = doc._ocr_settings
+    if model in doc._ocr_engines:
+        return doc._ocr_engines[model]
+    try:
+        engine = Tesseract.find(settings["cmd"], lang=settings["lang"], psm=settings["psm"], model=model)
+        doc.components.update(engine.provenance())
+    except OcrUnavailable as exc:
+        doc._ocr_error = doc._ocr_error or str(exc)
+        engine = None
+    doc._ocr_engines[model] = engine
+    if doc._ocr_engine is None:
+        doc._ocr_engine = engine
+    return engine
 
 
 NUMBER_LANG = "eng"  # stock eng reads digits far better than stock heb (dev split: 96.5% against 37% agreement)
@@ -73,7 +101,10 @@ def block_ocr(engine: Tesseract, lines) -> dict:
         "psm": engine.psm,
         "words": sum(len(line.confidences) for line in lines),
         "mean_confidence": round(sum(confidences) / len(confidences), 2) if confidences else None,
+        **({"model_route": dict(engine.route)} if getattr(engine, "route", None) else {}),
     }
 
 
-__all__ = ["NUMBER_LANG", "OcrUnavailable", "Tesseract", "block_ocr", "engine_for", "number_engine_for", "unavailable_reason"]
+from heocr.ocr import routes  # noqa: E402  (after engine_for_model, which it imports lazily)
+
+__all__ = ["NUMBER_LANG", "OcrUnavailable", "Tesseract", "block_ocr", "engine_for", "engine_for_model", "number_engine_for", "routes", "unavailable_reason"]

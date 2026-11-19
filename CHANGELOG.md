@@ -6,6 +6,15 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 
 ## Unreleased → 0.2.0
 
+### Added
+
+- **`--ocr-model auto`** (`ocr_model="auto"`) picks one OCR model per document from the route table (`heocr.ocr.routes`: modern and old print). It's opt-in; the default stays stock `heb`.
+  - When the table offers one model, there is no probe.
+  - Otherwise a probe samples up to 8 lines from up to 3 OCR pages, read again by each other candidate, and switches only when one scores clearly better. The deciding page is then read again by it.
+  - Every OCR block records `ocr.model_route` (mode, domain, reason, and the probe's scores).
+  - The route table is empty until the models evaluation picked are released, so today `auto` reads with stock `heb`.
+- **Bundled models:** the models in `MODELS` gain a `domain` and a `bundled` flag, and a model shipped inside the package (`heocr/models_data/`) resolves without a download, after the download cache.
+
 ### Fixed
 
 - **A page of short cells under an OCR layer is checked, and a wrong layer there is replaced.**

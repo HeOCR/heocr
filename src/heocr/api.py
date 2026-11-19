@@ -62,7 +62,9 @@ def extract(
     ``ocr`` runs the OCR route on pages and regions that need it, through stock Tesseract
     when it is installed (``heocr.ocr.tesseract``): ``ocr_lang`` is ``heb`` by default,
     ``ocr_psm`` is 3, and ``tesseract`` names the program when it is not on the PATH.
-    ``ocr_model`` runs a HeOCR traineddata instead of ``ocr_lang``: a released model's name
+    ``ocr_model="auto"`` picks a model per document from the route table (``heocr.ocr.routes``), with a
+    probe of a few lines when the table offers more than one; it is opt-in, and stock ``heb`` stays the default.
+    Otherwise ``ocr_model`` runs a HeOCR traineddata instead of ``ocr_lang``: a released model's name
     (downloaded on purpose first, ``heocr.models.download``) or a ``.traineddata`` path.
     Without Tesseract, or with ``ocr=False``, those pages are recorded as unread.
     ``force_ocr`` reads every PDF page by OCR, its text layer ignored (flag ``ocr_forced``): a workaround
@@ -125,7 +127,7 @@ def extract(
         options={
             "repairs": bool(repairs),
             "check_numbers": (check_numbers if check_numbers in ("suspect", "tables", "all") else False) if ocr else False,
-            "ocr": {"engine": "tesseract", "lang": ocr_lang, "psm": ocr_psm, **({"model": Path(ocr_model).name if ocr_model else None} if ocr_model else {})}
+            "ocr": {"engine": "tesseract", "lang": ocr_lang, "psm": ocr_psm, **({"model": ocr_model if ocr_model == "auto" else Path(ocr_model).name} if ocr_model else {})}
             if ocr
             else False,
         },

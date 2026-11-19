@@ -96,7 +96,7 @@ The options, all keyword-only:
 | `ocr` | `True` | Run OCR where the text exists only as an image. `False` reports those pages unread. |
 | `ocr_lang`, `ocr_psm` | `"heb"`, `3` | Tesseract's languages and page segmentation mode |
 | `tesseract` | found | The Tesseract program, when it is not on the `PATH` |
-| `ocr_model` | none | A released HeOCR model's name or a `.traineddata` path, used instead of `heb` |
+| `ocr_model` | none | A released HeOCR model's name or a `.traineddata` path, used instead of `heb`; or `auto`, which picks one model per document from the route table (`heocr.ocr.routes`) and records how in each OCR block's `ocr.model_route`. Opt-in; until evaluation fills the table, `auto` reads with stock `heb` |
 | `force_ocr` | `False` | Read every PDF page by OCR, its text layer ignored (`--force-ocr`); flags each page `ocr_forced`. Needs `ocr` |
 | `check_numbers` | `"suspect"` | The second reading of numbers (below) |
 | `repairs` | `True` | `False` turns every repair rule off: the text exactly as extracted |
