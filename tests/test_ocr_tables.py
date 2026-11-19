@@ -6,6 +6,7 @@ and a cell that holds ink but cannot be read can be made on purpose.
 
 import json
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -577,6 +578,53 @@ class ImageRulingsTest(unittest.TestCase):
             draw.rectangle([px(100 + k * 8), px(200), px(104 + k * 8), px(212)], fill=0)
         horizontal, vertical = image_rulings(image, DPI / 72)
         self.assertEqual((horizontal, vertical), ([], []))
+
+
+
+def grainy_paper(seed: int = 3):
+    """Invented scan paper: grey 236 with fine grain, through JPEG at quality 40, at 150 dpi.
+
+    Rendered at 300 dpi, JPEG's ringing around the grain becomes short bars a few pixels long, and
+    Tesseract's global threshold reads them as strokes. This is the paper of the gate's synthetic
+    T4 page, made from scratch.
+    """
+    import io
+    import random
+
+    from PIL import Image
+
+    rng = random.Random(seed)
+    paper = Image.new("L", (px(595), px(842)))
+    paper.putdata([max(0, min(255, round(rng.gauss(236, 3)))) for _ in range(paper.size[0] * paper.size[1])])
+    buffer = io.BytesIO()
+    paper.save(buffer, "JPEG", quality=40)
+    buffer.seek(0)
+    return Image.open(buffer).convert("L")
+
+
+@unittest.skipUnless(os.environ.get("HEOCR_TEST_TESSERACT") and shutil.which("tesseract"), "opt-in; needs Tesseract with heb")
+class GrainyPaperTest(unittest.TestCase):
+    """Real Tesseract on invented grainy paper around a small ruled table (the T4 noise report)."""
+
+    def test_bare_grainy_paper_is_noise_to_tesseract(self) -> None:
+        # The hazard itself: without the skip, the rest of such a page is read as hundreds of characters.
+        from PIL import Image
+
+        from heocr.ocr.tesseract import Tesseract
+
+        rendered = grainy_paper().resize((px(595) * 2, px(842) * 2), Image.BILINEAR)
+        result = Tesseract.find().recognize(rendered, dpi=300)
+        self.assertGreater(sum(len(line.text) for line in result.lines), 300)
+
+    def test_a_table_on_grainy_paper_adds_no_noise(self) -> None:
+        from PIL import Image
+
+        paper, table = grainy_paper(), scan(LEVELS)
+        page = Image.composite(table, paper, table.point(lambda v: 255 if v < 255 else 0))
+        doc = heocr.extract(scanned_pdf(page))
+        outside = "".join(b.text or "" for b in doc.blocks if b.kind != "table")
+        self.assertEqual(len(outside), 0, "text read from bare paper outside the table")
+        self.assertIn("ocr_rest_blank", doc.pages[0].flags)
 
 
 if __name__ == "__main__":
