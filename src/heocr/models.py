@@ -31,6 +31,8 @@ class ReleasedModel:
     url: str  # the Hugging Face mirror's file
     doi: str  # the Zenodo version DOI
     licence: str
+    domain: str = "unassigned"  # the print it is meant for (heocr.ocr.routes); set from evaluation's default-model study
+    bundled: bool = False  # shipped inside the wheel (heocr/models_data/), so it needs no download
 
 
 MODELS: dict[str, ReleasedModel] = {
@@ -80,10 +82,19 @@ def sha256_of(path: Path) -> str:
     return digest.hexdigest()
 
 
+def bundled_dir() -> Path:
+    """Where models shipped inside the package live (``heocr/models_data/``); it may be empty."""
+    from importlib.resources import files
+
+    return Path(str(files("heocr") / "models_data"))
+
+
 def resolve(spec: str) -> tuple[Path, str, ReleasedModel | None]:
     """(file, language name, released model or None) for a model name or a ``.traineddata`` path.
 
-    A released model's file must match its pinned sha256, wherever it came from.
+    A name resolves to the download cache first (``cache_dir``), then to the copy bundled in the
+    package, if any (``bundled_dir``). A released model's file must match its pinned sha256,
+    wherever it came from.
     """
     path = Path(spec)
     if path.suffix == ".traineddata" or path.is_file():
@@ -93,6 +104,8 @@ def resolve(spec: str) -> tuple[Path, str, ReleasedModel | None]:
     elif spec in MODELS:
         name = spec
         path = cache_dir() / f"{spec}.traineddata"
+        if not path.is_file() and (bundled_dir() / f"{spec}.traineddata").is_file():
+            path = bundled_dir() / f"{spec}.traineddata"
         if not path.is_file():
             raise ModelError(f"model {spec} is not downloaded; run: heocr --download-model {spec}")
     else:
