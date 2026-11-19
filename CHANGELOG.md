@@ -14,6 +14,16 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
   - Those readings are now treated as content, like block text. Every other key is still guarded, including a reading's `model`.
   - Found on two synthetic office-number scans in the release gate's synthetic set.
 
+- **A scanned page with a small table no longer reads its bare paper as text.**
+  - A page's ruled tables are read cell by cell, and the rest of the page is read once with the tables taken out.
+  - When that rest was bare paper, Tesseract's global threshold fell inside the paper's texture, and the page gained thousands of characters of symbols and single letters.
+  - When no ink is left, not even faint ink (the same tests as for a table cell), the rest is no longer read.
+  - Found on a synthetic T4 page in the release gate's synthetic set.
+
+### Record
+
+- New page flag `ocr_rest_blank` (additive, within v1): the page's tables were read, and nothing else on it had ink.
+
 ## Unreleased → 0.1.0 (D5, release readiness)
 
 `0.1.0rc1` is the release candidate for the registered D-bench release gate. Nothing is on PyPI yet:
