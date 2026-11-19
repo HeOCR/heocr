@@ -4,6 +4,16 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 [HeOCR/heocr](https://github.com/HeOCR/heocr). The milestones (D1–D5) are planned in
 [`planning/milestones/`](planning/milestones/).
 
+## Unreleased → 0.1.1
+
+### Fixed
+
+- **A number reading that starts with a slash no longer makes the record invalid.**
+  - The path guard checked the OCR readings in a block's `checks.number_readings` (`first`, `second`, `replaced`) as if they were provenance.
+  - A reading of a digit run such as `/2.` matched the guard, and `to_dict()` raised ContractError, so the document had no record at all.
+  - Those readings are now treated as content, like block text. Every other key is still guarded, including a reading's `model`.
+  - Found on two synthetic office-number scans in the release gate's synthetic set.
+
 ## Unreleased → 0.1.0 (D5, release readiness)
 
 `0.1.0rc1` is the release candidate for the registered D-bench release gate. Nothing is on PyPI yet:

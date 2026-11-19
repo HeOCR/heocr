@@ -27,6 +27,10 @@ UNREAD_SCOPES = ("document", "page", "block")
 # Strings that look like local filesystem locations. Provenance must stay path-free;
 # document content (block text, cells) is content and is not path-checked.
 LOCAL_PATH = re.compile(r"(\A(/|~/|[A-Za-z]:[\\/]|\\\\|file:))|(/(Users|home|tmp|private|var)/)")
+# The OCR readings kept in a block's ``checks.number_readings``: content, like block text, so the
+# path guard skips them. A reading of a digit run can start with a slash ("/2."), and the guard
+# refused the whole record. Every other key of an entry, the model's name among them, is still checked.
+READING_KEYS = ("first", "second", "replaced")
 
 
 def json_schema() -> dict[str, Any]:
@@ -325,6 +329,17 @@ def _path_like(value: Any, where: str):
             yield from _path_like(item, f"{where}[{index}]")
 
 
+def _without_readings(checks: Any) -> Any:
+    """A block's ``checks`` for the path guard: each number reading without its OCR text (``READING_KEYS``)."""
+    if not isinstance(checks, dict) or not isinstance(checks.get("number_readings"), list):
+        return checks
+    readings = [
+        {key: value for key, value in entry.items() if key not in READING_KEYS} if isinstance(entry, dict) else entry
+        for entry in checks["number_readings"]
+    ]
+    return {**checks, "number_readings": readings}
+
+
 def _is_box(value: Any) -> bool:
     return (
         isinstance(value, list)
@@ -488,7 +503,7 @@ def validate(payload: Any) -> list[str]:
     # Provenance must be path-free. Block text and cells are content, not provenance.
     provenance = {key: value for key, value in payload.items() if key != "blocks"}
     provenance["blocks"] = [
-        {key: value for key, value in block.items() if key not in ("text", "cells", "lines", "label")}
+        {key: _without_readings(value) if key == "checks" else value for key, value in block.items() if key not in ("text", "cells", "lines", "label")}
         for block in blocks
         if isinstance(block, dict)
     ]

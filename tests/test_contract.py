@@ -52,6 +52,28 @@ class ContractTest(unittest.TestCase):
         doc.blocks[0].text = "ראו /home/user/readme"
         self.assertEqual(validate(doc.to_dict()), [])
 
+    def test_number_readings_are_content_not_paths(self) -> None:
+        # A reading of a digit run may start with a slash. It is OCR text, so the path guard skips it;
+        # it used to refuse the whole record (ContractError in to_dict). The readings here are invented.
+        doc = _doc()
+        doc.blocks[0].checks = {
+            "number_readings": [
+                {"first": "/2.", "second": "12", "model": "eng", "replaced": [["/2.", "12"]]},
+                {"first": "// 4 56", "second": "1/4 56", "model": "eng", "used": False},
+            ]
+        }
+        payload = doc.to_dict()
+        self.assertEqual(payload["blocks"][0]["checks"]["number_readings"][0]["first"], "/2.")
+        self.assertEqual(validate(payload), [])
+
+    def test_number_readings_other_keys_are_still_guarded(self) -> None:
+        payload = _doc().to_dict()
+        payload["blocks"][0]["checks"] = {"number_readings": [{"first": "7", "second": "7", "model": "/tmp/models/x"}],
+                                          "note": "/Users/someone/run"}
+        errors = validate(payload)
+        self.assertTrue(any("number_readings[0].model" in e for e in errors), errors)
+        self.assertTrue(any("checks.note" in e for e in errors), errors)
+
     def test_invalid_enums_and_indexes(self) -> None:
         payload = _doc().to_dict()
         bad = copy.deepcopy(payload)
