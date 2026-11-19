@@ -77,6 +77,7 @@ The gate's method and its verdicts are summarised publicly on [heocr.github.io/b
 
 ## Known limitations
 
+- **Pointed text in a kept OCR layer.** Some scans carry someone else's OCR layer with niqqud or cantillation, with each mark in its own box, as Internet Archive's scans do. heocr keeps such a layer, but builds the marks into separate pieces, so pointed lines come out fragmented: on the pointed pages we tested, a median of under half of the layer's words came through. Unpointed layers are not affected. There is no switch to force OCR yet: convert those pages to images and read the images, which go through OCR. A fix is planned for the next release.
 - **Phone photos of pages are not in the gate.** The scanned sets are flat scans and page renders. A photo taken with a phone adds perspective, uneven light and curved lines. heocr straightens skew, but it does not correct perspective, and its accuracy on such photos has not been measured. A phone-scan evaluation set is being collected for a later release.
 - **Latin references in wrapped lines and cells.** A Latin parenthetical that a line wrap or a cell edge splits over two lines has its two brackets paired (`latin_wrap_brackets`) only when the evidence is clear. heocr leaves the rest as read rather than guess:
   - a bracket whose partner could also be another bracket on its line;
