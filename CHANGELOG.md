@@ -12,6 +12,12 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 
 ### Fixed
 
+- **Pointed text in an OCR layer that gives each mark its own slot is read whole.**
+  - Some OCR layers, Internet Archive's among them, give every character of a word, its niqqud and cantillation marks included, an equal share of the word's box. A mark then sits beside its letter, not on it.
+  - heocr attached each mark by position to the nearest letter, often the wrong one, and the slot it left read as a gap between words, so pointed lines came out in fragments.
+  - A mark on no letter now joins the letter before it in the layer's stream, which such layers write in logical order, and that letter's box takes in the mark's slot. Marks on their letter are read as before.
+  - On 123 pointed pages of open Internet Archive scans, the share of the layer's words that came through rose from a median of 39% to 89%; unpointed layers are unchanged.
+
 - **A scrambled OCR layer over a table page is replaced when our reading strongly disagrees.**
   - A foreign OCR layer is replaced only when our confident reading disagrees with it and the layer is misspelt on its own evidence (at least 15% of its words) and well beyond our reading.
   - A table page's layer is mostly short cells, numbers and dates, which a scrambled layer misspells less. One stayed at 12.5% and was kept, though the two readings shared barely a fifth of their letters.

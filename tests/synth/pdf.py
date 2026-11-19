@@ -23,8 +23,10 @@ ADVANCE = {" ": 250}
 DEFAULT_ADVANCE = 500  # glyph units of 1/1000 em
 
 
-def _advance(ch: str) -> int:
-    return 0 if unicodedata.combining(ch) else ADVANCE.get(ch, DEFAULT_ADVANCE)
+def _advance(ch: str, mark_slots: bool = False) -> int:
+    if unicodedata.combining(ch):
+        return DEFAULT_ADVANCE if mark_slots else 0
+    return ADVANCE.get(ch, DEFAULT_ADVANCE)
 
 
 def layout(text: str, rtl: bool = True) -> list[int]:
@@ -123,6 +125,7 @@ class PdfPage:
     rasters: list[tuple] = field(default_factory=list)  # (x, y, w, h, PIL "L" image): real pixels, as a scan
     font_name: str = ""  # the Type3 font's /Name (and BaseFont), for per-font evidence
     rules: list[tuple[float, float, float, float]] = field(default_factory=list)  # ruling segments x0, y0, x1, y1
+    mark_slots: bool = False  # each combining mark gets its own slot beside its letter, as Internet Archive's OCR layers place it
     rules_as: str = "stroke"  # "stroke": lines; "rects": thin filled rectangles, as Word draws borders; "double": two parallel lines
     rule_width: float = 0.5  # stroke width of "stroke" rulings
     rule_gap: float = 3.0  # distance between the two lines of a "double" ruling
@@ -167,20 +170,20 @@ def make_pdf(pages: list[PdfPage]) -> bytes:
         content: list[str] = []
         for line in page.lines:
             order = layout(line.text, line.rtl)
-            width = sum(_advance(line.text[i]) for i in order) * line.size / 1000
+            width = sum(_advance(line.text[i], page.mark_slots) for i in order) * line.size / 1000
             x = line.x - width if line.rtl else line.x
             placed = []  # (logical index, char, x)
             base_x: dict[int, float] = {}
             for i in order:
                 ch = line.text[i]
-                if unicodedata.combining(ch):
+                if unicodedata.combining(ch) and not page.mark_slots:
                     continue
                 if ch != " " or page.real_spaces:
                     placed.append((i, ch, x))
-                base_x[i] = x + _advance(ch) * line.size / 2000
-                x += _advance(ch) * line.size / 1000
+                base_x[i] = x + _advance(ch, page.mark_slots) * line.size / 2000
+                x += _advance(ch, page.mark_slots) * line.size / 1000
             for i, ch in enumerate(line.text):
-                if unicodedata.combining(ch):
+                if unicodedata.combining(ch) and not page.mark_slots:
                     # A mark has no advance and sits over the centre of its base letter.
                     base = max((b for b in base_x if b < i), default=None)
                     if base is not None:
@@ -235,7 +238,7 @@ def make_pdf(pages: list[PdfPage]) -> bytes:
         if codes:
             procs = []
             for ch, code in codes.items():
-                adv = _advance(ch)
+                adv = _advance(ch, page.mark_slots)
                 if adv == 0:
                     glyph = "0 0 -60 750 60 850 d1 -60 750 120 100 re f"
                 else:
@@ -253,7 +256,7 @@ def make_pdf(pages: list[PdfPage]) -> bytes:
                 cmap_lines.append(f"<{code:02X}> <{''.join(f'{u:04X}' for u in _utf16(mapped))}>")
             cmap_lines.append("endbfchar endcmap CMapName currentdict /CMap defineresource pop end end")
             tounicode = new(stream("\n".join(cmap_lines).encode()))
-            widths = " ".join(str(_advance(ch)) for ch in codes)
+            widths = " ".join(str(_advance(ch, page.mark_slots)) for ch in codes)
             diffs = " ".join(f"/g{code}" for code in codes.values())
             font_id = new(
                 (
