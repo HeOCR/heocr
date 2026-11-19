@@ -87,7 +87,7 @@ def engine_for_model(doc: "Document", model: str | None) -> Tesseract | None:
     return engine
 
 
-NUMBER_LANG = "eng"  # stock eng reads digits far better than stock heb (dev split: 96.5% against 37% agreement)
+NUMBER_LANG = "eng"  # stock eng reads digits far better than stock heb, which drops or misreads isolated digits
 
 
 def number_engine_for(doc: "Document") -> Tesseract | None:

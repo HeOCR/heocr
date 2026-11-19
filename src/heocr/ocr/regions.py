@@ -2,7 +2,7 @@
 
 Used by the PDF route (image regions on text-layer pages, and whole pages) and by the DOCX route
 (embedded images). Every threshold is a named constant. They are provisional, tuned on
-D-bench synthetic data and the dev split only.
+open synthetic data and the development split, and not measured on a held-out set yet.
 """
 
 from __future__ import annotations
@@ -23,8 +23,8 @@ SHORT_INK_MIN_PX = 5000
 SHORT_INK_SHARE = 0.5
 # Image regions smaller than this (in rendered pixels, either side) are icons, not text.
 MIN_REGION_PX = 24
-# Region OCR below this mean word confidence is stray marks from logos and drawings (dev split:
-# below 50 the results were single characters and punctuation; from 80 up, real labels).
+# Region OCR below this mean word confidence is stray marks from logos and drawings: such readings are
+# single characters and punctuation, while real labels are read with high confidence.
 REGION_MIN_CONFIDENCE = 50.0
 
 

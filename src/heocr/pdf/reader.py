@@ -361,10 +361,9 @@ def _close_word(word: list[int], font: str, words: dict, other_words: dict) -> N
 DESKEW_TEXT_MIN_DEG = 1.0  # a page with no ruled table is turned straight only from this skew (degrees)
 RULE_PAD_PT = 2.0  # around a ruling found in a scan
 # A kept OCR layer whose scan has this share of its ink (and SHORT_INK_MIN_PX), in dense areas,
-# outside every layer line and ruling is partial. Correct layers leave 0% on set C pdf_t1_ocr_layer
-# and at most 8% on heavy hocrsyngen scans skewed about 1.5 degrees under an unskewed layer; a
-# missing paragraph of about five lines on a full page is over 10%. A line or two left out of the
-# layer is below this and not detected.
+# outside every layer line and ruling is partial. A correct layer leaves little or none, even over a
+# scan skewed under an unskewed layer; a missing paragraph of a few lines on a full page leaves more.
+# A line or two left out of the layer is below this and not detected.
 LAYER_SCAN_SHORT_SHARE = 0.10
 LAYER_SCAN_TILE_PT = 30.0  # uncovered ink counts only where it is dense, as text is (dense_ink_outside)
 LAYER_SCAN_DENSITY = 0.07
@@ -383,10 +382,9 @@ LAYER_CHECK_MIN_LETTERS = 8  # a line with fewer letters says too little
 LAYER_CHECK_AGREEMENT = 0.5  # the median letter agreement under which the two readings differ
 LAYER_MISSPELT_MIN = 0.15  # the layer's share of misspelt words above which it looks wrong on its own
 LAYER_MISSPELT_MARGIN = 0.10  # ... and by how much it must exceed our reading's share
-# When the two readings share barely a third of their letters (the open synthetic sets: wrong layers at
-# most 0.30, right ones at least 0.63), the layer's own misspelling needs less weight: a table page's
-# layer is mostly short cells, numbers and dates, which a scrambled layer misspells less. The margin
-# over our reading still holds.
+# When the two readings share barely a third of their letters, far below what a right layer shares with
+# our reading, the layer's own misspelling needs less weight: a table page's layer is mostly short cells,
+# numbers and dates, which a scrambled layer misspells less. The margin over our reading still holds.
 LAYER_STRONG_DISAGREEMENT = 0.35
 LAYER_MISSPELT_MIN_STRONG = 0.10
 # ... and only when our reading is clearly credible: this confident, and with enough words of its own to be
@@ -442,7 +440,7 @@ class LayerCheck:
                 and self.agreement < LAYER_STRONG_DISAGREEMENT and self.confidence >= LAYER_POOLED_MIN_CONFIDENCE):
             # A page of short cells (codes, numbers, one-word cells) gives neither side words enough to
             # spell-check. There, a very confident reading that shares under a third of the layer's letters
-            # replaces it (the open synthetic set G: wrong layers 0.125, right ones 1.0, at confidence 91.5).
+            # replaces it: a right layer shares nearly all of them.
             return True
         strong = (self.agreement < LAYER_STRONG_DISAGREEMENT and self.confidence >= LAYER_STRONG_MIN_CONFIDENCE
                   and self.ocr_misspelt is not None)
@@ -516,7 +514,7 @@ def _check_ocr_layer(doc: Document, page, built: PageLines) -> LayerCheck | None
 
 
 # A page whose layer has no line of LAYER_CHECK_MIN_LETTERS letters (a table of one-word cells) was not
-# checked at all, so a wrong layer there was kept by default (the open synthetic set G). Its short lines are
+# checked at all, so a wrong layer there was kept by default. Its short lines are
 # pooled instead: consecutive lines of at least LAYER_POOL_MIN_LETTERS letters, in reading order, until a
 # group reaches LAYER_CHECK_MIN_LETTERS. Each line is still read on its own crop.
 LAYER_CHECK_POOLED = True
@@ -1559,7 +1557,7 @@ def _reread_number_words(numbers, image, result, dpi: int) -> tuple[int, int]:
 
 LABEL_CROPS = True  # a cut label heb's box reads as noise is read again on a few more crops
 # A crop candidate vouched for only by another candidate (LABEL_CHAIN) needs most crops to agree on it:
-# on set B, those that one or two of five crops read were 27 right to 10 wrong.
+# a reading that only one or two crops give is too often wrong.
 LABEL_CROPS_CHAIN_MIN_SHARE = 60.0
 _LABEL_IN_READING = re.compile(r"\d{1,2}(?:\.\d{1,2})+")
 
@@ -1926,10 +1924,8 @@ def _unrotate_records(doc: Document, first_block: int, first_unread: int, index:
 
 
 # Ink in the rest of a page, once its tables are taken out, is looked for tile by tile: a short faint line
-# holds far less ink than a share of a whole page (set E: lines 43-65 grey levels under the paper, with
-# 3,889 such pixels on a page whose share floor was 4,351, were dropped). On set E's bare grainy pages no
-# 30 pt tile has a pixel 25 levels under the paper; every faint line's tile has hundreds, down to lines
-# 26 levels under it.
+# holds far less ink than a share of a whole page, and was dropped. Bare grainy paper has no tile with a
+# pixel REST_FAINT_DELTA levels under the paper; a faint line's tile has hundreds.
 REST_FAINT_DELTA = 25
 REST_TILE_PT = 30.0
 
@@ -2129,7 +2125,7 @@ def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids, n
                             empty -= 1
                         text = half["text"]
                         second = None  # settled: the half-resolution reading is confirmed by its own evidence
-                # A third reading that agrees with the cell's text confirms it (set C: every such cell read right).
+                # A third reading that agrees with the cell's text confirms it.
                 confirmed = half is not None and half["text"] == text.strip()
                 if checked and second is not None and not confirmed:
                     if _unconfirmed(first, second):
@@ -2142,8 +2138,8 @@ def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids, n
                                                  bbox=[x0 + ox, y0 + oy, x1 + ox, y1 + oy],
                                                  detail=f"row {len(rows)}, column {len(out_row)}: two readings differ and neither is confident"))
                 if text.strip() and _GARBLED_CELL.search(text) and not any(f.startswith("number_read_") for f in cell_flags):
-                    # Letters and marks no table cell holds ("ססס,,1", "₪19ךדךד"): a misreading, flagged on the
-                    # cell itself, whatever the other cells' readings (set C: every such cell was wrong).
+                    # Letters and marks no table cell holds (letters and commas for an amount, ₪ fused with
+                    # letters): a misreading, flagged on the cell itself, whatever the other cells' readings.
                     cell_flags.append("table_cell_garbled")
                     x0, y0, x1, y1 = cell["box"]
                     doc.unread.append(Unread(scope="block", reason="table_cell_garbled", page=index,
@@ -2186,13 +2182,13 @@ _HEBREW_WORD_IN = re.compile(r"[\u05d0-\u05ea]{3,}")
 
 
 # A scanned table's number cells read once more at half resolution: at 300 dpi the number model reads a
-# cell's short line of digits poorly (dates as "Ze ANe2020"), at 150 it reads them well, as on a page
-# (set C pdf_t5_table*: of 153 number cells read wrong, 103 right this way, none of the right ones
-# made wrong, no text cell changed).
+# cell's short line of digits poorly (a date read as letters), at 150 it reads them well, as on a page.
+# Taken only under the conditions of ``_take_half_reading``, it rights most such cells and leaves the
+# rest as they were.
 CELL_HALF_READING = True
 # A misread cell: marks no table cell holds, a final letter inside a word, ₪ against a letter, digits
-# fused with two letters or more, or a letter glued to a digit by number punctuation ("ססס,,1" for 4,200).
-# On set C pdf_t5_table* 100 cells matched, all of them read wrong, and no cell read right.
+# fused with two letters or more, or a letter glued to a digit by number punctuation (letters and commas
+# for an amount). Cells it matches are read wrong; cells read right do not match it.
 _GARBLED_CELL = re.compile(r"[=\]\[<>*+^~\\]|[ךםןףץ][\u05d0-\u05ea]|₪[\u05d0-\u05ea]|[\u05d0-\u05ea]₪|\d[\u05d0-\u05ea]{2,}|[\u05d0-\u05ea]{2,}\d|[\u05d0-\u05ea][.,/]+\d")
 CELL_HALF_MIN_CONFIDENCE = 85.0  # alone, without the other evidence below
 _CELL_NUMBER_SHAPE = re.compile(r"^[\d.,/%₪\-]+$")
@@ -2204,9 +2200,9 @@ NUMBER_COLUMN_MIN_CELLS = 3
 
 def _flag_cells_out_of_column(doc: Document, index: int, grid, rows: list[list[Cell]], offset) -> None:
     """In a column of numbers (``NUMBER_COLUMN_SHARE`` of its read body cells hold a digit), a body cell
-    read with no digit at all is a misreading: heb read "4,370" as "סזכ,./" and "877" as letters (set C
-    pdf_t5_table*: 18 such cells, every one read wrong). It is flagged ``table_cell_not_a_number`` with
-    its own unread entry, whatever the other cells' readings. The first row (a header) is not checked."""
+    read with no digit at all is a misreading: heb can read an amount as letters and marks. It is flagged
+    ``table_cell_not_a_number`` with its own unread entry, whatever the other cells' readings. The first
+    row (a header) is not checked."""
     ox, oy = offset
     boxes = [sorted(row, key=lambda cell: -cell["col"] if doc._rtl else cell["col"]) for row in grid.rows]
     width = max((len(r) for r in rows), default=0)
@@ -2254,8 +2250,8 @@ def _half_number_reading(numbers, crop, dpi: int) -> dict | None:
 def _take_half_reading(half: dict, text: str, second: dict | None, numbers, crop, dpi: int) -> bool:
     """Whether the half-resolution reading replaces the cell's text: it differs, and it agrees with the
     number model's full-resolution reading, or is a whole date or grouped amount, or is read with
-    confidence at least ``CELL_HALF_MIN_CONFIDENCE``. On set C none of the three admitted a wrong
-    reading; without them most changes were wrong."""
+    confidence at least ``CELL_HALF_MIN_CONFIDENCE``. Each of the three is evidence the new reading is
+    right; without them, most changes would be wrong."""
     if half["text"] == text.strip():
         return False
     if second is None:
@@ -2414,9 +2410,9 @@ def _ocr_regions(
         large = sized
     else:
         # Images under a T6 share of the page are mostly logos and icons, counted and not read. A
-        # region that holds lines of text is read all the same (set B pdf_t6_region: a table drawn as
-        # an image, 3-9% of the page, was skipped and lost with no flag): the layer's own characters
-        # are masked out first, and the rest must look like text rows (text_rows).
+        # region that holds lines of text is read all the same (a table drawn as a small image was
+        # skipped and lost with no flag): the layer's own characters are masked out first, and the
+        # rest must look like text rows (text_rows).
         large = []
         if sized:
             image, scale = _render(page, frame_of(page))

@@ -125,8 +125,7 @@ FAINT_INK_DELTA = 40  # grey levels below the cell's own paper that count as fai
 
 def cell_has_faint_ink(crop) -> bool:
     """Ink too light for ``has_ink`` (grey above ``INK_LEVEL``) but clearly darker than the cell's own
-    paper: a faint row of a scanned table (set C pdf_t5_table_faint: grey 165-196). Every faint text
-    cell there passes, and no empty cell."""
+    paper: a faint row of a scanned table, too light for ``INK_LEVEL`` yet plainly printed."""
     if crop is None:
         return False
     gray = crop.convert("L")
