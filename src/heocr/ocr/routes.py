@@ -1,9 +1,8 @@
 """Which OCR model reads which print (D6): the route table for ``ocr_model="auto"``.
 
 Each domain names a released model (``heocr.models.MODELS``) or ``None`` for stock Tesseract ``heb``.
-The table is filled from evaluation's default-model study; until then every domain reads with stock
-``heb``, so ``auto`` changes nothing but the record of how each page was routed. The default stays
-stock ``heb`` (not ``auto``) until evaluation's numbers and a registered gate say otherwise.
+The table comes from evaluation's default-model study. ``auto`` is opt-in: the default reads every
+document with the modern-print model (``heocr.api.DEFAULT_MODEL``).
 """
 
 from __future__ import annotations
@@ -13,7 +12,7 @@ import re
 DOMAINS = ("modern", "old")  # modern print, and old or rabbinic print (decision 0018)
 DEFAULT_DOMAIN = "modern"  # the fallback when the probe cannot tell (D6 note, cascade step 3)
 # From evaluation's default-model study (2026-11-19): the office-print model for modern print, the
-# P-hist pick for old print. The default stays stock heb until the default flip (D6-rc1).
+# P-hist pick for old print.
 ROUTES: dict[str, str | None] = {"modern": "heocr_modern_v1", "old": "heocr_oldprint_v1"}
 
 

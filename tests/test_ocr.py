@@ -41,8 +41,9 @@ class OcrRouteTest(unittest.TestCase):
         return [json.loads(line) for line in self.log.read_text(encoding="utf-8").splitlines()] if self.log.exists() else []
 
     def test_image_only_page_is_read_by_ocr(self) -> None:
-        # A white scan: the fake engine's lines are all there is, so no ink is left unread.
-        doc = heocr.extract(make_pdf([PdfPage(images=FULL_PAGE, image_gray=0xFF)]), tesseract=FAKE)
+        # A white scan: the fake engine's lines are all there is, so no ink is left unread. Stock heb, so the
+        # block's ocr object holds no route.
+        doc = heocr.extract(make_pdf([PdfPage(images=FULL_PAGE, image_gray=0xFF)]), tesseract=FAKE, ocr_model="heb")
         page = doc.pages[0]
         self.assertEqual((page.page_class, page.route, page.coverage["status"]), ("T5", "ocr", "ocr"))
         self.assertEqual([b.text for b in doc.blocks], ["שלום עולם\nשורה", "פסקה"])

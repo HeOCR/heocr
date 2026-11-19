@@ -16,6 +16,8 @@ Or, for the unreleased changes on `main`, install it from the repository:
 pip install "git+https://github.com/HeOCR/heocr"
 ```
 
+An install from the repository has no bundled OCR models (they ship in the released package only). The default model then falls back to stock Tesseract `heb`, and the document is flagged `bundled_model_unavailable`. In a clone, `python scripts/fetch_models.py` before `pip install .` fetches them and checks their pinned hashes.
+
 The core needs only pypdfium2, Pillow and defusedxml. It reads text-layer PDFs, DOCX, XLSX, PPTX and HTML on its own. Two optional programs add the rest:
 - **Tesseract,** for scans, images and image regions;
 - **LibreOffice,** for DOC, RTF, ODT, ODS, XLS, ODP and PPT.
@@ -102,7 +104,7 @@ The options, all keyword-only:
 | `ocr` | `True` | Run OCR where the text exists only as an image. `False` reports those pages unread. |
 | `ocr_lang`, `ocr_psm` | `"heb"`, `3` | Tesseract's languages and page segmentation mode |
 | `tesseract` | found | The Tesseract program, when it is not on the `PATH` |
-| `ocr_model` | none | A released HeOCR model's name or a `.traineddata` path, used instead of `heb`; or `auto`, which picks one model per document from the route table (`heocr.ocr.routes`) and records how in each OCR block's `ocr.model_route`. Opt-in; until evaluation fills the table, `auto` reads with stock `heb` |
+| `ocr_model` | `"heocr_modern_v1"` | HeOCR's bundled modern-print model, for every document, when `ocr_lang` is `heb`. `"oldprint"`: the bundled old-print model. `"auto"`: one of the two per document from the route table (`heocr.ocr.routes`), recorded in each OCR block's `ocr.model_route`. `"heb"`, `"stock"` or `None`: stock Tesseract. Or another released HeOCR model's name or a `.traineddata` path, used instead of `ocr_lang`. The models' accuracy is not measured on a held-out set yet |
 | `force_ocr` | `False` | Read every PDF page by OCR, its text layer ignored (`--force-ocr`); flags each page `ocr_forced`. Needs `ocr` |
 | `check_numbers` | `"suspect"` | The second reading of numbers (below) |
 | `repairs` | `True` | `False` turns every repair rule off: the text exactly as extracted |

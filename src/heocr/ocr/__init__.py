@@ -39,14 +39,35 @@ def engine_for(doc: "Document") -> Tesseract | None:
             engine.route = route
         return engine
     if doc._ocr_engine is None and doc._ocr_error is None:
+        model = settings.get("model")
+        if model is not None and _bundled_missing(model):
+            # A bundled model whose file is not here (an install from the repository): stock Tesseract reads
+            # instead, and the document says so. Never silent.
+            if "bundled_model_unavailable" not in doc.flags:
+                doc.flags.append("bundled_model_unavailable")
+            model = None
         try:
             doc._ocr_engine = Tesseract.find(
-                settings["cmd"], lang=settings["lang"], psm=settings["psm"], model=settings.get("model")
+                settings["cmd"], lang=settings["lang"], psm=settings["psm"], model=model
             )
             doc.components.update(doc._ocr_engine.provenance())
         except OcrUnavailable as exc:
             doc._ocr_error = str(exc)
     return doc._ocr_engine
+
+
+def _bundled_missing(model: str) -> bool:
+    """A released model meant to ship in the package (``ReleasedModel.bundled``) that resolves nowhere."""
+    from heocr.models import MODELS, ModelError, resolve
+
+    released = MODELS.get(model)
+    if released is None or not released.bundled:
+        return False
+    try:
+        resolve(model)
+    except ModelError:
+        return True
+    return False
 
 
 def engine_for_model(doc: "Document", model: str | None) -> Tesseract | None:
