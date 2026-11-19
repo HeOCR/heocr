@@ -4,7 +4,9 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 [HeOCR/heocr](https://github.com/HeOCR/heocr). The milestones (D1–D5) are planned in
 [`planning/milestones/`](planning/milestones/).
 
-## Unreleased → 0.2.0
+## Unreleased → 0.2.0 (release candidate 0.2.0rc1, RC2)
+
+0.2.0rc1 is a release candidate: RC2's registered gate measures it. Nothing in it is measured on a held-out set yet.
 
 ### Added
 
