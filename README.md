@@ -9,12 +9,12 @@
 
 Every decision is recorded in the output. Text that could not be read is reported in `unread`, never dropped silently.
 
-> Status: release candidate 0.1.0rc1. Milestones D1–D4 are done, and D5 is in its release gate. Nothing is on PyPI yet: the first release, 0.1.0, waits for the D-bench release gate's verdict.
+> Status: 0.1.2 is on PyPI: the gated 0.1.0 plus the fixes made since, which are not yet re-gated. The gate's verdicts, per format and page class, are [below](#what-the-release-gate-supports). This branch holds unreleased changes for 0.2.0, listed in the [changelog](CHANGELOG.md).
 
 ## Quickstart
 
 ```sh
-pip install .            # from a clone; the core needs only defusedxml, pypdfium2 and Pillow
+pip install heocr        # the core needs only defusedxml, pypdfium2 and Pillow
 ```
 
 ```python

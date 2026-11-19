@@ -1,6 +1,4 @@
-# heocr 0.1.1: release notes (draft)
-
-> **Draft.** Nothing is tagged or published. The version is still `0.1.0rc1` in `pyproject.toml`. Whether and when 0.1.0 and 0.1.1 go to PyPI is the maintainer's decision.
+# heocr 0.1.1: release notes
 
 0.1.1 is the release candidate that went through the registered release gate (`0.1.0rc1`, commit `57e58de`), plus the fixes made after its verdicts. **The gate's verdicts belong to `0.1.0rc1`.** These fixes were tuned on open synthetic sets and the development split only, never on the gate's held-out documents. They are not gated yet: a fresh registered gate (RC2, with a new seed) decides the next claims.
 
