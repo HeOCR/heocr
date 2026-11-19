@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 
 from heocr import repairs
 from heocr.contract import Block, Cell, Document, Line, Page, Unread, page_limit, pages_left_unread, time_up
-from heocr.ocr import OcrUnavailable, block_ocr, engine_for, number_engine_for, routes, unavailable_reason
+from heocr.ocr import OcrUnavailable, block_ocr, call_failures, engine_for, number_engine_for, routes, unavailable_reason
 from heocr.ocr.tesseract import OcrResult
 from heocr.ocr.regions import (  # noqa: F401  (re-exported for callers of the PDF route)
     INK_LEVEL,
@@ -653,10 +653,17 @@ def read_pdf(body: bytes, doc: Document) -> None:
                 pages_left_unread(doc, index, pages)
                 break
             page = pdf[index]
+            failed = call_failures(doc)
             try:
                 _read_page(doc, index, page, eth_fonts, font_maps, doc._shifted_fonts)
             finally:
                 page.close()
+            failed = call_failures(doc) - failed
+            if failed and doc.pages and doc.pages[-1].index == index:
+                # A Tesseract call on this page failed or timed out (a second reading, a check, a cell):
+                # whatever it would have read is missing, and the page says so.
+                doc.pages[-1].flags.append("ocr_call_failed")
+                doc.pages[-1].signals["ocr_calls_failed"] = failed
         if doc.options.get("check_numbers"):
             _check_numbers(doc, pdf, doc.options["check_numbers"])
     finally:
