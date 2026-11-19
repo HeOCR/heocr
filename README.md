@@ -9,7 +9,7 @@
 
 Every decision is recorded in the output. Text that could not be read is reported in `unread`, never dropped silently.
 
-> Status: 0.1.2 is on PyPI: the gated 0.1.0 plus the fixes made since, which are not yet re-gated. The gate's verdicts, per format and page class, are [below](#what-the-release-gate-supports). This branch holds unreleased changes for 0.2.0, listed in the [changelog](CHANGELOG.md).
+> Status: **0.2.0rc1 is a release candidate**, in RC2's registered release gate. Its changes since 0.1.2 are in the [changelog](CHANGELOG.md); none of them is measured on a held-out set yet. Install it with `pip install --pre heocr` (or `heocr==0.2.0rc1`); plain `pip install heocr` installs 0.1.2, the gated 0.1.0 plus the fixes made since. The 0.1.0 gate's verdicts, per format and page class, are [below](#what-the-release-gate-supports).
 
 ## Quickstart
 

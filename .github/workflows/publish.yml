@@ -34,6 +34,15 @@ jobs:
       - name: Fetch the bundled models, checked against their pins
         run: python scripts/fetch_models.py
       - run: python -m build
+      - name: The wheel and the sdist bundle every bundled model and its notices
+        shell: bash
+        run: |
+          names=$(python -c "import sys; sys.path.insert(0, 'src'); from heocr.models import MODELS; print(' '.join(m.name for m in MODELS.values() if m.bundled))")
+          for name in $names; do
+            unzip -l dist/*.whl | grep -q "heocr/models_data/$name.traineddata" || { echo "wheel lacks $name"; exit 1; }
+            unzip -l dist/*.whl | grep -q "heocr/models_data/NOTICE.$name" || { echo "wheel lacks NOTICE.$name"; exit 1; }
+            tar -tzf dist/*.tar.gz | grep -q "models_data/$name.traineddata" || { echo "sdist lacks $name"; exit 1; }
+          done
       - run: python -m twine check --strict dist/*
       - name: Install the wheel, then the sdist, into fresh venvs and smoke-test each
         shell: bash
