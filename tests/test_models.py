@@ -170,15 +170,16 @@ class BundledAndRoutesTest(unittest.TestCase):
         with self.assertRaises(models.ModelError):
             models.resolve("heocr_test")
 
-    def test_the_route_table_starts_at_stock_heb(self) -> None:
+    def test_the_route_table_names_bundled_models_of_its_domains(self) -> None:
         from heocr.ocr import routes
 
         self.assertEqual(set(routes.ROUTES), set(routes.DOMAINS))
-        self.assertTrue(all(routes.model_for(d) is None for d in routes.DOMAINS))  # filled from evaluation's study
         self.assertIn(routes.DEFAULT_DOMAIN, routes.DOMAINS)
+        for domain in routes.DOMAINS:
+            model = models.MODELS[routes.model_for(domain)]
+            self.assertEqual((model.domain, model.bundled, model.licence), (domain, True, "Apache-2.0"))
         with self.assertRaises(ValueError):
             routes.model_for("handwriting")
-        self.assertTrue(all(m.domain == "unassigned" for name, m in models.MODELS.items() if name != "heocr_test"))
 
 
 class AutoRouteTest(unittest.TestCase):
@@ -208,7 +209,7 @@ class AutoRouteTest(unittest.TestCase):
         return [(c[c.index("-l") + 1], c[c.index("--psm") + 1]) for c in calls if c and "-l" in c and "--psm" in c]
 
     def test_one_candidate_needs_no_probe(self) -> None:
-        with mock.patch.dict(os.environ, self.page_tsv("80")):
+        with mock.patch.dict(os.environ, self.page_tsv("80")), mock.patch.dict("heocr.ocr.routes.ROUTES", {"modern": None, "old": None}):
             doc = heocr.extract(SCAN, tesseract=FAKE, ocr_model="auto")
         self.assertEqual(doc.options["ocr"]["model"], "auto")
         self.assertTrue(doc.blocks)
@@ -226,6 +227,16 @@ class AutoRouteTest(unittest.TestCase):
         self.assertGreater(route["scores"]["old"], route["scores"]["modern"])
         self.assertIn(("heocr_oldt", "3"), self.recognition_langs())  # the deciding page is read again by the chosen model
         self.assertEqual(doc.blocks[0].ocr["lang"], "heocr_oldt")
+        self.assertEqual(heocr.validate(doc.to_dict()), [])
+
+    def test_a_routed_model_that_is_not_here_falls_back_to_stock_and_says_so(self) -> None:
+        # The table names the released models; with neither bundled nor downloaded, auto reads with stock heb.
+        with mock.patch.dict(os.environ, self.page_tsv("80")), mock.patch("heocr.models.bundled_dir", return_value=self.cache / "none"):
+            doc = heocr.extract(SCAN, tesseract=FAKE, ocr_model="auto")
+        self.assertIn("routed_model_unavailable", doc.flags)
+        self.assertTrue(doc.blocks)
+        self.assertEqual(doc.blocks[0].ocr["lang"], "heb")
+        self.assertEqual(doc.blocks[0].ocr["model_route"]["unavailable"], "heocr_modern_v1")
         self.assertEqual(heocr.validate(doc.to_dict()), [])
 
     def test_a_close_call_keeps_the_fallback(self) -> None:

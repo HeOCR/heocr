@@ -12,7 +12,9 @@ import re
 
 DOMAINS = ("modern", "old")  # modern print, and old or rabbinic print (decision 0018)
 DEFAULT_DOMAIN = "modern"  # the fallback when the probe cannot tell (D6 note, cascade step 3)
-ROUTES: dict[str, str | None] = {"modern": None, "old": None}
+# From evaluation's default-model study (2026-11-19): the office-print model for modern print, the
+# P-hist pick for old print. The default stays stock heb until the default flip (D6-rc1).
+ROUTES: dict[str, str | None] = {"modern": "heocr_modern_v1", "old": "heocr_oldprint_v1"}
 
 
 def model_for(domain: str) -> str | None:

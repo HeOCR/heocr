@@ -52,4 +52,4 @@ where = ["src"]
 include = ["heocr*"]
 
 [tool.setuptools.package-data]
-heocr = ["schemas/*.json", "models_data/*.traineddata", "models_data/README.md"]
+heocr = ["schemas/*.json", "models_data/*.traineddata", "models_data/NOTICE.*", "models_data/README.md"]
