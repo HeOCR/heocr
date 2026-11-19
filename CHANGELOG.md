@@ -32,7 +32,7 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 
 - New page signal `ocr_layer_check_pooled` (additive, within v1).
 
-## Unreleased → 0.1.2
+## 0.1.2
 
 ### Added
 
@@ -57,7 +57,7 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 
 - New option `force_ocr` in `options`, and page flag `ocr_forced` (both additive, within v1).
 
-## Unreleased → 0.1.1
+## 0.1.1
 
 ### Fixed
 
@@ -88,10 +88,10 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 - New page flag `ocr_rest_blank` (additive, within v1): the page's tables were read, and nothing else on it had ink.
 - New key `agreed` (additive) on a number reading in `checks.number_readings`: a cut label restored because two readings agree.
 
-## Unreleased → 0.1.0 (D5, release readiness)
+## 0.1.0 (D5, release readiness)
 
-`0.1.0rc1` is the release candidate for the registered D-bench release gate. Nothing is on PyPI yet:
-0.1.0 is released only if the gate supports it.
+0.1.0 is exactly `0.1.0rc1`, the release candidate the registered D-bench release gate judged. Its verdicts are in
+`docs/release-notes-0.1.0.md`.
 
 ### Record
 

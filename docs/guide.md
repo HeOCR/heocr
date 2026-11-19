@@ -4,7 +4,13 @@ How to install heocr, read documents with it from Python or the command line, an
 
 ## Install
 
-heocr needs Python 3.11 or later. Nothing is on PyPI yet, so install it from the repository:
+heocr needs Python 3.11 or later. Install the latest release from PyPI:
+
+```sh
+pip install heocr
+```
+
+Or, for the unreleased changes on `main`, install it from the repository:
 
 ```sh
 pip install "git+https://github.com/HeOCR/heocr"
