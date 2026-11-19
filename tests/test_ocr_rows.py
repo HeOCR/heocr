@@ -85,7 +85,7 @@ class OcrRowsTest(unittest.TestCase):
         self.assertEqual(table_rows(lines, SCALE, rtl=True), [])
 
     def test_two_rows_are_not_a_table(self) -> None:
-        lines = [l for l in column_major() if l.bbox[1] < 300 + 80 * 2]
+        lines = [ln for ln in column_major() if ln.bbox[1] < 300 + 80 * 2]
         self.assertEqual(table_rows(lines, SCALE, rtl=True), [])
 
     def test_a_row_with_two_pieces_in_one_column_leaves_the_page_as_read(self) -> None:
@@ -102,8 +102,8 @@ class OcrRowsTest(unittest.TestCase):
         tables = table_rows(lines, SCALE, rtl=True)
         for table in tables:
             taken = {id(w) for row in table.rows for cell in row for p in cell for w in p.words}
-            for l in table.lines:
-                self.assertTrue(all(id(w) in taken for w in l.words))
+            for ln in table.lines:
+                self.assertTrue(all(id(w) in taken for w in ln.words))
 
 
 

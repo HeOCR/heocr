@@ -111,8 +111,7 @@ def _same(a: Piece, b: Piece) -> bool:
     iy = min(bb[3], bs[3]) - max(bb[1], bs[1])
     if ix <= 0 or iy <= 0:
         return False
-    area = lambda r: (r[2] - r[0]) * (r[3] - r[1])
-    return ix * iy >= DUPLICATE_OVERLAP * area(bs)
+    return ix * iy >= DUPLICATE_OVERLAP * (bs[2] - bs[0]) * (bs[3] - bs[1])
 
 
 def _rows(pieces: list[Piece]) -> list[list[Piece]]:
