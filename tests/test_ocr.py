@@ -54,6 +54,30 @@ class OcrRouteTest(unittest.TestCase):
         self.assertEqual([round(v, 2) for v in first.lines[0].bbox], [72.0, 48.0, 504.0, 62.4])
         self.assertEqual(doc.unread, [])
 
+    def test_force_ocr_reads_a_text_layer_page_by_ocr(self) -> None:
+        # A workaround for a text layer heocr reads badly: every PDF page goes to OCR, its layer ignored.
+        pdf = make_pdf([PdfPage(lines=lines_block(["שורה ראשונה של מסמך", "שורה שנייה של מסמך"]))])
+        self.assertEqual(heocr.extract(pdf, tesseract=FAKE).pages[0].route, "text_layer")
+        doc = heocr.extract(pdf, tesseract=FAKE, force_ocr=True)
+        page = doc.pages[0]
+        self.assertEqual((page.page_class, page.route), ("T1", "ocr"))  # the class says what the page is; the route how it was read
+        self.assertIn("ocr_forced", page.flags)
+        self.assertTrue(doc.options["force_ocr"])
+        self.assertTrue(doc.blocks and all(b.source == "ocr" for b in doc.blocks))
+        self.assertEqual(heocr.validate(doc.to_dict()), [])
+
+    def test_force_ocr_needs_ocr(self) -> None:
+        pdf = make_pdf([PdfPage(lines=lines_block(["שורה אחת"]))])
+        with self.assertRaises(ValueError):
+            heocr.extract(pdf, ocr=False, force_ocr=True)
+        path = Path(self.tmp.name) / "one.pdf"
+        path.write_bytes(pdf)
+        from heocr.cli import main
+
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(main([str(path), "--force-ocr", "--no-ocr"]), 1)
+        self.assertIn("--no-ocr", err.getvalue())
+
     def test_provenance_has_versions_and_hashes_and_no_paths(self) -> None:
         doc = heocr.extract(make_pdf([PdfPage(images=FULL_PAGE)]), tesseract=FAKE)
         components = doc.to_dict()["producer"]["components"]

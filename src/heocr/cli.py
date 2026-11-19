@@ -33,6 +33,7 @@ def _parser() -> argparse.ArgumentParser:
         help="turn every repair rule off: output the extracted text byte for byte",
     )
     parser.add_argument("--no-ocr", action="store_true", help="do not run OCR; pages that need it are reported unread")
+    parser.add_argument("--force-ocr", action="store_true", help="read every PDF page by OCR, ignoring its text layer (a workaround for a text layer heocr reads badly)")
     parser.add_argument(
         "--check-numbers",
         choices=("suspect", "tables", "all", "off"),
@@ -86,6 +87,7 @@ def main(argv: list[str] | None = None) -> int:
             ocr_psm=args.psm,
             tesseract=args.tesseract,
             ocr_model=args.ocr_model,
+            force_ocr=args.force_ocr,
             check_numbers=False if args.check_numbers == "off" else args.check_numbers,
             convert=not args.no_convert,
             soffice=args.soffice,

@@ -4,6 +4,25 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 [HeOCR/heocr](https://github.com/HeOCR/heocr). The milestones (D1–D5) are planned in
 [`planning/milestones/`](planning/milestones/).
 
+## Unreleased → 0.1.2
+
+### Added
+
+- **`--force-ocr`** (`force_ocr=True`): reads every PDF page by OCR, its text layer ignored. It's a workaround for a text layer heocr reads badly, such as the pointed OCR layers in the known issues. The page keeps its class; its route is `ocr` and it is flagged `ocr_forced`. It needs OCR, so it cannot be combined with `--no-ocr`.
+
+### Fixed
+
+- **A scrambled OCR layer over a table page is replaced when our reading strongly disagrees.**
+  - A foreign OCR layer is replaced only when our confident reading disagrees with it and the layer is misspelt on its own evidence (at least 15% of its words) and well beyond our reading.
+  - A table page's layer is mostly short cells, numbers and dates, which a scrambled layer misspells less. One stayed at 12.5% and was kept, though the two readings shared barely a fifth of their letters.
+  - When they share under 35%, and our reading is clearly credible (confidence at least 80, with enough words of its own to be spell-checked), the layer's own floor is now 10%; the margin over our reading still holds.
+  - On the open synthetic sets, wrong layers share at most 30% of letters with our reading and right ones at least 63%.
+  - It fixes one known case, not a class: on every other document checked, including held-out ones, nothing changes.
+
+### Record
+
+- New option `force_ocr` in `options`, and page flag `ocr_forced` (both additive, within v1).
+
 ## Unreleased → 0.1.1
 
 ### Fixed
@@ -29,12 +48,6 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
   - On a scan whose labels heb cut ("2.2.4." read as "4."), the number model's deeper reading of a low-confidence label is used only when a neighbouring label vouches for the sequence. When the neighbours are cut too, nothing vouches.
   - Now a deeper label that the word's crop and the whole-page reading both give, level for level, is used when no known label next to it contradicts the sequence. It is logged with `agreed: true`.
   - It can be turned off (`LABEL_AGREEMENT`).
-
-- **A scrambled OCR layer over a table page is replaced when our reading strongly disagrees.**
-  - A foreign OCR layer is replaced only when our confident reading disagrees with it and the layer is misspelt on its own evidence (at least 15% of its words) and well beyond our reading.
-  - A table page's layer is mostly short cells, numbers and dates, which a scrambled layer misspells less. One stayed at 12.5% and was kept, though the two readings shared barely a fifth of their letters.
-  - When they share under 35%, and our reading is clearly credible (confidence at least 80, with enough words of its own to be spell-checked), the layer's own floor is now 10%; the margin over our reading still holds.
-  - On the open synthetic sets, wrong layers share at most 30% of letters with our reading and right ones at least 63%.
 
 ### Record
 
