@@ -74,6 +74,22 @@ class PageClassTest(unittest.TestCase):
         page = PdfPage(lines=garbage, invisible=True, images=FULL_PAGE)
         self.assertClass(page, "T4", "foreign_ocr_layer")
 
+    def test_an_ocr_layer_of_numbers_and_codes_is_not_foreign_by_its_letters(self) -> None:
+        # A table of amounts, dates and codes has a few Latin letters and no Hebrew. Its layer may well be right,
+        # so its letters do not make it another language's: its digits decide (the reader, with OCR). Values invented.
+        from heocr.pdf.classify import classify
+
+        rows = [TextLine(t, 50, 780 - 18 * i, rtl=False) for i, t in enumerate(["QX-418 62 14.03.2022", "TR-905 7 1,250", "MV-31 480 2.11.2021"])]
+        doc, record = page_of(PdfPage(lines=rows, invisible=True, images=FULL_PAGE))
+        self.assertEqual(record.signals["latin_word_letters"], 0)
+        self.assertEqual(classify(record.signals), ("T1", ["text_layer_is_ocr", "ocr_layer_numbers_and_codes"]))
+        # Without OCR its digits cannot be checked, and the page is read as foreign, as before.
+        self.assertEqual(record.page_class, "T4")
+        self.assertIn("foreign_ocr_layer", record.flags)
+        self.assertNotIn("text_layer_is_ocr", record.flags)
+        latin = dict(record.signals, latin_word_letters=40, latin_word_share=0.6)
+        self.assertEqual(classify(latin), ("T4", ["foreign_ocr_layer"]))
+
     def test_hebrew_ocr_layer_is_read_and_flagged(self) -> None:
         page = PdfPage(lines=lines_block(HEBREW), invisible=True, images=FULL_PAGE)
         doc, _ = self.assertClass(page, "T1", "text_layer_is_ocr")

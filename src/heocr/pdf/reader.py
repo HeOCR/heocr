@@ -424,6 +424,9 @@ class LayerCheck:
     layer_misspelt: float | None  # the layer's share of misspelt words (``misspelt_share``)
     ocr_misspelt: float | None  # the same, in our reading of the sampled lines
     pooled: bool = False  # short lines were pooled, as no line had LAYER_CHECK_MIN_LETTERS letters
+    digit_agreement: float | None = None  # the digits' agreement over the sampled lines (``_digit_agreement``)
+    digits: int = 0  # the layer's digits in the sampled lines
+    digit_confidence: float | None = None  # our reading's mean confidence on its words with digits
 
     @property
     def disagrees(self) -> bool:
@@ -449,8 +452,19 @@ class LayerCheck:
             return False
         return self.layer_misspelt >= (self.ocr_misspelt or 0.0) + LAYER_MISSPELT_MARGIN
 
+    @property
+    def digits_agree(self) -> bool:
+        """Our confident reading shares the layer's digits: on a layer of amounts, dates and codes, with
+        no words to spell-check and next to no letters, that is the evidence the layer is right."""
+        return _digits_agree(self.digit_agreement, self.digits, self.digit_confidence)
+
     def signals(self) -> dict[str, float]:
         out = {"ocr_layer_agreement": round(self.agreement, 3)}
+        if self.digit_agreement is not None:
+            out["ocr_layer_digit_agreement"] = round(self.digit_agreement, 3)
+            out["ocr_layer_digits"] = self.digits
+        if self.digit_confidence is not None:
+            out["ocr_layer_digit_confidence"] = round(self.digit_confidence, 1)
         if self.confidence is not None:
             out["ocr_layer_check_confidence"] = round(self.confidence, 1)
         if self.layer_misspelt is not None:
@@ -487,30 +501,88 @@ def _check_ocr_layer(doc: Document, page, built: PageLines) -> LayerCheck | None
     sample = groups[::step][:LAYER_CHECK_LINES]
     image, scale = _render(page, frame_of(page))
     ratios, confidences, readings = [], [], []
+    read_lines: dict[int, tuple[str, list]] = {}  # id(line) -> (our reading, its words)
+
+    def reading(line):
+        if id(line) not in read_lines:
+            box = line.bbox
+            crop = image.crop((max(0, int((box[0] - 2) * scale)), max(0, int((box[1] - 2) * scale)), int((box[2] + 2) * scale), int((box[3] + 2) * scale)))
+            result = engine.recognize(crop, dpi=round(scale * 72), psm=7)
+            read_lines[id(line)] = (" ".join(line_.text for line_ in result.lines), [w for line_ in result.lines for w in line_.words])
+        return read_lines[id(line)]
+
     for group in sample:
         texts = []
         for line in group:
-            box = line.bbox
-            crop = image.crop((max(0, int((box[0] - 2) * scale)), max(0, int((box[1] - 2) * scale)), int((box[2] + 2) * scale), int((box[3] + 2) * scale)))
             try:
-                result = engine.recognize(crop, dpi=round(scale * 72), psm=7)
+                text, words = reading(line)
             except OcrUnavailable:
                 return None
-            texts.append(" ".join(line_.text for line_ in result.lines))
-            confidences.extend(c for line_ in result.lines for c in line_.confidences)
+            texts.append(text)
+            confidences.extend(w.confidence for w in words)
         text = " ".join(texts)
         readings.append(text)
         read = "".join(ch for ch in text if ch.isalpha())
         layer = "".join(ch for line in group for ch in line.text if ch.isalpha())
         ratios.append(difflib.SequenceMatcher(None, layer, read, autojunk=False).ratio())
     ratios.sort()
+    try:
+        digit_agreement, digits, digit_confidence = _digit_agreement(doc, built, image, scale)
+    except OcrUnavailable:
+        digit_agreement, digits, digit_confidence = None, 0, None
     return LayerCheck(
         agreement=ratios[len(ratios) // 2],
         confidence=sum(confidences) / len(confidences) if confidences else None,
         layer_misspelt=misspelt_share(" ".join(line.text for line in built.lines)),
         ocr_misspelt=misspelt_share(" ".join(readings)),
         pooled=pooled,
+        digit_agreement=digit_agreement,
+        digits=digits,
+        digit_confidence=digit_confidence,
     )
+
+
+def _digits_agree(agreement: float | None, digits: int, confidence: float | None) -> bool:
+    return (agreement is not None and digits >= LAYER_DIGIT_MIN and agreement >= LAYER_DIGIT_KEEP
+            and confidence is not None and confidence >= LAYER_DIGIT_MIN_CONFIDENCE)
+
+
+def _layer_digits(doc: Document, page, built: PageLines) -> tuple[float | None, int, float | None]:
+    """``_digit_agreement`` on its own, for a layer with no letters to check (a page of bare numbers)."""
+    if number_engine_for(doc) is None:
+        return None, 0, None
+    image, scale = _render(page, frame_of(page))
+    try:
+        return _digit_agreement(doc, built, image, scale)
+    except OcrUnavailable:
+        return None, 0, None
+
+
+def _digit_agreement(doc: Document, built: PageLines, image, scale: float) -> tuple[float | None, int, float | None]:
+    """The digits of up to ``LAYER_CHECK_LINES`` layer lines with at least ``LAYER_DIGIT_MIN_LINE`` digits,
+    spread over the page, against a reading of the same lines in ``eng`` (``number_engine_for``: stock
+    ``heb`` misreads isolated digits, "860" as "00"): the median per-line agreement of the lines' numbers,
+    the layer's digit count, and that reading's mean confidence on its words with digits."""
+    engine = number_engine_for(doc)
+    digit_lines = [line for line in built.lines if sum(ch.isdigit() for ch in line.text) >= LAYER_DIGIT_MIN_LINE]
+    if engine is None or not digit_lines:
+        return None, 0, None
+    step = max(1, len(digit_lines) // LAYER_CHECK_LINES)
+    ratios, digits, confidences = [], 0, []
+    for line in digit_lines[::step][:LAYER_CHECK_LINES]:
+        box = line.bbox
+        crop = image.crop((max(0, int((box[0] - 2) * scale)), max(0, int((box[1] - 2) * scale)), int((box[2] + 2) * scale), int((box[3] + 2) * scale)))
+        result = engine.recognize(crop, dpi=round(scale * 72), psm=7)
+        text = " ".join(line_.text for line_ in result.lines)
+        # Numbers as a bag, not a string: the two readings may order a row's cells differently.
+        layer, ours = Counter(re.findall(r"\d+", line.text)), Counter(re.findall(r"\d+", text))
+        digits += sum(len(n) * c for n, c in layer.items())
+        both = sum(len(n) * c for n, c in (layer & ours).items())
+        total = sum(len(n) * c for n, c in (layer + ours).items())
+        ratios.append(2 * both / total if total else 0.0)
+        confidences.extend(w.confidence for line_ in result.lines for w in line_.words if any(ch.isdigit() for ch in w.text))
+    ratios.sort()
+    return ratios[len(ratios) // 2], digits, (sum(confidences) / len(confidences) if confidences else None)
 
 
 # A page whose layer has no line of LAYER_CHECK_MIN_LETTERS letters (a table of one-word cells) was not
@@ -523,6 +595,14 @@ LAYER_POOL_MIN_LETTERS = 2
 # Kept, switchable, for a held-out set with all-table pages to test it.
 LAYER_POOLED_REPLACE = False  # a pooled page with no spelling evidence on either side may be replaced (LayerCheck.layer_is_wrong)
 LAYER_POOLED_MIN_CONFIDENCE = 85.0
+# Digits: a layer of amounts, dates and codes has no words to spell-check, and its letters can be few (Latin
+# codes, which a Hebrew model reads poorly). Its digits are compared with our reading of the same lines.
+# A layer with neither Hebrew nor Latin text (``classify``) is kept only when they agree; otherwise it is
+# read again by OCR, as a foreign layer is.
+LAYER_DIGIT_MIN_LINE = 3  # a line with fewer digits says too little
+LAYER_DIGIT_MIN = 30  # digits over the sampled lines
+LAYER_DIGIT_KEEP = 0.8
+LAYER_DIGIT_MIN_CONFIDENCE = 70.0
 
 
 def _pooled_lines(lines, letters) -> list[list]:
@@ -1002,6 +1082,9 @@ def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = froz
         # The layer was a cp1255-shifted font (a T3 layer by its state), fully restored: read as T1.
         flags.append("font_cp1255_shifted")
     forced = bool(doc.options.get("force_ocr")) and page_class != "empty"
+    if forced and "ocr_layer_numbers_and_codes" in flags:
+        # The layer is not checked, so the page keeps the class it had before its digits could decide.
+        page_class, flags = "T4", [f for f in flags if f not in ("text_layer_is_ocr", "ocr_layer_numbers_and_codes")] + ["foreign_ocr_layer"]
     if forced:
         flags = flags + ["ocr_forced"]  # the user asked for OCR: the layer is neither checked nor read
     if "text_layer_is_ocr" in flags and page_class in ("T1", "T2") and not forced:
@@ -1009,10 +1092,29 @@ def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = froz
         # its lines tells whether the two agree; when they do not, the layer is replaced only when
         # our reading is the credible one (``LayerCheck.layer_is_wrong``). Otherwise it is kept.
         check = _check_ocr_layer(doc, page, built)
-        if check is None:
+        # A layer with neither Hebrew nor Latin text, such as a table of amounts, dates and codes, used to be
+        # read again as foreign. It is kept only when its digits agree with our reading; otherwise it is
+        # foreign, with the same class and flags as before.
+        if check is not None:
+            signals.update(check.signals())
+        if "ocr_layer_numbers_and_codes" in flags:
+            if check is not None:
+                agree = check.digits_agree
+            else:
+                digit_agreement, digits, digit_confidence = _layer_digits(doc, page, built)
+                agree = _digits_agree(digit_agreement, digits, digit_confidence)
+                if digit_agreement is not None:
+                    signals.update({"ocr_layer_digit_agreement": round(digit_agreement, 3), "ocr_layer_digits": digits})
+                if digit_confidence is not None:
+                    signals["ocr_layer_digit_confidence"] = round(digit_confidence, 1)
+            if agree:
+                flags.append("ocr_layer_kept_by_digits")
+            else:
+                dropped = ("text_layer_is_ocr", "ocr_layer_numbers_and_codes")
+                page_class, flags = "T4", [f for f in flags if f not in dropped] + ["foreign_ocr_layer"]
+        elif check is None:
             flags.append("ocr_layer_unchecked")
         else:
-            signals.update(check.signals())
             if check.layer_is_wrong:
                 page_class, flags = "T4", flags + ["foreign_ocr_layer", "ocr_layer_disagrees"]
             elif check.disagrees:

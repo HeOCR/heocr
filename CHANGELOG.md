@@ -34,12 +34,17 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
   - Replacing such a layer is possible but off by default (`LAYER_POOLED_REPLACE`): on a pooled page where neither side has words enough to spell-check, a reading at least 85% confident that shares under 35% of the layer's letters would replace it. Its evidence is one tuned page, and evaluation's held-out check found no page for it to act on, so the page is flagged (`ocr_layer_disagrees_kept`) instead.
   - On every other document checked (the open synthetic sets, open real scans and the development split), nothing changes.
 - **A Tesseract call that fails or times out is never silent.** A second reading of numbers, a layer check, the page-number pass or a table cell caught the failure, carried on without its reading, and left no trace, so a slow or paused machine could change the output unseen. Every failed call is now counted: its page is flagged `ocr_call_failed` (with `signals.ocr_calls_failed`), and the document is flagged and gets an `unread` entry, `ocr_call_failed`.
+- **A correct OCR layer over a page of amounts, dates and codes is no longer dropped as foreign.**
+  - A page under an OCR layer with little Hebrew was taken for another language's OCR (`foreign_ocr_layer`) and read again, its layer ignored. A table of numbers and codes has no Hebrew either, and its layer may well be right, so correct layers were dropped.
+  - Foreign now needs Latin text: at least 10 Latin letters in words without a digit, and at least a quarter of the layer's letters and digits. A code such as `QX-418` is not a Latin word. Real foreign layers hold far more.
+  - A layer with neither (`ocr_layer_numbers_and_codes`) is kept when its digits agree with a second reading of a few of its lines by the number model (`ocr_layer_kept_by_digits`). Otherwise, or without OCR, the page is read as foreign, as before. Digits never replace a layer that was kept before.
 
 ### Record
 
 - New page signal `ocr_layer_check_pooled` (additive, within v1).
 - New flag and unread reason `ocr_call_failed`, and page signal `ocr_calls_failed` (additive, within v1).
 - New document flags `bundled_model_unavailable` and `routed_model_unavailable` (additive, within v1).
+- New page flags `ocr_layer_numbers_and_codes` and `ocr_layer_kept_by_digits`, and page signals `latin_word_letters`, `latin_word_share`, `ocr_layer_digit_agreement`, `ocr_layer_digits` and `ocr_layer_digit_confidence` (all additive, within v1).
 
 ## 0.1.2
 

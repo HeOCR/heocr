@@ -36,6 +36,8 @@ PATHS = [
     ("read_region", "reader.py", "tests.test_ocr.OcrRouteTest.test_a_letterhead_on_every_page_is_read_once_and_kept_on_every_page", True),
     ("_decide", "routes.py", "tests.test_models.AutoRouteTest.test_the_probe_switches_to_a_clearly_better_model", True),
     ("image_blocks", "reader.py", "tests.test_docx_images.DocxImageTest.test_embedded_image_is_read_by_ocr_in_place", False),
+    ("_digit_agreement", "reader.py", "tests.test_ocr.NumbersAndCodesLayerTest.test_a_layer_whose_digits_agree_is_kept", True),
+    ("_layer_digits", "reader.py", "tests.test_ocr.NumbersAndCodesLayerTest.test_a_layer_of_bare_numbers_is_checked_by_its_digits_alone", True),
 ]
 
 

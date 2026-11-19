@@ -73,6 +73,7 @@ Flags are open lists of strings: a later v1 may add more. The main ones, by what
   - `bidi_ambiguous_ltr_run`.
 - **The page's text layer:**
   - `text_layer_is_ocr`, `foreign_ocr_layer`, `ocr_layer_disagrees`, `ocr_layer_disagrees_kept`, `ocr_layer_unchecked`;
+  - `ocr_layer_numbers_and_codes` (an OCR layer with neither Hebrew nor Latin text, such as a table of amounts, dates and codes), `ocr_layer_kept_by_digits` (such a layer kept because its digits agree with a second reading; otherwise the page is `foreign_ocr_layer`);
   - `text_layer_ignored`, `text_layer_visual_order`, `text_sideways_on_screen`;
   - `rotated_text_read`, `rotated_text_not_read`, `text_outside_page`, `page_rotated`;
   - `possible_spread`, `spread_split`.
