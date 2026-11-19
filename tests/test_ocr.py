@@ -203,6 +203,11 @@ class OcrRouteTest(unittest.TestCase):
         self.assertFalse(wrong(0.22, 88.0, 0.0, 0.0))  # a well-spelt layer is never replaced on disagreement alone
         self.assertFalse(wrong(0.22, 88.0, 0.125, 0.05))  # the margin over our reading still holds
         self.assertFalse(wrong(0.22, 30.0, 0.125, 0.0))  # nor when our reading is not confident
+        # The lower floor needs our reading to be clearly credible: real two-column and pointed pages can
+        # pair their lines badly (agreement 0.0) while the layer is no worse than ours.
+        self.assertFalse(wrong(0.0, 72.0, 0.125, 0.0))  # confident enough to read, not to overrule at 12.5%
+        self.assertFalse(wrong(0.0, 88.0, 0.125, None))  # our own spelling unmeasured: no evidence of our side
+        self.assertTrue(wrong(0.0, 72.0, 0.30, 0.0))  # the usual floor still applies at any agreement below 0.5
 
     def test_a_scrambled_layer_is_kept_when_our_reading_is_not_confident(self) -> None:
         doc = self.read_layer(SCRAMBLED, "המציע יגיש את הצעתו עד המועד", confidence="30.0")
