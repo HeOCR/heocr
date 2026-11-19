@@ -363,6 +363,16 @@ LAYER_CHECK_MIN_LETTERS = 8  # a line with fewer letters says too little
 LAYER_CHECK_AGREEMENT = 0.5  # the median letter agreement under which the two readings differ
 LAYER_MISSPELT_MIN = 0.15  # the layer's share of misspelt words above which it looks wrong on its own
 LAYER_MISSPELT_MARGIN = 0.10  # ... and by how much it must exceed our reading's share
+# When the two readings share barely a third of their letters (the open synthetic sets: wrong layers at
+# most 0.30, right ones at least 0.63), the layer's own misspelling needs less weight: a table page's
+# layer is mostly short cells, numbers and dates, which a scrambled layer misspells less. The margin
+# over our reading still holds.
+LAYER_STRONG_DISAGREEMENT = 0.35
+LAYER_MISSPELT_MIN_STRONG = 0.10
+# ... and only when our reading is clearly credible: this confident, and with enough words of its own to be
+# spell-checked. On real Internet Archive layers (Tesseract's, over pointed and two-column pages) the line
+# pairing can fail outright (agreement 0.0) at our confidence 57-74, with the layer no worse than ours.
+LAYER_STRONG_MIN_CONFIDENCE = 80.0
 MISSPELT_MIN_WORDS = 5  # fewer words say nothing about spelling
 
 _FINALS = frozenset("ךםןףץ")
@@ -407,7 +417,10 @@ class LayerCheck:
         wrong: on a hard scan a good foreign layer can beat our OCR."""
         if not self.disagrees or self.confidence is None or self.confidence < REGION_MIN_CONFIDENCE:
             return False
-        if self.layer_misspelt is None or self.layer_misspelt < LAYER_MISSPELT_MIN:
+        strong = (self.agreement < LAYER_STRONG_DISAGREEMENT and self.confidence >= LAYER_STRONG_MIN_CONFIDENCE
+                  and self.ocr_misspelt is not None)
+        floor = LAYER_MISSPELT_MIN_STRONG if strong else LAYER_MISSPELT_MIN
+        if self.layer_misspelt is None or self.layer_misspelt < floor:
             return False
         return self.layer_misspelt >= (self.ocr_misspelt or 0.0) + LAYER_MISSPELT_MARGIN
 

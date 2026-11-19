@@ -30,6 +30,12 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
   - Now a deeper label that the word's crop and the whole-page reading both give, level for level, is used when no known label next to it contradicts the sequence. It is logged with `agreed: true`.
   - It can be turned off (`LABEL_AGREEMENT`).
 
+- **A scrambled OCR layer over a table page is replaced when our reading strongly disagrees.**
+  - A foreign OCR layer is replaced only when our confident reading disagrees with it and the layer is misspelt on its own evidence (at least 15% of its words) and well beyond our reading.
+  - A table page's layer is mostly short cells, numbers and dates, which a scrambled layer misspells less. One stayed at 12.5% and was kept, though the two readings shared barely a fifth of their letters.
+  - When they share under 35%, and our reading is clearly credible (confidence at least 80, with enough words of its own to be spell-checked), the layer's own floor is now 10%; the margin over our reading still holds.
+  - On the open synthetic sets, wrong layers share at most 30% of letters with our reading and right ones at least 63%.
+
 ### Record
 
 - New page flag `ocr_rest_blank` (additive, within v1): the page's tables were read, and nothing else on it had ink.
