@@ -1,7 +1,13 @@
 """Unruled tables on OCR pages (heocr.pdf.ocrrows): cells given back in rows. Values invented."""
 
+import os
+import sys
+import tempfile
 import unittest
+from pathlib import Path
+from unittest import mock
 
+import heocr
 from heocr.ocr.tesseract import OcrLine, OcrWord
 from heocr.pdf.ocrrows import table_rows
 
@@ -98,6 +104,60 @@ class OcrRowsTest(unittest.TestCase):
             taken = {id(w) for row in table.rows for cell in row for p in cell for w in p.words}
             for l in table.lines:
                 self.assertTrue(all(id(w) in taken for w in l.words))
+
+
+
+class OcrRowsReaderTest(unittest.TestCase):
+    """A scanned page through the reader, with the fake Tesseract reading the table column by column."""
+
+    FAKE = [sys.executable, str(Path(__file__).parent / "synth" / "fake_tesseract.py")]
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        tessdata = Path(tmp.name) / "tessdata"
+        tessdata.mkdir()
+        (tessdata / "heb.traineddata").write_bytes(b"fake heb model")
+        rows = ["level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext"]
+        # A title line, then the table's three columns as three blocks, one after the other.
+        for n, (word, x0, x1) in enumerate([("סיכום", 1900, 2080), ("תשלומים", 1600, 1860), ("לשנה", 1400, 1560)], start=1):
+            rows.append(f"5\t1\t1\t1\t1\t{n}\t{x0}\t300\t{x1 - x0}\t{H}\t92.0\t{word}")
+        for col in range(3):
+            x0, x1 = X[col]
+            for r, row in enumerate(ROWS):
+                rows.append(f"5\t1\t{col + 2}\t1\t{r + 1}\t1\t{x0}\t{500 + 80 * r}\t{x1 - x0}\t{H}\t90.0\t{row[col]}")
+        self.tsv = Path(tmp.name) / "columns.tsv"
+        self.tsv.write_text("\n".join(rows) + "\n", encoding="utf-8")
+        patcher = mock.patch.dict(os.environ, {"FAKE_TESSDATA": str(tessdata), "FAKE_TSV": str(self.tsv)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        os.environ.pop("TESSDATA_PREFIX", None)
+
+    def extract(self):
+        from tests.synth.pdf import PdfPage, make_pdf
+
+        pdf = make_pdf([PdfPage(images=[(0, 0, 595, 842)], image_gray=0xFF)])
+        return heocr.extract(pdf, tesseract=self.FAKE, ocr_model="heb", check_numbers=False)
+
+    def test_the_table_comes_back_in_rows_after_the_title(self) -> None:
+        doc = self.extract()
+        self.assertEqual([b.kind for b in doc.blocks], ["text", "table"])
+        self.assertEqual(doc.blocks[0].text, "סיכום תשלומים לשנה")
+        table = doc.blocks[1]
+        self.assertEqual([[c.text for c in row] for row in table.cells], [list(row) for row in ROWS])
+        self.assertIn("unruled_table", table.flags)
+        self.assertEqual((table.source, table.direction), ("ocr", "rtl"))
+        self.assertIn("unruled_tables", doc.pages[0].flags)
+        self.assertEqual(doc.text, "סיכום תשלומים לשנה\n" + "\n".join(" | ".join(row) for row in ROWS) + "\n")
+        self.assertEqual(heocr.validate(doc.to_dict()), [])
+
+    def test_switched_off_the_page_keeps_tesseracts_order(self) -> None:
+        with mock.patch("heocr.pdf.reader.OCR_TABLE_ROWS", False):
+            doc = self.extract()
+        self.assertNotIn("table", [b.kind for b in doc.blocks])
+        self.assertNotIn("unruled_tables", doc.pages[0].flags)
+        # Column by column: every cell of the first column comes before any of the second.
+        self.assertLess(doc.text.index(ROWS[-1][0]), doc.text.index(ROWS[0][1]))
 
 
 if __name__ == "__main__":
