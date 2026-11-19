@@ -47,6 +47,29 @@ class CliTest(unittest.TestCase):
         self.assertEqual(out.getvalue(), "")
         self.assertEqual(err.getvalue(), "")
 
+    def test_a_missing_ocr_model_is_reported_even_when_quiet(self) -> None:
+        # An install from the repository has no bundled models: stock Tesseract reads instead, and says so.
+        from unittest import mock
+
+        import heocr.cli
+
+        doc = heocr.extract(self.input, ocr=False)
+        doc.options["ocr"] = {"engine": "tesseract", "lang": "heb", "psm": 3, "model": "heocr_modern_v1"}
+        doc.flags.append("bundled_model_unavailable")
+        for quiet in ([], ["-q"]):
+            with self.subTest(quiet=bool(quiet)):
+                err = io.StringIO()
+                with mock.patch.object(heocr.cli, "extract", return_value=doc), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                    self.assertEqual(main([str(self.input), *quiet]), 0)
+                self.assertIn("heocr_modern_v1 is not installed", err.getvalue())
+                self.assertIn("scripts/fetch_models.py", err.getvalue())
+
+    def test_no_model_warning_when_the_model_is_there(self) -> None:
+        err = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            self.assertEqual(main([str(self.input), "--no-ocr"]), 0)
+        self.assertNotIn("warning", err.getvalue())
+
     def test_missing_file(self) -> None:
         err = io.StringIO()
         with contextlib.redirect_stderr(err):
