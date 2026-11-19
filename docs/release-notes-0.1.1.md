@@ -38,6 +38,10 @@ Additive, within `heocr_document.v1`:
 - page flag `ocr_rest_blank`: the page's tables were read, and nothing else on it had ink;
 - key `agreed` on a number reading in `checks.number_readings`: a cut label restored because two readings agree.
 
+## Known issues
+
+- **Pointed text in a kept OCR layer.** Some scans carry someone else's OCR layer with niqqud or cantillation, with each mark in its own box, as Internet Archive's scans do. heocr keeps such a layer, but builds the marks into separate pieces, so pointed lines come out fragmented: on the pointed pages we tested, a median of under half of the layer's words came through. Unpointed layers are not affected. There is no switch to force OCR yet: convert those pages to images and read the images, which go through OCR. A fix is planned for the next release.
+
 ## Coming next
 
 - **Model routing (D6):** `--ocr-model auto` picks an OCR model per document, old print or modern. It's opt-in first. HeOCR's own models become the default only after evaluation's numbers and a registered gate ([proposal](../planning/proposals/d6-model-routing.md)).
