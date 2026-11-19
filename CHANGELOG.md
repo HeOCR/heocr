@@ -24,8 +24,8 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 - **Table cells keep their order in right-to-left rows of numbers and codes** [#112].
   - A band of the page with no Hebrew letter took its direction from its own letters. A row of amounts and dates has none, and a single Latin code among them made the band left to right, so its cells came out in reverse. Such a band now follows the document's direction, unless half its words or more are Latin words.
   - Inside a row, a Latin code next to numbers was one left-to-right run, so the cells around it came out in visual order. A gap between cells holding digits is now a segment separator: no direction run crosses it. Latin text is never split this way.
-  - On evaluation's held-out all-table pages, row order went from 68.5% to 100% (a row's tokens in order). Rows emitted as one line went from 64.7% to 74.1%. The other quarter are in order but split over several lines, where cells lie a column gap apart.
-  - On held-out short-cell tables under a correct OCR layer, the character error rate fell from 23.8% to 0.2%. Nothing else moved on the held-out sets, and the development split showed reorders only.
+  - Some rows still come out in order but split over several lines, where cells lie a column gap apart.
+  - Its effect is not measured on a registered held-out set yet.
 - **A page of short cells under an OCR layer is checked, and a wrong layer there is replaced.**
   - The check of a foreign OCR layer reads a few of its lines again, but only lines of at least 8 letters. A table of one-word cells (codes, numbers, dates) had none, so its layer was never checked and was kept by default, wrong or right.
   - Such a page's short lines are now pooled until a group reaches 8 letters (`LAYER_CHECK_POOLED`), so the check runs and a disagreeing layer is flagged.
@@ -49,13 +49,12 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
   - Some OCR layers, Internet Archive's among them, give every character of a word, its niqqud and cantillation marks included, an equal share of the word's box. A mark then sits beside its letter, not on it.
   - heocr attached each mark by position to the nearest letter, often the wrong one, and the slot it left read as a gap between words, so pointed lines came out in fragments.
   - A mark on no letter now joins the letter before it in the layer's stream, which such layers write in logical order, and that letter's box takes in the mark's slot. Marks on their letter are read as before.
-  - On 123 pointed pages of open Internet Archive scans, the share of the layer's words that came through rose from a median of 39% to 89%; unpointed layers are unchanged.
+  - Unpointed layers are unchanged. Its effect is not measured on a held-out set yet.
 
 - **A scrambled OCR layer over a table page is replaced when our reading strongly disagrees.**
   - A foreign OCR layer is replaced only when our confident reading disagrees with it and the layer is misspelt on its own evidence (at least 15% of its words) and well beyond our reading.
-  - A table page's layer is mostly short cells, numbers and dates, which a scrambled layer misspells less. One stayed at 12.5% and was kept, though the two readings shared barely a fifth of their letters.
+  - A table page's layer is mostly short cells, numbers and dates, which a scrambled layer misspells less, so such a layer could stay under that floor and be kept, though the two readings shared few of their letters.
   - When they share under 35%, and our reading is clearly credible (confidence at least 80, with enough words of its own to be spell-checked), the layer's own floor is now 10%; the margin over our reading still holds.
-  - On the open synthetic sets, wrong layers share at most 30% of letters with our reading and right ones at least 63%.
   - It fixes one known case, not a class: on every other document checked, including held-out ones, nothing changes.
 
 ### Record
