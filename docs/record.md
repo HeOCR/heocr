@@ -90,6 +90,7 @@ Flags are open lists of strings: a later v1 may add more. The main ones, by what
   - `brackets_mirrored`, `brackets_kept_valid_as_read`, `rtl_brackets_unverified`;
   - `bullet_symbol_mapped`, `font_cp1255_shifted`, `unmapped_characters`.
 - **Limits:** `page_limit_reached`, `time_limit_reached` (the rest is in `unread`).
+- **OCR model:** `routed_model_unavailable` (the document's routed model was neither bundled nor downloaded, so stock `heb` read instead; `ocr.model_route.unavailable` names it).
 - **Office and web:**
   - `hidden_text_dropped`, `white_text_dropped`, `hidden_rows_read`, `hidden_columns_read`, `hidden_sheets_read`, `hidden_slides_read`;
   - `converted_by_libreoffice`;

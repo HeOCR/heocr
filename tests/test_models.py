@@ -83,10 +83,27 @@ class ModelRouteTest(unittest.TestCase):
         doc = heocr.extract(SCAN, tesseract=FAKE, ocr_model=str(model))
         self.assertIn("configs/tsv", doc.unread[0].detail)
 
-    def test_default_stays_stock_heb(self) -> None:
+    def test_the_default_is_auto(self) -> None:
         doc = heocr.extract(SCAN, tesseract=FAKE)
-        self.assertEqual(doc.blocks[0].ocr["lang"], "heb")
+        self.assertEqual(doc.to_dict()["options"]["ocr"]["model"], "auto")
+        self.assertEqual(doc.blocks[0].ocr["model_route"]["mode"], "auto")
+
+    def test_heb_and_stock_read_with_stock_tesseract(self) -> None:
+        for model in ("heb", "stock", None):
+            with self.subTest(model=model):
+                doc = heocr.extract(SCAN, tesseract=FAKE, ocr_model=model)
+                self.assertEqual(doc.blocks[0].ocr["lang"], "heb")
+                self.assertNotIn("model_route", doc.blocks[0].ocr)
+                self.assertNotIn("model", doc.to_dict()["options"]["ocr"])
+                self.assertNotIn("routed_model_unavailable", doc.flags)
+
+    def test_auto_leaves_another_language_list_to_stock(self) -> None:
+        # The route table's models are Hebrew models: a list such as heb+eng is not replaced by one of them.
+        # (The fake engine has heb only, so nothing is read here; what matters is the setting.)
+        doc = heocr.extract(SCAN, tesseract=FAKE, ocr_lang="heb+eng")
+        self.assertEqual(doc.to_dict()["options"]["ocr"]["lang"], "heb+eng")
         self.assertNotIn("model", doc.to_dict()["options"]["ocr"])
+        self.assertNotIn("routed_model_unavailable", doc.flags)
 
 
 class DownloadTest(unittest.TestCase):
