@@ -1,6 +1,6 @@
 # heocr 0.1.0: release notes (draft)
 
-> **Draft.** The release candidate `0.1.0rc1` (commit `57e58de`) went through the registered D-bench release gate. The verdicts are below. Whether and when 0.1.0 is published, with T4, T5 and T6 as not supported, is Shay's decision. The fixes since rc1 are in the [0.1.1 notes](release-notes-0.1.1.md).
+> **Draft.** The release candidate `0.1.0rc1` (commit `57e58de`) went through the registered D-bench release gate. The verdicts are below. Whether and when 0.1.0 is published, with T4, T5 and T6 as not supported, is the maintainer's decision. The fixes since rc1 are in the [0.1.1 notes](release-notes-0.1.1.md).
 
 ## What heocr does
 

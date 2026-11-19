@@ -79,8 +79,8 @@ heocr's claims come from a release gate registered before the candidate existed.
 | PDF T3 (broken font mappings) | Supported | |
 | PDF spread (two pages side by side) | Supported | |
 | Scanned tables | Supported | |
-| PDF T4 (under someone else's OCR layer) | Not supported | Character errors above stock Tesseract's margin. Most of the excess came from one page whose bare paper was read as text, which 0.1.1 fixes. |
-| PDF T5 (scans) | Not supported | Character errors just above stock Tesseract's margin, from two documents that produced no record (fixed in 0.1.1). Numbers missed more often than pymupdf4llm, which reads scans with Tesseract's English model. |
+| PDF T4 (under someone else's OCR layer) | Not supported | Character errors above stock Tesseract's margin. Most of the excess came from one page whose bare paper was read as text: addressed in 0.1.1; not yet re-gated (RC2 decides). |
+| PDF T5 (scans) | Not supported | Character errors just above stock Tesseract's margin, from two documents that produced no record; that crash is gone in 0.1.1. Numbers missed more often than pymupdf4llm, which reads scans with Tesseract's English model: addressed in part in 0.1.1. The cell itself is not yet re-gated (RC2 decides). |
 | PDF T6 (text layers with image regions) | Not supported | Vetoed by the held-out real documents: amounts in mixed right-to-left and left-to-right text came out reversed more often than stock Tesseract's. |
 
 "Not supported" means no claim is made for that cell. heocr still reads those pages, and its record still flags what it could not read. 0.1.1's fixes are not yet gated: a fresh registered gate (RC2) decides the next claims.

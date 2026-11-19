@@ -1,6 +1,6 @@
 # heocr 0.1.1: release notes (draft)
 
-> **Draft.** Nothing is tagged or published. The version is still `0.1.0rc1` in `pyproject.toml`. Whether and when 0.1.0 and 0.1.1 go to PyPI is Shay's decision.
+> **Draft.** Nothing is tagged or published. The version is still `0.1.0rc1` in `pyproject.toml`. Whether and when 0.1.0 and 0.1.1 go to PyPI is the maintainer's decision.
 
 0.1.1 is the release candidate that went through the registered release gate (`0.1.0rc1`, commit `57e58de`), plus the fixes made after its verdicts. **The gate's verdicts belong to `0.1.0rc1`.** These fixes were tuned on open synthetic sets and the development split only, never on the gate's held-out documents. They are not gated yet: a fresh registered gate (RC2, with a new seed) decides the next claims.
 
@@ -41,4 +41,4 @@ Additive, within `heocr_document.v1`:
 ## Coming next
 
 - **Model routing (D6):** `--ocr-model auto` picks an OCR model per document, old print or modern. It's opt-in first. HeOCR's own models become the default only after evaluation's numbers and a registered gate ([proposal](../planning/proposals/d6-model-routing.md)).
-- **T6:** amounts drawn as images or vector shapes inside a text layer are not yet read. They will first be flagged, then read by OCR and merged in reading order.
+- **T6:** amounts drawn as images or vector shapes inside a text layer are not yet read. They will first be flagged, then read by OCR and merged in reading order. The cause of the held-out veto is not yet reproduced on open data.
