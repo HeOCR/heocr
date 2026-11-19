@@ -38,7 +38,7 @@ Additive, within `heocr_document.v1`:
 
 ## Known issues
 
-- **Pointed text in a kept OCR layer.** Some scans carry someone else's OCR layer with niqqud or cantillation, with each mark in its own box, as Internet Archive's scans do. heocr keeps such a layer, but builds the marks into separate pieces, so pointed lines come out fragmented: on the pointed pages we tested, a median of under half of the layer's words came through. Unpointed layers are not affected. There is no switch to force OCR yet: convert those pages to images and read the images, which go through OCR. A fix is planned for the next release.
+- **Pointed text in a kept OCR layer.** Some scans carry someone else's OCR layer with niqqud or cantillation, with each mark in its own box, as Internet Archive's scans do. heocr keeps such a layer, but builds the marks into separate pieces, so pointed lines come out fragmented, and many of the layer's words do not come through. Unpointed layers are not affected. There is no switch to force OCR yet: convert those pages to images and read the images, which go through OCR. A fix is planned for the next release.
 
 ## Coming next
 

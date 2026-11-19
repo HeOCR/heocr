@@ -14,9 +14,8 @@
 - **Pointed text in an OCR layer that gives each mark its own slot is read whole.** This was a known issue in 0.1.0 and 0.1.1.
   - Some OCR layers, Internet Archive's among them, give every character of a word, its niqqud and cantillation marks included, an equal share of the word's box. heocr built such marks into separate pieces.
   - A mark that sits on no letter now joins the letter before it in the layer's stream.
-  - **Open Internet Archive scans:** on 123 pointed pages, the share of the layer's words that came through rose from a median of 39% to 89%. Unpointed layers are unchanged.
-  - **An open synthetic set of pointed pages in that layout:** 0% to 100% of words.
-  - **Held-out synthetic documents:** none changed.
+  - Unpointed layers are unchanged, and evaluation's held-out synthetic documents did not change.
+  - Its effect on pointed layers is not measured on a held-out set yet.
 - **A scrambled OCR layer over a table page is replaced when our reading strongly disagrees.**
   - When the layer and our confident reading share under 35% of their letters, a lower misspelling floor (10%) lets the layer be replaced.
   - It fixes one known case, not a class: on every other document checked, including held-out ones, nothing changes.
