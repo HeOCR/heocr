@@ -66,6 +66,25 @@ PDF page classes:
 | T5 | An image with no text layer (a scan) | OCR |
 | T6 | A text layer with significant images | Text layer, plus region OCR |
 
+## What the release gate supports
+
+heocr's claims come from a release gate registered before the candidate existed. Per cell, heocr is compared with stock Tesseract, Docling, MarkItDown, pymupdf4llm and a production tender-extraction pipeline, on a fresh synthetic set with exact gold. A held-out split of real documents can veto a cell. Verdicts for the release candidate `0.1.0rc1` (aggregates only):
+
+| Cell | Verdict | Why |
+|---|---|---|
+| DOCX | Supported | |
+| DOC | Supported | |
+| PDF T1 (good text layers) | Supported | |
+| PDF T2 (text layers in visual order) | Supported | |
+| PDF T3 (broken font mappings) | Supported | |
+| PDF spread (two pages side by side) | Supported | |
+| Scanned tables | Supported | |
+| PDF T4 (under someone else's OCR layer) | Not supported | Character errors above stock Tesseract's margin. Most of the excess came from one page whose bare paper was read as text, which 0.1.1 fixes. |
+| PDF T5 (scans) | Not supported | Character errors just above stock Tesseract's margin, from two documents that produced no record (fixed in 0.1.1). Numbers missed more often than pymupdf4llm, which reads scans with Tesseract's English model. |
+| PDF T6 (text layers with image regions) | Not supported | Vetoed by the held-out real documents: amounts in mixed right-to-left and left-to-right text came out reversed more often than stock Tesseract's. |
+
+"Not supported" means no claim is made for that cell. heocr still reads those pages, and its record still flags what it could not read. 0.1.1's fixes are not yet gated: a fresh registered gate (RC2) decides the next claims.
+
 ## What the record tells you
 
 - **Every block** carries its `source` (`text_layer`, `office_xml`, `converted_docx`/`xlsx`/`pptx`, `html` or `ocr`) and its `tool`. OCR blocks are `unverified`, with their engine, settings and confidence.
