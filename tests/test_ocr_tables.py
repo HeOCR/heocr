@@ -81,12 +81,47 @@ class OcrTableTest(unittest.TestCase):
         self.assertEqual([[c.text for c in row] for row in table.cells], [["שם", "תפקיד", "סכום"], ["ספק א", "מנהל", "100"], ["ספק ב", "עובד", "200"]])
         self.assertIn("ocr_tables", page.flags)
         self.assertEqual(self.calls("6|7"), 9)  # one call per inked cell
-        self.assertEqual(self.calls("3"), 1)  # and the page once, around the table
+        self.assertEqual(self.calls("3"), 0)  # the rest of the page is bare paper: not read (ocr_rest_blank)
+        self.assertIn("ocr_rest_blank", page.flags)
         self.assertEqual(heocr.validate(doc.to_dict()), [])
         self.assertEqual([u.reason for u in doc.unread], [])
         # The page's own OCR lines sit before the table, by their top edge.
         kinds = [b.kind for b in doc.blocks]
         self.assertEqual(kinds[-1], "table")
+
+    def textured(self, image):
+        """The scan on grey, slightly mottled paper (levels 230-246), as a real scan's paper is."""
+        import random
+
+        from PIL import Image
+
+        rng = random.Random(7)
+        paper = Image.new("L", image.size)
+        paper.putdata([rng.randint(230, 246) for _ in range(image.size[0] * image.size[1])])
+        return Image.composite(image, paper, image.point(lambda v: 255 if v < 255 else 0))
+
+    def test_bare_paper_around_a_table_is_not_read(self) -> None:
+        # eval's report: a scanned page with one small table. With the table taken out, the rest was
+        # bare paper, and Tesseract read its texture as thousands of characters of symbols.
+        doc = heocr.extract(scanned_pdf(self.textured(scan(LEVELS))), tesseract=FAKE)
+        page = doc.pages[0]
+        self.assertIn("ocr_rest_blank", page.flags)
+        self.assertEqual(self.calls("3"), 0)
+        self.assertEqual([b.kind for b in doc.blocks], ["table"])
+        self.assertEqual(page.coverage["status"], "ocr")
+        self.assertEqual(heocr.validate(doc.to_dict()), [])
+
+    def test_text_beside_a_table_is_still_read(self) -> None:
+        from PIL import ImageDraw
+
+        for grey in (0, 185):  # dark text, and faint text (lighter than INK_LEVEL, over 40 levels under the paper)
+            with self.subTest(grey=grey):
+                self.log.unlink(missing_ok=True)
+                image = scan(LEVELS)
+                ImageDraw.Draw(image).rectangle([px(100), px(150), px(500), px(170)], fill=grey)
+                doc = heocr.extract(scanned_pdf(self.textured(image)), tesseract=FAKE)
+                self.assertNotIn("ocr_rest_blank", doc.pages[0].flags)
+                self.assertEqual(self.calls("3"), 1)
 
     def empty_page_ocr(self) -> dict:
         tsv = Path(self.tmp.name) / "empty.tsv"

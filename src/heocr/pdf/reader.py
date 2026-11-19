@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from heocr import repairs
 from heocr.contract import Block, Cell, Document, Line, Page, Unread, page_limit, pages_left_unread, time_up
 from heocr.ocr import OcrUnavailable, block_ocr, engine_for, number_engine_for, unavailable_reason
+from heocr.ocr.tesseract import OcrResult
 from heocr.ocr.regions import (  # noqa: F401  (re-exported for callers of the PDF route)
     INK_LEVEL,
     MAX_RENDER_PIXELS,
@@ -1839,8 +1840,15 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
             deskew = 0.0
     # Ruled tables in the image are read cell by cell; the rest of the page once, without them (D3e).
     page_image = _without(image, scale, [t.bbox for t in grids]) if grids else image
+    # With its tables taken out, the rest of a page can be bare paper. Tesseract's global threshold then
+    # falls inside the paper's own texture, and it reads that texture as lines of symbols and single
+    # letters (a page with one small table gave 2,801 characters of noise). No ink, not even faint
+    # ink, means nothing to read there.
+    rest_blank = bool(grids) and not cell_has_ink(page_image) and not cell_has_faint_ink(page_image)
+    if rest_blank:
+        flags = flags + ["ocr_rest_blank"]
     try:
-        result = engine.recognize(page_image, dpi=round(scale * 72))
+        result = OcrResult([]) if rest_blank else engine.recognize(page_image, dpi=round(scale * 72))
     except OcrUnavailable as exc:
         doc.pages.append(
             Page(index, width, height, page_class, "none", signals,
