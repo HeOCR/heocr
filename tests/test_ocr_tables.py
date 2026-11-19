@@ -124,6 +124,37 @@ class OcrTableTest(unittest.TestCase):
                 self.assertNotIn("ocr_rest_blank", doc.pages[0].flags)
                 self.assertEqual(self.calls("3"), 1)
 
+    def test_a_short_faint_line_beside_a_table_is_read(self) -> None:
+        # eval's set E report: lines 43-65 grey levels under the paper, beside a table at 300 dpi, held
+        # fewer such pixels than a share of the whole page, and the rest of the page was skipped as bare.
+        import random
+
+        from PIL import Image, ImageDraw
+
+        dpi, paper = 300, 236
+        p3 = lambda v: round(v * dpi / 72)
+        rng = random.Random(11)
+        image = Image.new("L", (p3(595), p3(842)), paper)
+        draw = ImageDraw.Draw(image)
+        for y in YS:  # the same 3x3 ruled table, at 300 dpi
+            draw.rectangle([p3(XS[0]), p3(y) - 2, p3(XS[-1]), p3(y) + 2], fill=0)
+        for x in XS:
+            draw.rectangle([p3(x) - 2, p3(YS[0]), p3(x) + 2, p3(YS[-1])], fill=0)
+        for r, row in enumerate(LEVELS):
+            for c, grey in enumerate(row):
+                draw.rectangle([p3(XS[c] + 30), p3(YS[r] + 12), p3(XS[c] + 100), p3(YS[r] + 28)], fill=grey)
+        # One short line of thin strokes, 45 levels under the paper: about 1,600 pixels, under the
+        # page-share floor (0.05% of the page, about 4,350) but hundreds in its tiles.
+        x = p3(480)
+        for _ in range(40):
+            h = rng.choice((20, 24, 28))
+            draw.rectangle([x, p3(200), x + 1, p3(200) + h], fill=paper - 45)
+            x -= rng.choice((6, 8, 10, 14))
+        pdf = make_pdf([PdfPage(rasters=[(0, 0, 595, 842, image)])])
+        doc = heocr.extract(pdf, tesseract=FAKE)
+        self.assertNotIn("ocr_rest_blank", doc.pages[0].flags)
+        self.assertEqual(self.calls("3"), 1)  # the rest of the page is read once, around the table
+
     def empty_page_ocr(self) -> dict:
         tsv = Path(self.tmp.name) / "empty.tsv"
         tsv.write_text("level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext\n1\t1\t0\t0\t0\t0\t0\t0\t1240\t1754\t-1\t\n", encoding="utf-8")

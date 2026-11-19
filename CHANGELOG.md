@@ -20,6 +20,11 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
   - When no ink is left, not even faint ink (the same tests as for a table cell), the rest is no longer read.
   - Found on a synthetic T4 page in the release gate's synthetic set.
 
+- **Faint text beside a scanned table is no longer skipped as bare paper.**
+  - The check that the rest of a page holds no ink measured ink as a share of the whole page. A short faint line, 43 to 65 grey levels under the paper, held fewer such pixels than that share, so the rest was skipped and its text lost.
+  - Ink is now looked for in 30 pt tiles: the rest counts as bare only when no tile holds 50 pixels 25 levels or more under the paper.
+  - Found by evaluation on its synthetic grain-and-table stress set.
+
 ### Record
 
 - New page flag `ocr_rest_blank` (additive, within v1): the page's tables were read, and nothing else on it had ink.
