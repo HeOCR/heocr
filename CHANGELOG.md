@@ -6,6 +6,7 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 
 ## Unreleased → 0.3.0 (pre-release 0.3.0a1)
 
+<<<<<<< HEAD
 ### Added
 
 - **Word output:** `doc.to_docx()`, `heocr.write_docx(doc, path)`, and `-f docx` on the command line (or `-o name.docx`).
@@ -15,6 +16,20 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
   - Known limitation: footnote and endnote references are not marked in the body, as in `doc.text`; the notes are listed, with their numbers, in their section.
   - The file is a plain OOXML package written with the standard library: no new dependency. heocr's own DOCX reader reads it back to the same body text.
   - Writing a Word file to a terminal is refused: give `-o` or redirect the output.
+=======
+### Fixed
+
+- **An unruled table on a page read by OCR comes out in rows, not column by column.**
+  - Tesseract reads a page block by block. On a table without rulings it can read each column as a block of its own, so every cell of one column came out, then every cell of the next.
+  - heocr now finds such a table from the boxes of Tesseract's words (`heocr.pdf.ocrrows`): runs of at least 3 rows of short pieces a column gap apart, whose rows Tesseract read as lines of their own, with columns that line up in every row. Its cells are given back in rows, as a table block (`unruled_table`) placed among the page's blocks by its top edge.
+  - A table Tesseract already read row by row keeps its order, and so does prose in columns. A run whose columns do not line up is left as Tesseract read it.
+  - A number Tesseract split over two blocks, and the number model read again whole, could come out twice; in such a table the repeat is dropped, and the block records it (`ocr.duplicate_lines_dropped`).
+  - Its effect is not measured on a held-out set yet.
+
+### Record
+
+- On OCR pages: the block flag `unruled_table`, the page flag `unruled_tables` and the key `ocr.duplicate_lines_dropped` (additive, within v1).
+>>>>>>> 49b4385 (fix(pdf): an unruled table read by OCR column by column comes back in rows)
 
 ### Fixed
 
