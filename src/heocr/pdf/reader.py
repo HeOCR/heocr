@@ -22,6 +22,7 @@ from heocr.ocr.tesseract import OcrResult
 from heocr.ocr.regions import (  # noqa: F401  (re-exported for callers of the PDF route)
     INK_LEVEL,
     MAX_RENDER_PIXELS,
+    MIN_INK_PIXELS,
     MIN_REGION_PX,
     REGION_MIN_CONFIDENCE,
     REGION_MIN_PAGE_SHARE,
@@ -1802,6 +1803,25 @@ def _unrotate_records(doc: Document, first_block: int, first_unread: int, index:
             entry.bbox = unrotate_box(entry.bbox, angle, center)
 
 
+# Ink in the rest of a page, once its tables are taken out, is looked for tile by tile: a short faint line
+# holds far less ink than a share of a whole page (set E: lines 43-65 grey levels under the paper, with
+# 3,889 such pixels on a page whose share floor was 4,351, were dropped). On set E's bare grainy pages no
+# 30 pt tile has a pixel 25 levels under the paper; every faint line's tile has hundreds, down to lines
+# 26 levels under it.
+REST_FAINT_DELTA = 25
+REST_TILE_PT = 30.0
+
+
+def _rest_has_ink(image, scale: float) -> bool:
+    """Whether some tile of ``image`` holds ``MIN_INK_PIXELS`` pixels ``REST_FAINT_DELTA`` levels under its paper."""
+    gray = image if image.mode == "L" else image.convert("L")
+    cut = paper_level(gray) - REST_FAINT_DELTA
+    ink = gray.point(lambda v: 255 if v < cut else 0)
+    tile = max(1, round(REST_TILE_PT * scale))
+    densest = ink.reduce(tile).getextrema()[1]  # each pixel of the reduced image is one tile's mean
+    return densest * tile * tile / 255 >= MIN_INK_PIXELS
+
+
 def _ocr_page(doc: Document, index: int, page, width, height, page_class, signals, text: PageText, flags, rendered=None) -> None:
     """Read a page by OCR. ``rendered`` is (image, pixels per point) when the page is already an
     image (an image file, D4b); otherwise the PDF page is rendered."""
@@ -1844,7 +1864,7 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
     # falls inside the paper's own texture, and it reads that texture as lines of symbols and single
     # letters (a page with one small table gave 2,801 characters of noise). No ink, not even faint
     # ink, means nothing to read there.
-    rest_blank = bool(grids) and not cell_has_ink(page_image) and not cell_has_faint_ink(page_image)
+    rest_blank = bool(grids) and not _rest_has_ink(page_image, scale)
     if rest_blank:
         flags = flags + ["ocr_rest_blank"]
     try:
