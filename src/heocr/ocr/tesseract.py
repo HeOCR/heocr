@@ -130,6 +130,7 @@ class Tesseract:
     timeout: float = TIMEOUT
     released: object = None  # the heocr.models.ReleasedModel in use, if any
     route: dict | None = None  # ocr_model="auto": how this engine was chosen (heocr.ocr.routes)
+    failures: int = 0  # recognize() calls that failed or timed out (heocr.ocr.call_failures)
 
     @classmethod
     def find(
@@ -212,27 +213,35 @@ class Tesseract:
             source = Path(temp) / "input.png"
             image.save(source, dpi=(dpi, dpi))
             base = Path(temp) / "result"
-            done = _run(
-                [
-                    *self.cmd,
-                    str(source),
-                    str(base),
-                    "--tessdata-dir",
-                    str(self.tessdata),
-                    "-l",
-                    self.lang,
-                    "--psm",
-                    str(self.psm if psm is None else psm),
-                    "--dpi",
-                    str(dpi),
-                    "tsv",
-                ],
-                self.timeout,
-            )
+            try:
+                done = self._recognize_call(source, base, dpi, psm)
+            except OcrUnavailable:
+                self.failures += 1
+                raise
             tsv = base.with_suffix(".tsv")
             if done.returncode != 0 or not tsv.is_file():
+                self.failures += 1
                 raise OcrUnavailable(f"tesseract failed with exit code {done.returncode}")
             return parse_tsv(tsv.read_text(encoding="utf-8", errors="replace"))
+
+    def _recognize_call(self, source: Path, base: Path, dpi: int, psm: int | None) -> subprocess.CompletedProcess:
+        return _run(
+            [
+                *self.cmd,
+                str(source),
+                str(base),
+                "--tessdata-dir",
+                str(self.tessdata),
+                "-l",
+                self.lang,
+                "--psm",
+                str(self.psm if psm is None else psm),
+                "--dpi",
+                str(dpi),
+                "tsv",
+            ],
+            self.timeout,
+        )
 
 
 def parse_tsv(tsv: str) -> OcrResult:

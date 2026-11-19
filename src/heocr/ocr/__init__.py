@@ -119,6 +119,14 @@ def unavailable_reason(doc: "Document") -> str:
     return doc._ocr_error or "ocr unavailable"
 
 
+def call_failures(doc: "Document") -> int:
+    """Tesseract calls of this document that failed or timed out, over all its engines. A caller that
+    catches the failure and carries on (a second reading, a check) leaves its reading out; this count
+    is how the record says so (``ocr_call_failed``)."""
+    engines = {id(e): e for e in (doc._ocr_engine, doc._number_engine, *doc._ocr_engines.values()) if e is not None}
+    return sum(getattr(e, "failures", 0) for e in engines.values())
+
+
 def block_ocr(engine: Tesseract, lines) -> dict:
     """The ``ocr`` object of one block: engine, settings, and its own words and mean confidence."""
     confidences = [c for line in lines for c in line.confidences if c >= 0]
@@ -135,4 +143,4 @@ def block_ocr(engine: Tesseract, lines) -> dict:
 
 from heocr.ocr import routes  # noqa: E402  (after engine_for_model, which it imports lazily)
 
-__all__ = ["NUMBER_LANG", "OcrUnavailable", "Tesseract", "block_ocr", "engine_for", "engine_for_model", "number_engine_for", "routes", "unavailable_reason"]
+__all__ = ["NUMBER_LANG", "OcrUnavailable", "Tesseract", "block_ocr", "call_failures", "engine_for", "engine_for_model", "number_engine_for", "routes", "unavailable_reason"]

@@ -166,4 +166,14 @@ def extract(
         doc.flags.append("not_read")
         return doc
     reader(body, doc)
+    from heocr.ocr import call_failures
+
+    failed = call_failures(doc)
+    if failed:
+        # Never silent: a failed or timed-out Tesseract call leaves its reading out wherever it happened.
+        doc.flags.append("ocr_call_failed")
+        doc.unread.append(
+            Unread(scope="document", reason="ocr_call_failed",
+                   detail=f"{failed} Tesseract call(s) failed or timed out; what they would have read is missing")
+        )
     return doc
