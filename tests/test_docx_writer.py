@@ -72,7 +72,7 @@ class RoundTripTest(unittest.TestCase):
         self.assertEqual(back.unread, [])
         body, _, _ = doc.text.partition("\n\n--- ")
         # Word has no page separator in its text: the reader gives the page break as a line break.
-        self.assertEqual(back.text, body.replace("\f", "\n") + "\nFootnotes\n[1] הערת שוליים\nHeaders\nכותרת הדף\nFooters\nעמוד\n")
+        self.assertEqual(back.text, body.replace("\f", "\n") + "\nהערות שוליים\n[1] הערת שוליים\nכותרות עליונות\nכותרת הדף\nכותרות תחתונות\nעמוד\n")
 
     def test_headings_and_directions_read_back(self) -> None:
         back = _read_back(_sample().to_docx())
@@ -103,7 +103,7 @@ class RoundTripTest(unittest.TestCase):
         first = _read_back(source)
         second = _read_back(first.to_docx())
         body, _, _ = first.text.partition("\n\n--- ")
-        self.assertTrue(second.text.startswith(body + "\nFootnotes\n"), second.text)
+        self.assertTrue(second.text.startswith(body + "\nהערות שוליים\n"), second.text)
         self.assertIn("[2] הערה קטנה", second.text)
         self.assertEqual([b.kind for b in second.blocks if b.role == "body"][:4], ["heading", "text", "table", "text"])
 
@@ -173,7 +173,22 @@ class LayoutTest(unittest.TestCase):
         breaks = [p for p in body.iter(W + "p") if p.find(f"{W}pPr/{W}pageBreakBefore") is not None]
         texts = ["".join(t.text for t in p.iter(W + "t")) for p in breaks]
         # Page 2 starts with a table, which takes its break from an empty paragraph; the sections start a page.
-        self.assertEqual(texts, ["", "Footnotes"])
+        self.assertEqual(texts, ["", "הערות שוליים"])
+
+    def test_section_titles_follow_the_body_language(self) -> None:
+        from heocr.docx.writer import HEBREW_TITLES
+        from heocr.render import _SECTIONS
+
+        self.assertEqual(set(HEBREW_TITLES), {role for role, _ in _SECTIONS})
+
+        def titles(body: str) -> list[str]:
+            doc = _doc()
+            doc.blocks = [Block(kind="text", text=body), Block(kind="text", text="note", role="footnote", note_id="1"), Block(kind="text", text="x", role="footer")]
+            return ["".join(t.text for t in p.iter(W + "t")) for p in _body_xml(doc).iter(W + "p") if p.find(f"{W}pPr/{W}pStyle") is not None]
+
+        self.assertEqual(titles("גוף המסמך בעברית עם code אחד"), ["הערות שוליים", "כותרות תחתונות"])
+        self.assertEqual(titles("An English body with one מילה"), ["Footnotes", "Footers"])
+        self.assertEqual(titles("12 34"), ["Footnotes", "Footers"])
 
     def test_a_break_skipped_by_a_figure_waits_for_the_next_block(self) -> None:
         doc = _doc(page_count=3)

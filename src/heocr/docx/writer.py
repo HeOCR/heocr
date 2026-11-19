@@ -14,8 +14,9 @@ It holds what ``Document.text`` holds, in the same order, laid out the way a Wor
   ``w:gridSpan`` and ``w:vMerge``.
 - **Pages:** a page break between a PDF's pages (or a deck's slides), on the first paragraph of the
   next page (``w:pageBreakBefore``).
-- **Notes, comments, headers and footers** in their own sections after the body, each under its title
-  (English, as in ``Document.text``), starting on a new page.
+- **Notes, comments, headers and footers** in their own sections after the body, each under its title,
+  starting on a new page. The titles are Hebrew when most of the body's letters are Hebrew
+  (``HEBREW_TITLES``), else English, as in ``Document.text``.
 
 Figures that were not read leave no trace in the body, as in ``Document.text``. The package is
 byte-stable: the same record gives the same file.
@@ -53,6 +54,19 @@ _RTL_LETTER = re.compile(r"[֐-ࣿיִ-﷿ﹰ-﻿]")
 _LTR_LETTER = re.compile(r"[A-Za-zÀ-ɏͰ-ϿЀ-ӿ]")
 # Characters XML 1.0 cannot carry (C0 controls but tab, line feed and carriage return; lone surrogates; U+FFFE/F).
 _NOT_XML = re.compile(r"[\x00-\x08\x0b-\x1f\ud800-\udfff￾￿]")
+
+# Section titles for a document whose body is mostly Hebrew: the file is for people, who read it in
+# the document's language. ``Document.text`` keeps the English titles.
+HEBREW_TITLES = {
+    "footnote": "הערות שוליים",
+    "endnote": "הערות סיום",
+    "comment": "הערות",
+    "header": "כותרות עליונות",
+    "footer": "כותרות תחתונות",
+    "notes": "הערות דובר",
+    "navigation": "ניווט",
+}
+_HEBREW_LETTER = re.compile(r"[\u05d0-\u05ea]")
 
 _FIXED_TIME = (1980, 1, 1, 0, 0, 0)  # zip entries carry no write time: the same record gives the same bytes
 
@@ -301,9 +315,24 @@ def _body(doc: "Document") -> str:
     return _with_sections(doc, rtl, parts)
 
 
+def _mostly_hebrew(doc: "Document") -> bool:
+    """Whether most letters of the body are Hebrew letters."""
+    texts = []
+    for block in doc.blocks:
+        if block.role in _INLINE_ROLES:
+            texts.append(block.text)
+            texts.extend(c.text for row in (block.cells or []) for c in row)
+    joined = " ".join(texts)
+    hebrew = len(_HEBREW_LETTER.findall(joined))
+    return hebrew > 0 and hebrew * 2 > hebrew + len(_LTR_LETTER.findall(joined))
+
+
 def _with_sections(doc: "Document", rtl: bool, parts: list[str]) -> str:
     first = True
+    hebrew = _mostly_hebrew(doc)
     for role, title in _SECTIONS:
+        if hebrew:
+            title = HEBREW_TITLES[role]
         items = [b for b in doc.blocks if b.role == role]
         written: list[str] = []
         for block in items:
