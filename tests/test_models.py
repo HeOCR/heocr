@@ -155,7 +155,7 @@ class DownloadTest(unittest.TestCase):
     def test_registry_pins(self) -> None:
         r8b = models.MODELS["heocr_r8b"]
         self.assertEqual(r8b.sha256, "8cb22dbeb195c3c0ffbe9c66cf956d8c2052d3b1c4a872234a85c975c4526117")
-        self.assertEqual((r8b.size, r8b.licence, r8b.doi), (3_633_477, "Apache-2.0", "10.5281/zenodo.24156688"))
+        self.assertEqual((r8b.size, r8b.licence, r8b.doi), (3_633_477, "Apache-2.0", "10.5281/zenodo.24372346"))
         self.assertTrue(all(m.url.startswith("https://huggingface.co/HeOCR/") for m in models.MODELS.values()))
 
     def test_cli(self) -> None:

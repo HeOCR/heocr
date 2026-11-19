@@ -16,7 +16,7 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
   - Otherwise a probe samples up to 8 lines from up to 3 OCR pages, read again by each other candidate, and switches only when one scores clearly better. The deciding page is then read again by it.
   - Every OCR block records `ocr.model_route` (mode, domain, reason, and the probe's scores).
 - **Bundled models:** the models in `MODELS` gain a `domain` and a `bundled` flag, and a model shipped inside the package (`heocr/models_data/`) resolves without a download, after the download cache.
-- **HeOCR's own models ship inside the wheel:** `heocr_modern_v1` (modern and office print, [10.5281/zenodo.24371757](https://doi.org/10.5281/zenodo.24371757)) and `heocr_oldprint_v1` (old and rabbinic print, [10.5281/zenodo.24371759](https://doi.org/10.5281/zenodo.24371759)), both Apache-2.0, with their notices. Their accuracy is not measured on a held-out set yet: RC2's registered gate measures the default.
+- **HeOCR's own models ship inside the wheel:** `heocr_modern_v1` (modern and office print, [10.5281/zenodo.24372349](https://doi.org/10.5281/zenodo.24372349)) and `heocr_oldprint_v1` (old and rabbinic print, [10.5281/zenodo.24372352](https://doi.org/10.5281/zenodo.24372352)), both Apache-2.0, with their notices. Their accuracy is not measured on a held-out set yet: RC2's registered gate measures the default.
   - Without the bundled files (an install from the repository), stock `heb` reads instead, and the document is flagged `bundled_model_unavailable` (with `auto`, `routed_model_unavailable`). `python scripts/fetch_models.py` fetches them.
 
 ### Fixed
