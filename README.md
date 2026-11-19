@@ -27,12 +27,14 @@ doc.text        # plain text in reading order; notes, headers, footers and navig
                 # (a table is one line per row, its cells joined by " | ", in reading order)
 doc.markdown    # headings, numbered sections and tables kept
 doc.to_json()   # the heocr_document.v1 record: every block with its route, tool and flags
+heocr.write_docx(doc, "tender.docx")  # a Word file: right to left, headings, lists, tables, page breaks
 doc.unread      # what was not read, and why
 ```
 
 ```sh
 heocr tender.pdf                      # text to standard output
-heocr tender.docx -o tender.md        # the format follows the suffix: .md, .json, else text
+heocr tender.docx -o tender.md        # the format follows the suffix: .md, .json, .docx, else text
+heocr scan.pdf -o scan.docx           # a Word file, for reading and editing in Word
 heocr scan.pdf -f json --ocr-lang heb+eng
 heocr report.pdf --no-ocr             # never run OCR; pages that need it are reported unread
 heocr report.pdf --force-ocr          # read every page by OCR, ignoring its text layer

@@ -275,6 +275,12 @@ class Document:
 
         return to_markdown(self)
 
+    def to_docx(self) -> bytes:
+        """The document as a Word file (DOCX): its bytes. See :func:`heocr.write_docx`."""
+        from heocr.docx.writer import to_docx
+
+        return to_docx(self)
+
     # -- record ------------------------------------------------------------
     def to_dict(self) -> dict[str, Any]:
         from heocr import __version__
