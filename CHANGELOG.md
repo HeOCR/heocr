@@ -17,6 +17,11 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 
 ### Fixed
 
+- **Table cells keep their order in right-to-left rows of numbers and codes** [#112].
+  - A band of the page with no Hebrew letter took its direction from its own letters. A row of amounts and dates has none, and a single Latin code among them made the band left to right, so its cells came out in reverse. Such a band now follows the document's direction, unless half its words or more are Latin words.
+  - Inside a row, a Latin code next to numbers was one left-to-right run, so the cells around it came out in visual order. A gap between cells holding digits is now a segment separator: no direction run crosses it. Latin text is never split this way.
+  - On evaluation's held-out all-table pages, row order went from 68.5% to 100% (a row's tokens in order). Rows emitted as one line went from 64.7% to 74.1%. The other quarter are in order but split over several lines, where cells lie a column gap apart.
+  - On held-out short-cell tables under a correct OCR layer, the character error rate fell from 23.8% to 0.2%. Nothing else moved on the held-out sets, and the development split showed reorders only.
 - **A page of short cells under an OCR layer is checked, and a wrong layer there is replaced.**
   - The check of a foreign OCR layer reads a few of its lines again, but only lines of at least 8 letters. A table of one-word cells (codes, numbers, dates) had none, so its layer was never checked and was kept by default, wrong or right.
   - Such a page's short lines are now pooled until a group reaches 8 letters (`LAYER_CHECK_POOLED`), so the check runs and a disagreeing layer is flagged.

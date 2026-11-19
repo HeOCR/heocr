@@ -22,6 +22,7 @@ import heocr
 
 doc = heocr.extract("tender.pdf")   # a path or the file's bytes; any format below
 doc.text        # plain text in reading order; notes, headers, footers and navigation follow the body
+                # (a table is one line per row, its cells joined by " | ", in reading order)
 doc.markdown    # headings, numbered sections and tables kept
 doc.to_json()   # the heocr_document.v1 record: every block with its route, tool and flags
 doc.unread      # what was not read, and why
