@@ -28,6 +28,13 @@ def engine_for(doc: "Document") -> Tesseract | None:
 
         model, route = routes.current(doc)
         engine = engine_for_model(doc, model)
+        if engine is None and model is not None:
+            # The routed model is not here (neither bundled nor downloaded): stock heb reads instead, and the
+            # document says so. Never silent.
+            if "routed_model_unavailable" not in doc.flags:
+                doc.flags.append("routed_model_unavailable")
+            route = {**route, "unavailable": model}
+            engine = engine_for_model(doc, None)
         if engine is not None:
             engine.route = route
         return engine

@@ -47,6 +47,28 @@ MODELS: dict[str, ReleasedModel] = {
             licence="Apache-2.0",
         ),
         ReleasedModel(
+            # Office-print A/B v2 arm A (snapshot 0160m_222700): evaluation's default-model study (2026-11-19).
+            name="heocr_modern_v1",
+            sha256="6275943bf68f3d44ecc32f8d4c4195c890c96602111542ebe1f0ae0d8a6a5201",
+            size=3_704_077,
+            url="https://huggingface.co/HeOCR/heocr-modern-v1-tesseract-heb/resolve/main/heocr_modern_v1.traineddata",
+            doi="pending",
+            licence="Apache-2.0",
+            domain="modern",
+            bundled=True,
+        ),
+        ReleasedModel(
+            # The P-hist v1 pick (r7 arm, heb_final), continued from R7: old and rabbinic print.
+            name="heocr_oldprint_v1",
+            sha256="f8090760b5b02d09cf4ddb435e7a5e34089f6f17cde9cfb6c67fd06c6f17ec02",
+            size=3_628_595,
+            url="https://huggingface.co/HeOCR/heocr-oldprint-v1-tesseract-heb/resolve/main/heocr_oldprint_v1.traineddata",
+            doi="pending",
+            licence="Apache-2.0",
+            domain="old",
+            bundled=True,
+        ),
+        ReleasedModel(
             name="heocr_r7",
             sha256="95faab81fba6fe57f854f973c1ccad2b0d1059fb951f34b17277385ceea8b303",
             size=3_628_595,

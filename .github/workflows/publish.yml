@@ -31,6 +31,8 @@ jobs:
           version=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
           test "v$version" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME does not match version $version"; exit 1; }
       - run: python -m pip install build==1.6.1 twine==7.0.0
+      - name: Fetch the bundled models, checked against their pins
+        run: python scripts/fetch_models.py
       - run: python -m build
       - run: python -m twine check --strict dist/*
       - name: Install the wheel, then the sdist, into fresh venvs and smoke-test each
