@@ -32,6 +32,7 @@ heocr tender.pdf                      # text to standard output
 heocr tender.docx -o tender.md        # the format follows the suffix: .md, .json, else text
 heocr scan.pdf -f json --ocr-lang heb+eng
 heocr report.pdf --no-ocr             # never run OCR; pages that need it are reported unread
+heocr report.pdf --force-ocr          # read every page by OCR, ignoring its text layer
 ```
 
 The CLI prints each `unread` entry on stderr (`-q` silences them). It exits with 1 only when the file cannot be opened or an option is invalid. A document read only in part, or not at all, exits with 0, and its `unread` entries say why.
@@ -130,7 +131,7 @@ Each limit, when reached, gives an `unread` entry or a flag:
 
 What is not detected:
 
-- **Pointed text in a kept OCR layer.** Some scans carry someone else's OCR layer with niqqud or cantillation, with each mark in its own box, as Internet Archive's scans do. heocr keeps such a layer, but builds the marks into separate pieces, so pointed lines come out fragmented: on the pointed pages we tested, a median of under half of the layer's words came through. Unpointed layers are not affected. There is no switch to force OCR yet: convert those pages to images and read the images, which go through OCR. A fix is planned for the next release.
+- **Pointed text in a kept OCR layer.** Some scans carry someone else's OCR layer with niqqud or cantillation, with each mark in its own box, as Internet Archive's scans do. heocr keeps such a layer, but builds the marks into separate pieces, so pointed lines come out fragmented: on the pointed pages we tested, a median of under half of the layer's words came through. Unpointed layers are not affected. From 0.1.2, `--force-ocr` reads such pages by OCR; in 0.1.0 and 0.1.1, convert those pages to images and read the images. A fix is planned.
 - **A partial OCR layer:** a scanned page under someone else's OCR layer that heocr keeps is flagged `ocr_short_for_ink` when at least 10% of the scan's ink lies away from the layer's lines and rulings. A line or two missing from a full page's layer stays under that, and is not detected.
 
 Read once:

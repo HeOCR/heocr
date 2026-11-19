@@ -934,7 +934,10 @@ def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = froz
     if shifted_chars:
         # The layer was a cp1255-shifted font (a T3 layer by its state), fully restored: read as T1.
         flags.append("font_cp1255_shifted")
-    if "text_layer_is_ocr" in flags and page_class in ("T1", "T2"):
+    forced = bool(doc.options.get("force_ocr")) and page_class != "empty"
+    if forced:
+        flags = flags + ["ocr_forced"]  # the user asked for OCR: the layer is neither checked nor read
+    if "text_layer_is_ocr" in flags and page_class in ("T1", "T2") and not forced:
         # An invisible layer over a full-page image is someone's OCR. A second reading of a few of
         # its lines tells whether the two agree; when they do not, the layer is replaced only when
         # our reading is the credible one (``LayerCheck.layer_is_wrong``). Otherwise it is kept.
@@ -951,7 +954,7 @@ def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = froz
         flags.append("page_rotated")
     rotated_blocks: list[Block] = []
     rotated_read = 0
-    layer_read = page_class not in OCR_CLASSES and page_class not in ("T3", "empty") and not (page_class == "T2" and "reversed_after_line_building" in flags)
+    layer_read = not forced and page_class not in OCR_CLASSES and page_class not in ("T3", "empty") and not (page_class == "T2" and "reversed_after_line_building" in flags)
     if layer_read and text.rotated_atoms:
         rotated_blocks, placed = _rotated_blocks(doc, index, text.rotated_atoms)
         text.rotated -= placed
@@ -963,7 +966,7 @@ def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = froz
         )
         return
     # T3 reaches here only with codes no rule recovered: whole-page OCR, as the plan says.
-    needs_ocr = page_class in OCR_CLASSES or page_class == "T3" or (page_class == "T2" and "reversed_after_line_building" in flags)
+    needs_ocr = forced or page_class in OCR_CLASSES or page_class == "T3" or (page_class == "T2" and "reversed_after_line_building" in flags)
     if needs_ocr:
         _ocr_page(doc, index, page, width, height, page_class, signals, text, flags)
         return

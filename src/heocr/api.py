@@ -43,6 +43,7 @@ def extract(
     ocr_psm: int = DEFAULT_PSM,
     tesseract: str | Sequence[str] | None = None,
     ocr_model: str | None = None,
+    force_ocr: bool = False,
     check_numbers: str | bool = "suspect",
     convert: bool = True,
     soffice: str | Sequence[str] | None = None,
@@ -64,6 +65,8 @@ def extract(
     ``ocr_model`` runs a HeOCR traineddata instead of ``ocr_lang``: a released model's name
     (downloaded on purpose first, ``heocr.models.download``) or a ``.traineddata`` path.
     Without Tesseract, or with ``ocr=False``, those pages are recorded as unread.
+    ``force_ocr`` reads every PDF page by OCR, its text layer ignored (flag ``ocr_forced``): a workaround
+    for a text layer heocr reads badly. It needs ``ocr``.
 
     ``check_numbers`` reads text-layer lines a second time, by OCR of their own image
     (``heocr.pdf.numbers``). ``"suspect"`` (the default) reads only lines with a reversed-looking
@@ -111,6 +114,8 @@ def extract(
     if len(body) > MAX_FILE_BYTES:
         raise ValueError(f"input is {len(body)} bytes; the limit is {MAX_FILE_BYTES}")
 
+    if force_ocr and not ocr:
+        raise ValueError("force_ocr needs OCR: it cannot be combined with ocr=False (--no-ocr)")
     kind = identify(body)
     doc = Document(
         sha256=hashlib.sha256(body).hexdigest(),
@@ -125,6 +130,8 @@ def extract(
             else False,
         },
     )
+    if force_ocr:
+        doc.options["force_ocr"] = True
     doc._max_pages = max_pages
     doc.options["max_pages"] = max_pages
     if time_limit is not None:

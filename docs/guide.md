@@ -97,6 +97,7 @@ The options, all keyword-only:
 | `ocr_lang`, `ocr_psm` | `"heb"`, `3` | Tesseract's languages and page segmentation mode |
 | `tesseract` | found | The Tesseract program, when it is not on the `PATH` |
 | `ocr_model` | none | A released HeOCR model's name or a `.traineddata` path, used instead of `heb` |
+| `force_ocr` | `False` | Read every PDF page by OCR, its text layer ignored (`--force-ocr`); flags each page `ocr_forced`. Needs `ocr` |
 | `check_numbers` | `"suspect"` | The second reading of numbers (below) |
 | `repairs` | `True` | `False` turns every repair rule off: the text exactly as extracted |
 | `convert`, `soffice`, `convert_timeout` | `True`, found, 180 s | LibreOffice for the older office formats |
@@ -111,6 +112,7 @@ heocr letter.docx -o letter.md       # the format follows the suffix: .md, .json
 heocr notice.pdf -f json             # the record
 heocr scan.pdf --ocr-lang heb+eng    # Tesseract's languages
 heocr notice.pdf --no-ocr            # never run OCR; pages that need it are reported unread
+heocr book.pdf --force-ocr           # read every page by OCR, ignoring its text layer
 heocr --help                         # every option
 ```
 
