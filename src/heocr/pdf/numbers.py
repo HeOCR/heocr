@@ -9,9 +9,9 @@ OCR of the line's own image on the rendered page:
   costs nothing on documents without one. ``check_numbers="tables"`` adds every table cell
   holding amounts or dates (cells are where amounts live), at a fraction of the cost of
   ``"all"``. With ``check_numbers="all"``, every line holding
-  amounts (thousands groups, ₪, %) or dates is read too. That is opt-in: on the dev split it
-  more than doubled the time (91 s to 222 s), and Tesseract's own digit errors left 51% of
-  numbers unconfirmed. Either way, each line gets one ``--psm 7`` call (the lead's cost rule).
+  amounts (thousands groups, ₪, %) or dates is read too. That is opt-in: it costs far more time,
+  and Tesseract's own digit errors leave many numbers unconfirmed. Either way, each line gets one
+  ``--psm 7`` call (the lead's cost rule).
 - **Disagreement:** a number the line's OCR reads differently, when that reading is itself
   trustworthy (see ``compare``), is flagged ``number_disagreement``, never resolved by a guess.
   A number OCR could not confirm is counted as unconfirmed, not flagged. Tesseract errs on
@@ -79,8 +79,8 @@ def compare(layer: str, ocr: str, confidence: float | None = None) -> tuple[int,
     A number counts as **disagreed** only when the OCR reading is itself trustworthy: it found
     the same count of numbers, in the same order, at line confidence ``MIN_CONFIDENCE`` or more,
     and the number at that place differs. Otherwise it is unconfirmed, which is counted but not
-    flagged: Tesseract misreads small or tight digits often enough (on the dev split it read
-    `30.09` as `50.0`, and dropped list digits), so a missing match is no evidence of an error.
+    flagged: Tesseract misreads small or tight digits often enough (a digit changed, a last digit
+    lost, list digits dropped), so a missing match is no evidence of an error.
     """
     mine = significant(layer)
     theirs = significant(ocr)

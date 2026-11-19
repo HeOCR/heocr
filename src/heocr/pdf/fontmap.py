@@ -1,7 +1,7 @@
 """``font_private_use_by_ocr``: learning what a font's private-use codes stand for, from the page itself.
 
 Some fonts map Hebrew letters to private-use codes and carry no glyph names to recover them
-(the dev split's David fonts: F01A for ם, F8FF for נ). The rule asks the page instead:
+(some David fonts do). The rule asks the page instead:
 
 1. **Word-level OCR.** The words that hold such a code are cropped from the rendered page and
    read one by one by Tesseract (``--psm 8``).
