@@ -133,5 +133,86 @@ class NumbersApartInRtlTest(unittest.TestCase):
         self.assertEqual(text(visual("1,000")), "1,000")
 
 
+
+def _cells(*cells: tuple[str, float], y: float = 100.0, width: float = 5.0) -> list:
+    """Atoms of one row: each (text, right edge) cell drawn left to right from its right edge back."""
+    out, index = [], 0
+    for text, right in cells:
+        x = right - width * len(text)
+        for ch in text:
+            out.append(Atom(ch, x, y, x + width, y + 10.0, 10.0, index))
+            x += width
+            index += 1
+    return out
+
+
+class LetterFreeRowTest(unittest.TestCase):
+    """A table row of only amounts, dates and codes has no letter to set its direction: it takes the
+    document's. All values are invented."""
+
+    def test_an_all_number_row_takes_the_documents_direction(self) -> None:
+        from heocr.pdf.lines import build_lines
+
+        row = _cells(("58,400", 300.0), ("12.12.2021", 255.0))  # the amount cell on the right, one cell gap apart
+        self.assertEqual([l.text for l in build_lines(row, default_rtl=True).lines], ["58,400 12.12.2021"])  # rightmost first
+        self.assertEqual([l.text for l in build_lines(row, default_rtl=False).lines], ["12.12.2021 58,400"])
+        self.assertEqual([l.text for l in build_lines(row).lines], ["12.12.2021 58,400"])  # no default given: as before
+
+    def test_rows_with_letters_keep_their_own_vote(self) -> None:
+        from heocr.pdf.lines import build_lines
+
+        latin = _cells(("Total", 300.0), ("12", 255.0))
+        self.assertEqual(build_lines(latin, default_rtl=True).lines[0].direction, "ltr")  # Latin letters: left to right
+        hebrew = _cells(("סכום", 300.0), ("12", 255.0))
+        self.assertEqual(build_lines(hebrew, default_rtl=False).lines[0].direction, "rtl")  # Hebrew letters: right to left
+
+
+class CellGapTest(unittest.TestCase):
+    """Cells set side by side in a row, closer than a column gap: no direction run crosses the gap between
+    them. All values are invented."""
+
+    def test_a_code_and_numbers_keep_their_cells_order_in_an_rtl_row(self) -> None:
+        from heocr.pdf.lines import build_lines
+
+        # A Hebrew cell (atoms are drawn in visual order, so it is written reversed here), then, one column gap
+        # to its left, a code, a count and a date, a cell gap apart.
+        row = _cells(("את", 400.0), ("AB-12", 300.0), ("57", 255.0), ("3.4.2020", 230.0))
+        self.assertEqual([l.text for l in build_lines(row).lines], ["תא", "AB-12 57 3.4.2020"])  # it was "3.4.2020 57 AB-12"
+
+    def test_a_code_among_amounts_follows_the_document(self) -> None:
+        from heocr.pdf.lines import build_lines
+
+        row = _cells(("CN-24", 300.0), ("5,100", 255.0))
+        self.assertEqual([l.text for l in build_lines(row, default_rtl=True).lines], ["CN-24 5,100"])
+        self.assertEqual([l.text for l in build_lines(row, default_rtl=False).lines], ["5,100 CN-24"])
+
+    def test_a_row_of_latin_words_stays_left_to_right(self) -> None:
+        from heocr.pdf.lines import build_lines
+
+        row = _cells(("Total", 300.0), ("Net", 255.0))
+        self.assertEqual([(l.text, l.direction) for l in build_lines(row, default_rtl=True).lines], [("Net Total", "ltr")])
+
+    def test_a_word_space_is_not_a_cell_gap(self) -> None:
+        from heocr.pdf.lines import build_lines
+
+        # Latin words in a Hebrew line, a wide word space (half a box height) apart: one Latin run, in order.
+        row = _cells(("בתכ", 400.0), ("Net", 370.0), ("AB-12", 350.0))
+        self.assertEqual([l.text for l in build_lines(row, default_rtl=True).lines], ["כתב AB-12 Net"])
+
+
+    def test_latin_words_far_apart_do_not_split(self) -> None:
+        from heocr.pdf.lines import build_lines
+
+        # An OCR layer can set word boxes far apart: words without digits stay one Latin run.
+        row = _cells(("בתכ", 400.0), ("tamen", 365.0), ("nunc", 330.0))
+        self.assertEqual([l.text for l in build_lines(row, default_rtl=True).lines], ["כתב nunc tamen"])
+
+    def test_a_latin_reference_far_apart_does_not_split(self) -> None:
+        from heocr.pdf.lines import build_lines
+
+        # "Ps 3, 4" in a Hebrew line, its words set far apart: one Latin run, in order.
+        row = _cells(("בתכ", 320.0), ("4", 300.0), ("3,", 285.0), ("Ps", 265.0))
+        self.assertEqual([l.text for l in build_lines(row, default_rtl=True).lines], ["כתב Ps 3, 4"])
+
 if __name__ == "__main__":
     unittest.main()

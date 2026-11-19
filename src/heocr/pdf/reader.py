@@ -1136,7 +1136,7 @@ def _read_region(doc: Document, index: int, atoms: list[Atom], tables, built: Pa
     side-by-side rows, then lines. Blocks are appended in reading order, tables by their top edge."""
     t_blocks, body_atoms, in_tables, rejected, grids = table_blocks(index, atoms, tables, doc._rtl, repairs_on)
     if built is None or t_blocks:
-        built = build_lines(body_atoms)
+        built = build_lines(body_atoms, default_rtl=doc._rtl)
     # Side-by-side rows: rows of a ruled table, unruled tables, column flows (D3c).
     if t_blocks or built.has_columns:
         segments, t_blocks, moved = arrange(body_atoms, doc._rtl, index, list(zip(t_blocks, grids)), repairs_on)
@@ -1161,7 +1161,7 @@ def _read_region(doc: Document, index: int, atoms: list[Atom], tables, built: Pa
             continue
         parts = segment.bands if segment.kind in ("flow", "rows") else [segment.atoms]
         for part in parts:
-            lines_built = built if len(segments) == 1 and segment.kind == "lines" and not t_blocks else build_lines(part)
+            lines_built = built if len(segments) == 1 and segment.kind == "lines" and not t_blocks else build_lines(part, default_rtl=doc._rtl)
             if segment.kind == "rows":
                 lines_built.flags = [f for f in lines_built.flags if f != UNRESOLVED] + ["reading_order_row_major_unverified"]
             in_lines += read_t1(doc, index, lines_built)

@@ -36,6 +36,10 @@ TIGHT_JOIN = 0.35
 HUG_MARGIN = 1.1
 # A vertical gap above this many median line heights starts a new paragraph.
 PARAGRAPH_GAP = 0.9
+# A word break wider than this share of the loose box height, still under a column gap, between two words that
+# hold digits, is a cell gap: table cells set side by side ("QX-418" and "62" in an RTL table). Bidi treats it
+# as a segment separator (a tab, UAX #9 L1), so no direction run crosses it and each cell keeps its place in the row.
+CELL_GAP_HEIGHTS = 0.8
 
 _OPENING = frozenset("([{")
 _CLOSING = frozenset(".,;:!?)]}")
@@ -122,6 +126,21 @@ def is_rtl(text: str) -> bool:
     rtl = sum(any(_bidi_type(ch) == "R" for ch in token) for token in tokens)
     latin = sum(any("LATIN" in unicodedata.name(ch, "") for ch in token) for token in tokens)
     return rtl > 0 and rtl >= latin
+
+
+def _latin_word(text: str) -> bool:
+    """A word of Latin text: Latin letters and no digit. A code that mixes them ("TR-905") is not one."""
+    return any(_bidi_type(ch) == "L" for ch in text) and not any(ch.isdigit() for ch in text)
+
+
+def _follows_document(atoms: list[Atom]) -> bool:
+    """Whether a band with no Hebrew letters takes the document's direction: amounts, dates and codes
+    ("TR-905" among a column of amounts), not an English passage. Fewer than half its words are Latin words."""
+    if any(_bidi_type(ch) == "R" for a in atoms for ch in a.text):
+        return False
+    words = [w for w in visual_words(atoms) if w]
+    latin = sum(_latin_word("".join(a.text for a in w)) for w in words)
+    return 2 * latin < len(words)
 
 
 def rows(atoms: list[Atom], median_height: float) -> list[list[Atom]]:
@@ -270,12 +289,12 @@ def _latin_around(types: list[str], texts: list[str], i: int, j: int, lead: bool
     side) holds a Latin letter or a section sign. With ``lead``, a stretch that reaches the line's
     right end (an RTL line's logical start) continues the previous line's Latin text."""
     k = i - 1
-    while k >= 0 and types[k] != "R":
+    while k >= 0 and types[k] not in ("R", "S"):
         if types[k] == "L" or "§" in texts[k]:
             return True
         k -= 1
     k = j
-    while k < len(types) and types[k] != "R":
+    while k < len(types) and types[k] not in ("R", "S"):
         if types[k] == "L" or "§" in texts[k]:
             return True
         k += 1
@@ -303,11 +322,11 @@ def _latin_brackets(texts: list[str], types: list[str], resolved: list[str], lea
     n = len(texts)
     i = 0
     while i < n:
-        if types[i] == "R":
+        if types[i] in ("R", "S"):
             i += 1
             continue
         j = i
-        while j < n and types[j] != "R":
+        while j < n and types[j] not in ("R", "S"):
             j += 1
         if any(types[k] == "L" or "§" in texts[k] for k in range(i, j)) or (lead and j == n):
             attached: set[int] = set()
@@ -333,12 +352,78 @@ def _latin_brackets(texts: list[str], types: list[str], resolved: list[str], lea
         i = j
 
 
+def _cell_gaps(units: list[tuple[str, Atom | None]]) -> list[str]:
+    """The units' texts, with each cell gap made a tab.
+
+    A cell gap is a word break wider than ``CELL_GAP_HEIGHTS`` between two words of amounts, dates or codes
+    ("QX-418", "62"): each holds a digit and no Hebrew letter. Not inside Latin text: a stretch of words
+    without Hebrew that holds a Latin word ("Ps 29, 1") keeps one run, whatever its spacing (an OCR layer's
+    word boxes can be set far apart)."""
+    texts = [u for u, _ in units]
+    words: list[tuple[int, int, str]] = []  # [start, end) of each word's units, and its text
+    k = 0
+    while k < len(units):
+        if units[k][0] == " ":
+            k += 1
+            continue
+        j = k
+        while j < len(units) and units[j][0] != " ":
+            j += 1
+        words.append((k, j, "".join(texts[k:j])))
+        k = j
+    # Letters only: a direction mark (RLM) is not a Hebrew word.
+    hebrew = [any(_bidi_type(ch) == "R" and unicodedata.category(ch).startswith("L") for ch in w) for _, _, w in words]
+    # Words in a stretch (between Hebrew words) that holds a Latin word.
+    in_latin = [False] * len(words)
+    i = 0
+    while i < len(words):
+        if hebrew[i]:
+            i += 1
+            continue
+        j = i
+        while j < len(words) and not hebrew[j]:
+            j += 1
+        if any(_latin_word(words[x][2]) for x in range(i, j)):
+            for x in range(i, j):
+                in_latin[x] = True
+        i = j
+    for x in range(len(words) - 1):
+        (a0, a1, left_text), (b0, b1, right_text) = words[x], words[x + 1]
+        if hebrew[x] or hebrew[x + 1] or in_latin[x]:
+            continue
+        if not (any(ch.isdigit() for ch in left_text) and any(ch.isdigit() for ch in right_text)):
+            continue
+        left = [atom for _, atom in units[a0:a1] if atom is not None]
+        right = [atom for _, atom in units[b0:b1] if atom is not None]
+        if not left or not right:
+            continue
+        last, first = max(left, key=lambda a: a.x1), min(right, key=lambda a: a.x0)
+        if first.x0 - last.x1 > CELL_GAP_HEIGHTS * max(first.height, last.height):
+            texts[a1] = "\t"
+    return texts
+
+
+def _cells_follow_page(texts: list[str], types: list[str]) -> bool:
+    """Whether a piece of a row split by cell gaps, with no Hebrew, is laid out in the page's direction.
+
+    A table row of codes and amounts ("QX-418", "62", "14.03.2022") in an RTL table has a few Latin
+    letters and no Hebrew, which alone would make it an LTR line. Its cells are set in the table's
+    direction. It stays LTR when half its cells or more are Latin words (an English table's row).
+    """
+    if "\t" not in texts or "R" in types:
+        return False
+    cells = "".join(texts).split("\t")
+    latin = sum(any(_latin_word(word) for word in cell.split()) for cell in cells)
+    return 2 * latin < len(cells)
+
+
 def logical_text(component: list[Atom], page_rtl: bool = True, latin_lead: bool = False) -> tuple[str, str, list[str]]:
     """Inverse bidi for one visual line segment: (text, direction, flags). ``latin_lead``: the line
     continues a Latin reference from the line before it in its paragraph or cell."""
     units = _units(component)
-    texts = [u for u, _ in units]
-    types = [_unit_type(u) for u in texts]
+    texts = _cell_gaps(units)
+    # A cell gap is a segment separator: it and its neighbours take the line's direction (UAX #9 L1).
+    types = ["S" if u == "\t" else _unit_type(u) for u in texts]
     n = len(texts)
     # W4: a single , . : / between digits joins the number. W5: % ₪ next to digits.
     for i in range(n):
@@ -349,6 +434,8 @@ def logical_text(component: list[Atom], page_rtl: bool = True, latin_lead: bool 
             if (i > 0 and types[i - 1] == "EN") or (i + 1 < n and types[i + 1] == "EN"):
                 types[i] = "EN"
     rtl = line_is_rtl("".join(texts), page_rtl)
+    if not rtl and page_rtl and _cells_follow_page(texts, types):
+        rtl = True
     base = "R" if rtl else "L"
     # Neutrals between two LTR units (Latin or number) join them; otherwise base.
     ltr_like = [("L" if t in ("L", "EN") else t) for t in types]
@@ -409,7 +496,7 @@ def logical_text(component: list[Atom], page_rtl: bool = True, latin_lead: bool 
                 flags.append("bidi_ambiguous_ltr_run")
         out.extend(run)
         k = m
-    text = "".join(texts[x] for x in out).strip()
+    text = "".join(texts[x] for x in out).replace("\t", " ").strip()
     if rtl and any(ch in _BRACKETS for ch in text):
         # Whether the layer maps mirrored bracket glyphs to the logical character is producer-specific.
         flags.append("rtl_brackets_unverified")
@@ -428,7 +515,7 @@ def clear_two_column_gutter(rendered_rows: list[list[BuiltLine]], median_height:
     return True
 
 
-def build_lines(atoms: list[Atom], rtl: bool | None = None) -> PageLines:
+def build_lines(atoms: list[Atom], rtl: bool | None = None, default_rtl: bool | None = None) -> PageLines:
     """Lines in reading order, with the page's reading-order flags.
 
     ``selection_safe`` says when a geometric reading order may be used without review: every atom has
@@ -441,7 +528,15 @@ def build_lines(atoms: list[Atom], rtl: bool | None = None) -> PageLines:
         return PageLines([], ["reading_order_no_usable_characters"] if atoms else [], False, False, False)
     median_height = statistics.median(a.height for a in ink)
     # ``rtl`` gives the base direction when the caller knows it (a table cell takes the document's).
-    page_rtl = is_rtl("".join(a.text for a in ink)) if rtl is None else rtl
+    # ``default_rtl`` is the document's direction, for a band with no Hebrew letter whose words are mostly
+    # amounts, dates and codes: it is laid out in the document's direction (an RTL table's all-number
+    # rows came out with their cells in reverse order, and one Latin code among them flipped the band).
+    if rtl is not None:
+        page_rtl = rtl
+    elif default_rtl is not None and _follows_document(ink):
+        page_rtl = default_rtl
+    else:
+        page_rtl = is_rtl("".join(a.text for a in ink))
     built_rows: list[list[BuiltLine]] = []
     for row_index, row in enumerate(rows(valid, median_height)):
         comps = components(row, median_height)
