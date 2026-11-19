@@ -240,11 +240,13 @@ class OcrRouteTest(unittest.TestCase):
         from heocr.pdf.reader import LayerCheck
 
         wrong = lambda agreement, confidence, pooled=True: LayerCheck(agreement, confidence, None, None, pooled).layer_is_wrong
-        self.assertTrue(wrong(0.12, 91.0))
-        self.assertFalse(wrong(0.12, 91.0, pooled=False))  # a page with long lines keeps needing spelling evidence
-        self.assertFalse(wrong(0.12, 80.0))  # not confident enough
-        self.assertFalse(wrong(0.40, 91.0))  # not a strong enough disagreement
-        self.assertFalse(wrong(1.0, 91.0))  # agreement keeps the layer
+        self.assertFalse(wrong(0.12, 91.0))  # off by default: flagged, not replaced
+        with mock.patch("heocr.pdf.reader.LAYER_POOLED_REPLACE", True):
+            self.assertTrue(wrong(0.12, 91.0))
+            self.assertFalse(wrong(0.12, 91.0, pooled=False))
+            self.assertFalse(wrong(0.12, 80.0))
+            self.assertFalse(wrong(0.40, 91.0))
+            self.assertFalse(wrong(1.0, 91.0))
 
     def test_short_lines_are_pooled_to_eight_letters(self) -> None:
         from types import SimpleNamespace

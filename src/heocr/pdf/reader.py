@@ -521,7 +521,9 @@ def _check_ocr_layer(doc: Document, page, built: PageLines) -> LayerCheck | None
 # group reaches LAYER_CHECK_MIN_LETTERS. Each line is still read on its own crop.
 LAYER_CHECK_POOLED = True
 LAYER_POOL_MIN_LETTERS = 2
-LAYER_POOLED_REPLACE = True  # a pooled page with no spelling evidence on either side may be replaced (LayerCheck.layer_is_wrong)
+# Off: evaluation's held-out check (a fresh seed base) found no page for it to act on, so its gain is unshown.
+# Kept, switchable, for a held-out set with all-table pages to test it.
+LAYER_POOLED_REPLACE = False  # a pooled page with no spelling evidence on either side may be replaced (LayerCheck.layer_is_wrong)
 LAYER_POOLED_MIN_CONFIDENCE = 85.0
 
 
