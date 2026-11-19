@@ -16,7 +16,7 @@ Or, for the unreleased changes on `main`, install it from the repository:
 pip install "git+https://github.com/HeOCR/heocr"
 ```
 
-An install from the repository has no bundled OCR models (they ship in the released package only). The default model then falls back to stock Tesseract `heb`, and the document is flagged `bundled_model_unavailable`. In a clone, `python scripts/fetch_models.py` before `pip install .` fetches them and checks their pinned hashes.
+An install from the repository has no bundled OCR models: they ship in the released package only. From git, run `python scripts/fetch_models.py` in a clone before `pip install .`, or you get stock Tesseract. It fetches the models and checks their pinned hashes. Without them, the default model falls back to stock Tesseract `heb`: the document is flagged `bundled_model_unavailable`, and the command line prints a warning, even with `-q`.
 
 The core needs only pypdfium2, Pillow and defusedxml. It reads text-layer PDFs, DOCX, XLSX, PPTX and HTML on its own. Two optional programs add the rest:
 - **Tesseract,** for scans, images and image regions;

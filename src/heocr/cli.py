@@ -60,7 +60,7 @@ def _parser() -> argparse.ArgumentParser:
         metavar="NAME",
         help="download a released HeOCR model on purpose, check its pinned sha256, and exit",
     )
-    parser.add_argument("-q", "--quiet", action="store_true", help="do not report unread parts on stderr")
+    parser.add_argument("-q", "--quiet", action="store_true", help="do not report unread parts on stderr (a missing OCR model is still reported)")
     parser.add_argument("--version", action="version", version=f"heocr {__version__}")
     return parser
 
@@ -113,12 +113,28 @@ def main(argv: list[str] | None = None) -> int:
         if hasattr(sys.stdout, "reconfigure"):
             sys.stdout.reconfigure(encoding="utf-8")
         sys.stdout.write(out)
+    # A missing OCR model changes the results, so it is reported even with --quiet.
+    for line in _model_warnings(doc):
+        print(line, file=sys.stderr)
     if not args.quiet:
         for item in doc.unread:
             where = f"page {item.page + 1}: " if item.page is not None else ""
             detail = f" ({item.detail})" if item.detail else ""
             print(f"heocr: unread: {where}{item.reason}{detail}", file=sys.stderr)
     return 0
+
+
+def _model_warnings(doc) -> list[str]:
+    """Warnings for an OCR model that was asked for but is not installed, so stock Tesseract read instead."""
+    if "bundled_model_unavailable" not in doc.flags and "routed_model_unavailable" not in doc.flags:
+        return []
+    model = (doc.options.get("ocr") or {}).get("model", "the default model")
+    return [
+        f"heocr: warning: the OCR model {model} is not installed with this copy of heocr, so stock Tesseract read"
+        " instead, and the results differ from a release's.",
+        "heocr: warning: an install from the repository has no bundled models: run scripts/fetch_models.py before"
+        " pip install ., or install heocr from PyPI.",
+    ]
 
 
 if __name__ == "__main__":  # pragma: no cover

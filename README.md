@@ -17,6 +17,8 @@ Every decision is recorded in the output. Text that could not be read is reporte
 pip install heocr        # the core needs only defusedxml, pypdfium2 and Pillow
 ```
 
+From a clone of the repository, run `python scripts/fetch_models.py` before `pip install .`, or you get stock Tesseract instead of HeOCR's own OCR models: the repository does not hold the model files. heocr then warns on the command line and flags the record `bundled_model_unavailable`.
+
 ```python
 import heocr
 
