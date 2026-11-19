@@ -14,7 +14,11 @@ from heocr.convert import CONVERSIONS, CONVERT_TIMEOUT
 from heocr.identify import identify
 from heocr.ocr.tesseract import DEFAULT_LANG, DEFAULT_PSM, check_settings
 
-# ``ocr_model`` values that read with stock Tesseract ``ocr_lang`` (the escape hatch from the default ``auto``).
+# The default OCR model: HeOCR's modern-print model, bundled in the package (``heocr.models``).
+DEFAULT_MODEL = "heocr_modern_v1"
+# Short names for the bundled models.
+MODEL_ALIASES = {"modern": "heocr_modern_v1", "oldprint": "heocr_oldprint_v1"}
+# ``ocr_model`` values that read with stock Tesseract ``ocr_lang`` (the escape hatch from the default).
 STOCK_MODELS = ("heb", "stock")
 
 IMAGE_FORMATS = ("png", "jpeg", "tiff", "gif", "bmp", "jp2", "webp")
@@ -45,7 +49,7 @@ def extract(
     ocr_lang: str = DEFAULT_LANG,
     ocr_psm: int = DEFAULT_PSM,
     tesseract: str | Sequence[str] | None = None,
-    ocr_model: str | None = "auto",
+    ocr_model: str | None = DEFAULT_MODEL,
     force_ocr: bool = False,
     check_numbers: str | bool = "suspect",
     convert: bool = True,
@@ -65,13 +69,15 @@ def extract(
     ``ocr`` runs the OCR route on pages and regions that need it, through stock Tesseract
     when it is installed (``heocr.ocr.tesseract``): ``ocr_lang`` is ``heb`` by default,
     ``ocr_psm`` is 3, and ``tesseract`` names the program when it is not on the PATH.
-    ``ocr_model`` is ``"auto"`` by default: one HeOCR model per document from the route table
-    (``heocr.ocr.routes``: modern print, old print), with a probe of a few lines when the table offers more
-    than one, recorded in each OCR block's ``ocr.model_route``. It applies when ``ocr_lang`` is ``heb``;
-    with another ``ocr_lang``, stock Tesseract reads with it. ``ocr_model="heb"`` (or ``"stock"``, or
-    ``None``) reads with stock Tesseract ``ocr_lang``, as heocr 0.1 did. Otherwise ``ocr_model`` runs a
-    HeOCR traineddata instead of ``ocr_lang``: a released model's name (downloaded on purpose first,
-    ``heocr.models.download``) or a ``.traineddata`` path.
+    ``ocr_model`` is HeOCR's modern-print model, ``heocr_modern_v1``, by default, for every document; it
+    ships in the package. ``"oldprint"`` reads with the old-print model, ``heocr_oldprint_v1``, and
+    ``"auto"`` picks one of the two per document from the route table (``heocr.ocr.routes``), with a probe
+    of a few lines, recorded in each OCR block's ``ocr.model_route``. The default and ``auto`` apply when
+    ``ocr_lang`` is ``heb``; with another ``ocr_lang``, stock Tesseract reads with it. When a bundled model's
+    file is missing (an install from the repository), stock Tesseract reads instead and the document is
+    flagged ``bundled_model_unavailable``. ``ocr_model="heb"`` (or ``"stock"``, or ``None``) reads with stock
+    Tesseract ``ocr_lang``, as heocr 0.1 did. Any other released model's name (downloaded on purpose first,
+    ``heocr.models.download``) or a ``.traineddata`` path runs that model instead of ``ocr_lang``.
     Without Tesseract, or with ``ocr=False``, those pages are recorded as unread.
     ``force_ocr`` reads every PDF page by OCR, its text layer ignored (flag ``ocr_forced``): a workaround
     for a text layer heocr reads badly. It needs ``ocr``.
@@ -111,8 +117,9 @@ def extract(
         raise ValueError("check_numbers must be 'suspect', 'tables', 'all' or False")
     if ocr:
         check_settings(ocr_lang, ocr_psm)
-    if ocr_model in STOCK_MODELS or (ocr_model == "auto" and ocr_lang != DEFAULT_LANG):
-        ocr_model = None  # stock Tesseract: asked for, or auto with a language list it does not route
+    ocr_model = MODEL_ALIASES.get(ocr_model, ocr_model) if isinstance(ocr_model, str) else ocr_model
+    if ocr_model in STOCK_MODELS or (ocr_model in ("auto", DEFAULT_MODEL) and ocr_lang != DEFAULT_LANG):
+        ocr_model = None  # stock Tesseract: asked for, or a Hebrew model with a language list it would replace
     if isinstance(source, (bytes, bytearray, memoryview)):
         body = bytes(source)
     else:

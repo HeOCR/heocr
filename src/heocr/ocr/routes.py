@@ -1,8 +1,8 @@
 """Which OCR model reads which print (D6): the route table for ``ocr_model="auto"``.
 
 Each domain names a released model (``heocr.models.MODELS``) or ``None`` for stock Tesseract ``heb``.
-The table comes from evaluation's default-model study. ``auto`` is the default (``heocr.extract``);
-``ocr_model="heb"`` reads with stock Tesseract instead.
+The table comes from evaluation's default-model study. ``auto`` is opt-in: the default reads every
+document with the modern-print model (``heocr.api.DEFAULT_MODEL``).
 """
 
 from __future__ import annotations

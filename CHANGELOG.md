@@ -8,14 +8,16 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 
 ### Added
 
-- **`--ocr-model auto`** (`ocr_model="auto"`) picks one OCR model per document from the route table (`heocr.ocr.routes`: modern and old print). **It is the default**, when `--ocr-lang` is `heb`.
+- **The default OCR model is HeOCR's modern-print model, `heocr_modern_v1`**, for every document, when `--ocr-lang` is `heb`.
   - `--ocr-model heb` (or `stock`; `ocr_model=None` in Python) reads with stock Tesseract, as 0.1 did. With another `--ocr-lang`, such as `heb+eng`, stock Tesseract reads with it.
+  - `--ocr-model oldprint` reads with the old-print model, `heocr_oldprint_v1` (and `modern` names the default).
+- **`--ocr-model auto`** (`ocr_model="auto"`), opt-in, picks one OCR model per document from the route table (`heocr.ocr.routes`: modern and old print).
   - When the table offers one model, there is no probe.
   - Otherwise a probe samples up to 8 lines from up to 3 OCR pages, read again by each other candidate, and switches only when one scores clearly better. The deciding page is then read again by it.
   - Every OCR block records `ocr.model_route` (mode, domain, reason, and the probe's scores).
 - **Bundled models:** the models in `MODELS` gain a `domain` and a `bundled` flag, and a model shipped inside the package (`heocr/models_data/`) resolves without a download, after the download cache.
-- **HeOCR's own models ship inside the wheel:** `heocr_modern_v1` (modern and office print, [10.5281/zenodo.24371757](https://doi.org/10.5281/zenodo.24371757)) and `heocr_oldprint_v1` (old and rabbinic print, [10.5281/zenodo.24371759](https://doi.org/10.5281/zenodo.24371759)), both Apache-2.0, with their notices. The route table names them, so the default `auto` reads with them. Their accuracy is not measured on a held-out set yet: RC2's registered gate measures it.
-  - Without the bundled files (an install from the repository), `auto` reads with stock `heb` and flags the document `routed_model_unavailable`. `python scripts/fetch_models.py` fetches them.
+- **HeOCR's own models ship inside the wheel:** `heocr_modern_v1` (modern and office print, [10.5281/zenodo.24371757](https://doi.org/10.5281/zenodo.24371757)) and `heocr_oldprint_v1` (old and rabbinic print, [10.5281/zenodo.24371759](https://doi.org/10.5281/zenodo.24371759)), both Apache-2.0, with their notices. Their accuracy is not measured on a held-out set yet: RC2's registered gate measures the default.
+  - Without the bundled files (an install from the repository), stock `heb` reads instead, and the document is flagged `bundled_model_unavailable` (with `auto`, `routed_model_unavailable`). `python scripts/fetch_models.py` fetches them.
 
 ### Fixed
 
@@ -33,6 +35,7 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 ### Record
 
 - New page signal `ocr_layer_check_pooled` (additive, within v1).
+- New document flags `bundled_model_unavailable` and `routed_model_unavailable` (additive, within v1).
 
 ## 0.1.2
 

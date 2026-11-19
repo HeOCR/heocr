@@ -50,9 +50,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--tesseract", help="the tesseract program, when it is not on the PATH")
     parser.add_argument(
         "--ocr-model",
-        default="auto",
-        help="the OCR model (default: auto, one HeOCR model per document from the route table, when --ocr-lang is heb); "
-        "heb or stock for stock Tesseract; or a released HeOCR model's name (e.g. heocr_r8b) or a .traineddata path",
+        default="heocr_modern_v1",
+        help="the OCR model (default: heocr_modern_v1, HeOCR's modern-print model, when --ocr-lang is heb); "
+        "oldprint for the old-print model; auto to pick one of the two per document; heb or stock for stock "
+        "Tesseract; or a released HeOCR model's name (e.g. heocr_r8b) or a .traineddata path",
     )
     parser.add_argument(
         "--download-model",

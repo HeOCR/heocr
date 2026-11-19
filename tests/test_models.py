@@ -83,8 +83,24 @@ class ModelRouteTest(unittest.TestCase):
         doc = heocr.extract(SCAN, tesseract=FAKE, ocr_model=str(model))
         self.assertIn("configs/tsv", doc.unread[0].detail)
 
-    def test_the_default_is_auto(self) -> None:
+    def test_the_default_is_the_modern_model(self) -> None:
+        # One model for every document, no router. The test package has no bundled files, so stock heb reads
+        # instead and the document says so.
         doc = heocr.extract(SCAN, tesseract=FAKE)
+        self.assertEqual(doc.to_dict()["options"]["ocr"]["model"], "heocr_modern_v1")
+        self.assertNotIn("model_route", doc.blocks[0].ocr)
+        self.assertIn("bundled_model_unavailable", doc.flags)
+        self.assertEqual(doc.blocks[0].ocr["lang"], "heb")
+        self.assertEqual(doc.unread, [])
+
+    def test_short_names_for_the_bundled_models(self) -> None:
+        for alias, name in (("modern", "heocr_modern_v1"), ("oldprint", "heocr_oldprint_v1")):
+            with self.subTest(alias=alias):
+                doc = heocr.extract(SCAN, tesseract=FAKE, ocr_model=alias)
+                self.assertEqual(doc.to_dict()["options"]["ocr"]["model"], name)
+
+    def test_auto_is_opt_in(self) -> None:
+        doc = heocr.extract(SCAN, tesseract=FAKE, ocr_model="auto")
         self.assertEqual(doc.to_dict()["options"]["ocr"]["model"], "auto")
         self.assertEqual(doc.blocks[0].ocr["model_route"]["mode"], "auto")
 
@@ -96,14 +112,18 @@ class ModelRouteTest(unittest.TestCase):
                 self.assertNotIn("model_route", doc.blocks[0].ocr)
                 self.assertNotIn("model", doc.to_dict()["options"]["ocr"])
                 self.assertNotIn("routed_model_unavailable", doc.flags)
+                self.assertNotIn("bundled_model_unavailable", doc.flags)
 
-    def test_auto_leaves_another_language_list_to_stock(self) -> None:
-        # The route table's models are Hebrew models: a list such as heb+eng is not replaced by one of them.
+    def test_another_language_list_reads_with_stock(self) -> None:
+        # The default and auto use Hebrew models: a list such as heb+eng is not replaced by one of them.
         # (The fake engine has heb only, so nothing is read here; what matters is the setting.)
         doc = heocr.extract(SCAN, tesseract=FAKE, ocr_lang="heb+eng")
         self.assertEqual(doc.to_dict()["options"]["ocr"]["lang"], "heb+eng")
         self.assertNotIn("model", doc.to_dict()["options"]["ocr"])
         self.assertNotIn("routed_model_unavailable", doc.flags)
+        self.assertNotIn("bundled_model_unavailable", doc.flags)
+        doc = heocr.extract(SCAN, tesseract=FAKE, ocr_lang="heb+eng", ocr_model="auto")
+        self.assertNotIn("model", doc.to_dict()["options"]["ocr"])
 
 
 class DownloadTest(unittest.TestCase):
