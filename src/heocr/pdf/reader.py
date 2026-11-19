@@ -1648,6 +1648,48 @@ PAGE_NUMBER_DPI = 150  # the page pass reads at this resolution: eng's page segm
 PAGE_NUMBER_MIN_OVERLAP = 0.5  # a token covers a word when it overlaps this share of the lower one's height
 
 
+# A cut label's deeper reading that the sequence guard turned down on the word's crop, and that the page
+# pass reads the same, is used: two readings of different images (the word's crop at the page's dpi, the
+# whole page at PAGE_NUMBER_DPI) that agree on every level are evidence of their own, where the
+# neighbours cannot vouch because their labels are cut too. Agreement stands in for a neighbour that is
+# missing, never for one that contradicts: a known label before it that it cannot follow, or one after
+# it that cannot follow it, keeps the reading out (both readings can see the same stray ink: "2." beside
+# a mark read "9.2.", after "1.2.").
+LABEL_AGREEMENT = True
+
+
+def _labels_agreed(lines, pending: dict, model: str) -> int:
+    """Use the pending page-pass labels (word id -> (reading, confidence)) that a rejected crop reading
+    of the same word agrees with; they leave ``pending``. Each use is logged with ``agreed: true``."""
+    replaced = 0
+    starts = [(line, max(line.words, key=lambda w: w.bbox[2])) for line in lines if line.words]
+    known = [_label_levels(w.text) if id(w) not in pending and _LABEL_DEEPER.match(w.text) else None for _, w in starts]
+    for i, (line, word) in enumerate(starts):
+        if id(word) not in pending:
+            continue
+        reading, confidence = pending[id(word)][:2]
+        levels = _label_levels(reading)
+        previous = next((k for k in reversed(known[:i]) if k), None)
+        following = next((k for k in known[i + 1 :] if k), None)
+        if (previous is not None and not _label_follows(previous, levels)) or (following is not None and not _label_follows(levels, following)):
+            continue  # a known neighbour contradicts it: agreement does not override the sequence
+        crop = next((e for e in line.number_readings if e.get("used") is False and not e.get("page_pass")
+                     and e.get("first") == word.text and e.get("second", "").rstrip(".") == reading.rstrip(".")), None)
+        if crop is None:
+            continue
+        del pending[id(word)]
+        if word.text[-1] in ".:" and reading[-1].isdigit():
+            reading += word.text[-1]
+        line.number_readings.append({"first": word.text, "second": reading, "first_confidence": word.confidence,
+                                     "second_confidence": confidence, "model": model, "wider": False,
+                                     "label_levels": True, "page_pass": True, "agreed": True})
+        word.text = reading
+        line.numbers_replaced += 1
+        line.text = " ".join(w.text for w in line.words)
+        replaced += 1
+    return replaced
+
+
 def _page_number_pass(numbers, image, result, dpi: int) -> tuple[int, int]:
     """The whole page read once more by the number model (``--psm 3`` at ``PAGE_NUMBER_DPI``), for the
     numbers no crop restored: heb cuts a label at a line's start to its last level ("1." of "2.3.1.")
@@ -1734,6 +1776,8 @@ def _page_number_pass(numbers, image, result, dpi: int) -> tuple[int, int]:
             replaced += 1
         if changes:
             line.text = " ".join(w.text for w in line.words)
+    if pending and LABEL_AGREEMENT:
+        replaced += _labels_agreed(result.lines, pending, numbers.lang)
     if pending:
         first = {id(line): len(line.number_readings) for line in result.lines}
         replaced += _label_sequence(result.lines, pending, numbers.lang)

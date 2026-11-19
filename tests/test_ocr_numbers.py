@@ -191,6 +191,49 @@ class NumberWordsTest(unittest.TestCase):
         self.assertNotIn("used", logged)
         self.assertEqual(doc.pages[0].coverage["page_number_words_replaced"], 1)
 
+    def agreeing(self, crop: str, token: str) -> heocr.Document:
+        """One line whose cut label "4." has no neighbour to vouch for it: the word crop reads it as
+        ``crop`` at a low confidence (so the sequence guard turns it down), and the number model's
+        whole-page reading has ``token`` over it. All values are invented."""
+        lines = [["4.", "דיווח", "עיתי"]]
+        left = 2250 - 250
+        path = Path(self.tmp.name) / "page-eng-agree.tsv"
+        path.write_text(f"{HEADER}\n5\t1\t1\t1\t1\t1\t{left // 2}\t50\t125\t30\t20\t{token}\n", encoding="utf-8")
+        with mock.patch.dict(os.environ, {"FAKE_PAGE_TSV_ENG": str(path)}):
+            return self.read_lines(lines, [crop, "", "", "", "", ""])
+
+    def test_a_cut_label_two_readings_agree_on_is_used(self) -> None:
+        # set C office scans: heb cuts "2.2.4." to "4." on a page whose labels are all cut, so no
+        # neighbour vouches; the word's crop and the whole page, read apart, both say "2.2.4.".
+        doc = self.agreeing("2.2.4", "2.2.4.")
+        self.assertEqual(doc.blocks[0].text, "2.2.4. דיווח עיתי")
+        readings = [r for b in doc.blocks for r in (b.checks or {}).get("number_readings") or []]
+        crop = [r for r in readings if not r.get("page_pass")]
+        page = [r for r in readings if r.get("page_pass")]
+        self.assertEqual([(r["second"], r.get("used")) for r in crop], [("2.2.4.", False)])  # the crop's own reading, turned down
+        self.assertEqual([(r["first"], r["second"], r.get("agreed")) for r in page], [("4.", "2.2.4.", True)])
+
+    def test_cut_label_readings_that_disagree_are_not_used(self) -> None:
+        doc = self.agreeing("2.2.4", "2.3.4.")
+        self.assertEqual(doc.blocks[0].text, "4. דיווח עיתי")
+        self.assertFalse(any(r.get("agreed") for b in doc.blocks for r in (b.checks or {}).get("number_readings") or []))
+
+    def test_agreement_never_overrides_a_known_neighbour(self) -> None:
+        # set B pdf_t5_scan: both readings saw a stray mark beside "2." as "9.2.", after a known "1.2.".
+        # It cannot follow "1.2.", so it stays out however the readings agree.
+        lines = [["1.2.", "הגדרות"], ["2.", "דיווח"]]
+        path = Path(self.tmp.name) / "page-eng-contra.tsv"
+        path.write_text(f"{HEADER}\n5\t1\t1\t1\t1\t1\t1000\t100\t125\t30\t20\t9.2.\n", encoding="utf-8")
+        with mock.patch.dict(os.environ, {"FAKE_PAGE_TSV_ENG": str(path)}):
+            doc = self.read_lines(lines, ["1.2", "9.2", "", "", "", ""])
+        self.assertEqual(doc.blocks[0].text.splitlines()[1], "2. דיווח")
+        self.assertFalse(any(r.get("agreed") for b in doc.blocks for r in (b.checks or {}).get("number_readings") or []))
+
+    def test_no_agreement_when_it_is_off(self) -> None:
+        with mock.patch("heocr.pdf.reader.LABEL_AGREEMENT", False):
+            doc = self.agreeing("2.2.4", "2.2.4.")
+        self.assertEqual(doc.blocks[0].text, "4. דיווח עיתי")
+
     def test_the_page_pass_label_out_of_sequence_is_logged_and_not_used(self) -> None:
         doc = self.page_pass([["3.1.", "אחת"], ["2.", "שתיים"], ["3.3.", "שלוש"]], [("23.2.", "90", [(2, 1)])])
         self.assertEqual(doc.blocks[0].text.splitlines()[1], "2. שתיים")

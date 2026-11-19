@@ -25,9 +25,15 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
   - Ink is now looked for in 30 pt tiles: the rest counts as bare only when no tile holds 50 pixels 25 levels or more under the paper.
   - Found by evaluation on its synthetic grain-and-table stress set.
 
+- **A cut outline label that two readings agree on is restored.**
+  - On a scan whose labels heb cut ("2.2.4." read as "4."), the number model's deeper reading of a low-confidence label is used only when a neighbouring label vouches for the sequence. When the neighbours are cut too, nothing vouches.
+  - Now a deeper label that the word's crop and the whole-page reading both give, level for level, is used when no known label next to it contradicts the sequence. It is logged with `agreed: true`.
+  - It can be turned off (`LABEL_AGREEMENT`).
+
 ### Record
 
 - New page flag `ocr_rest_blank` (additive, within v1): the page's tables were read, and nothing else on it had ink.
+- New key `agreed` (additive) on a number reading in `checks.number_readings`: a cut label restored because two readings agree.
 
 ## Unreleased → 0.1.0 (D5, release readiness)
 
