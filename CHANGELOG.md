@@ -4,6 +4,20 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 [HeOCR/heocr](https://github.com/HeOCR/heocr). The milestones (D1–D5) are planned in
 [`planning/milestones/`](planning/milestones/).
 
+## Unreleased → 0.2.0
+
+### Fixed
+
+- **A page of short cells under an OCR layer is checked, and a wrong layer there is replaced.**
+  - The check of a foreign OCR layer reads a few of its lines again, but only lines of at least 8 letters. A table of one-word cells (codes, numbers, dates) had none, so its layer was never checked and was kept by default, wrong or right.
+  - Such a page's short lines are now pooled until a group reaches 8 letters (`LAYER_CHECK_POOLED`), so the check runs and a disagreeing layer is flagged.
+  - On a pooled page where neither side has words enough to spell-check, a reading at least 85% confident that shares under 35% of the layer's letters replaces it (`LAYER_POOLED_REPLACE`). Its evidence is the open synthetic set G only.
+  - On every other document checked (the open synthetic sets, open real scans and the development split), nothing changes.
+
+### Record
+
+- New page signal `ocr_layer_check_pooled` (additive, within v1).
+
 ## Unreleased → 0.1.2
 
 ### Added

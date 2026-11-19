@@ -233,6 +233,29 @@ class OcrRouteTest(unittest.TestCase):
         self.assertFalse(wrong(0.0, 88.0, 0.125, None))  # our own spelling unmeasured: no evidence of our side
         self.assertTrue(wrong(0.0, 72.0, 0.30, 0.0))  # the usual floor still applies at any agreement below 0.5
 
+    def test_a_pooled_page_without_spelling_evidence(self) -> None:
+        # The open synthetic set G: a table of one-word cells has no layer line of 8 letters, so its short
+        # lines are pooled, and neither side has words enough to spell-check. Only a very confident reading
+        # that shares under a third of the layer's letters replaces it. Values are invented.
+        from heocr.pdf.reader import LayerCheck
+
+        wrong = lambda agreement, confidence, pooled=True: LayerCheck(agreement, confidence, None, None, pooled).layer_is_wrong
+        self.assertTrue(wrong(0.12, 91.0))
+        self.assertFalse(wrong(0.12, 91.0, pooled=False))  # a page with long lines keeps needing spelling evidence
+        self.assertFalse(wrong(0.12, 80.0))  # not confident enough
+        self.assertFalse(wrong(0.40, 91.0))  # not a strong enough disagreement
+        self.assertFalse(wrong(1.0, 91.0))  # agreement keeps the layer
+
+    def test_short_lines_are_pooled_to_eight_letters(self) -> None:
+        from types import SimpleNamespace
+
+        from heocr.pdf.reader import _pooled_lines
+
+        letters = lambda text: sum(ch.isalpha() for ch in text)
+        lines = [SimpleNamespace(text=s) for s in ["אב", "1", "גדה", "וז", "חטי", "כל"]]
+        groups = _pooled_lines(lines, letters)
+        self.assertEqual([[line.text for line in group] for group in groups], [["אב", "גדה", "וז", "חטי"]])  # "1" too short; "כל" left over
+
     def test_a_scrambled_layer_is_kept_when_our_reading_is_not_confident(self) -> None:
         doc = self.read_layer(SCRAMBLED, "המציע יגיש את הצעתו עד המועד", confidence="30.0")
         page = doc.pages[0]
