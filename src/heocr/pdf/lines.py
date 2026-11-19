@@ -349,7 +349,37 @@ def _latin_brackets(texts: list[str], types: list[str], resolved: list[str], lea
                 p, q = core[0] - 1, core[-1] + 1
                 if p >= i and q < j and texts[p] in "()" and texts[p] and texts[p] == texts[q]:
                     texts[p], texts[q] = ")", "("
+                else:
+                    _number_beside_latin_pair(texts, types, resolved, i, j, attached)
         i = j
+
+
+def _number_beside_latin_pair(texts: list[str], types: list[str], resolved: list[str], i: int, j: int, attached: set[int]) -> None:
+    """A number set beside a Latin parenthetical, outside its brackets: "משנת 2018 (Assigning
+    responsibilities), ..." in an RTL line. The page shows the number, then the parenthetical, right
+    to left. The brackets take the paragraph's direction (UAX #9 N0: the number before them counts as
+    R), so the number is a run of its own; read as one left-to-right run with the Latin text, it came
+    out after it, with a bracket each side ("Assigning responsibilities) 2018)"). The pair is the
+    brackets hugging the Latin letters only, when the rest of the stretch outside them is numbers and
+    neutrals. Whatever characters the layer gives them (the same one twice, as LibreOffice writes
+    them, or each glyph's own), the right one opens the pair, as an RTL paragraph shows it."""
+    latin = [k for k in range(i, j) if types[k] == "L" or k in attached]
+    if not latin:
+        return
+    p, q = latin[0] - 1, latin[-1] + 1
+    if not (p >= i and q < j and texts[p] in ("(", ")") and texts[q] in ("(", ")")):
+        return
+    if any(texts[k] in _BRACKETS for k in range(p + 1, q) if k not in attached):
+        return  # another bracket inside: not one parenthetical
+    outside = [k for k in range(i, j) if not p <= k <= q]
+    if not any(types[k] == "EN" for k in outside) or any(types[k] == "L" for k in outside):
+        return
+    texts[p], texts[q] = ")", "("
+    resolved[p] = resolved[q] = "R"
+    # The neutrals between a bracket and the number take the paragraph's direction too.
+    for k in outside:
+        if types[k] == "N":
+            resolved[k] = "R"
 
 
 def _cell_gaps(units: list[tuple[str, Atom | None]]) -> list[str]:

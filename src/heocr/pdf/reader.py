@@ -919,13 +919,17 @@ def _check_numbers(doc: Document, pdf, scope: str = "suspect") -> None:
 
 
 def _repair_rtl_brackets(doc: Document) -> None:
-    """``rtl_bracket_order``, decided once per document on its RTL text-layer paragraphs."""
+    """``rtl_bracket_order``, decided once per document on its RTL text-layer paragraphs.
+
+    Mirroring is its own inverse, so a block or table it already changed is never changed again:
+    a second pass would put every bracket back as the layer had it."""
+    done = ("brackets_mirrored", "brackets_kept_valid_as_read")
     blocks = [b for b in doc.blocks if b.source == "text_layer" and b.direction == "rtl" and b.lines]
     lines = [line.text for b in blocks for line in b.lines if line.direction == "rtl"]
     if not repairs.brackets_mirrored_in(lines):
         return
     # Table cells read from the layer follow the same document decision, cell by cell (D3).
-    for table in (b for b in doc.blocks if b.kind == "table" and b.source == "text_layer" and b.direction == "rtl"):
+    for table in (b for b in doc.blocks if b.kind == "table" and b.source == "text_layer" and b.direction == "rtl" and "brackets_mirrored" not in b.flags):
         changes: Counter = Counter()
         for row in table.cells or []:
             for cell in row:
@@ -946,6 +950,8 @@ def _repair_rtl_brackets(doc: Document) -> None:
             table.repairs += repairs.record(repairs.RTL_BRACKET_ORDER, changes)
             table.flags.append("brackets_mirrored")
     for block in blocks:
+        if any(flag in block.flags for flag in done):
+            continue
         flat = block.text.replace("\n", " ")
         mirrored = repairs.mirror_brackets(flat)
         labels_say_mirror = repairs.bracket_labels(mirrored) > repairs.bracket_labels(flat)
