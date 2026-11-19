@@ -78,6 +78,7 @@ Flags are open lists of strings: a later v1 may add more. The main ones, by what
   - `possible_spread`, `spread_split`.
 - **OCR:**
   - `ocr_unverified`, `ocr_short_for_ink`, `ocr_empty_with_ink`, `render_dpi_reduced`, `deskewed`;
+  - `ocr_call_failed` (a page, and the document, where a Tesseract call failed or timed out; the page's `signals.ocr_calls_failed` counts them);
   - `from_image_region`, `layer_text_masked`, `repeated_image_text`.
 - **Tables:**
   - `ruled_table`, `unruled_table`, `ocr_tables`;
@@ -114,6 +115,7 @@ Reasons are an open list. Those in use:
 | `pdf_encrypted`, `pdf_unreadable`, `docx_unreadable`, `xlsx_unreadable`, `pptx_unreadable`, `html_unreadable`, `image_unreadable` | A file that does not open or parse |
 | `converter_unavailable`, `conversion_failed`, `conversion_timeout` | LibreOffice missing, refusing the file, or stopped at its time limit |
 | `ocr_route_unavailable`, `ocr_failed`, `ocr_found_no_text`, `ocr_short_for_ink` | Tesseract missing or failing; a page whose ink OCR did not read |
+| `ocr_call_failed` | Tesseract calls that failed or timed out (a second reading, a check, a cell), counted for the document: what they would have read is missing |
 | `image_region_not_read`, `image_region_too_small`, `image_region_no_text_found`, `image_region_ocr_low_confidence` | Image regions on text-layer pages |
 | `image_not_read`, `image_too_small`, `image_too_large`, `image_blank`, `image_no_text_found`, `image_ocr_low_confidence`, `image_format_not_supported` | Embedded images and image files |
 | `table_row_ink_unread` | A table row with ink in its cells that OCR read none of |

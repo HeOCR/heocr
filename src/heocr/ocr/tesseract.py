@@ -87,9 +87,20 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+# Every Tesseract call runs on one thread, as a precaution. Tesseract can run its arithmetic on several,
+# through OpenMP (Linux builds) or Apple's Accelerate framework (macOS builds), split according to the
+# machine's load; one thread takes that out of the picture. heocr runs one Tesseract call at a time per
+# document, so little speed is lost.
+THREAD_ENV = {"OMP_THREAD_LIMIT": "1", "VECLIB_MAXIMUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1"}
+
+
+def _env() -> dict[str, str]:
+    return {**os.environ, **THREAD_ENV}
+
+
 def _run(cmd: list[str], timeout: float) -> subprocess.CompletedProcess:
     try:
-        return subprocess.run(cmd, capture_output=True, timeout=timeout, check=False)
+        return subprocess.run(cmd, capture_output=True, timeout=timeout, check=False, env=_env())
     except FileNotFoundError as exc:
         raise OcrUnavailable("tesseract not found") from exc
     except subprocess.TimeoutExpired as exc:
@@ -130,6 +141,7 @@ class Tesseract:
     timeout: float = TIMEOUT
     released: object = None  # the heocr.models.ReleasedModel in use, if any
     route: dict | None = None  # ocr_model="auto": how this engine was chosen (heocr.ocr.routes)
+    failures: int = 0  # recognize() calls that failed or timed out (heocr.ocr.call_failures)
 
     @classmethod
     def find(
@@ -195,6 +207,7 @@ class Tesseract:
             "tesseract:executable_sha256": self.executable_sha256,
             "tesseract:lang": self.lang,
             "tesseract:psm": str(self.psm),
+            "tesseract:threads": "1",
         }
         for language, sha in self.models.items():
             out[f"tesseract:{language}.traineddata"] = f"sha256:{sha}"
@@ -212,27 +225,35 @@ class Tesseract:
             source = Path(temp) / "input.png"
             image.save(source, dpi=(dpi, dpi))
             base = Path(temp) / "result"
-            done = _run(
-                [
-                    *self.cmd,
-                    str(source),
-                    str(base),
-                    "--tessdata-dir",
-                    str(self.tessdata),
-                    "-l",
-                    self.lang,
-                    "--psm",
-                    str(self.psm if psm is None else psm),
-                    "--dpi",
-                    str(dpi),
-                    "tsv",
-                ],
-                self.timeout,
-            )
+            try:
+                done = self._recognize_call(source, base, dpi, psm)
+            except OcrUnavailable:
+                self.failures += 1
+                raise
             tsv = base.with_suffix(".tsv")
             if done.returncode != 0 or not tsv.is_file():
+                self.failures += 1
                 raise OcrUnavailable(f"tesseract failed with exit code {done.returncode}")
             return parse_tsv(tsv.read_text(encoding="utf-8", errors="replace"))
+
+    def _recognize_call(self, source: Path, base: Path, dpi: int, psm: int | None) -> subprocess.CompletedProcess:
+        return _run(
+            [
+                *self.cmd,
+                str(source),
+                str(base),
+                "--tessdata-dir",
+                str(self.tessdata),
+                "-l",
+                self.lang,
+                "--psm",
+                str(self.psm if psm is None else psm),
+                "--dpi",
+                str(dpi),
+                "tsv",
+            ],
+            self.timeout,
+        )
 
 
 def parse_tsv(tsv: str) -> OcrResult:

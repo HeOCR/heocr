@@ -31,10 +31,16 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
   - Such a page's short lines are now pooled until a group reaches 8 letters (`LAYER_CHECK_POOLED`), so the check runs and a disagreeing layer is flagged.
   - Replacing such a layer is possible but off by default (`LAYER_POOLED_REPLACE`): on a pooled page where neither side has words enough to spell-check, a reading at least 85% confident that shares under 35% of the layer's letters would replace it. Its evidence is one tuned page, and evaluation's held-out check found no page for it to act on, so the page is flagged (`ocr_layer_disagrees_kept`) instead.
   - On every other document checked (the open synthetic sets, open real scans and the development split), nothing changes.
+- **A Tesseract call that fails or times out is flagged, never dropped silently.**
+  - A second reading of numbers, a layer check, the page-number pass, a table cell, an image region or the route probe could catch such a failure, carry on without its reading, and leave no trace.
+  - Every failed or timed-out call is now counted: its page is flagged `ocr_call_failed` (with `signals.ocr_calls_failed`), and the document is flagged and gets an `unread` entry, `ocr_call_failed`.
+  - As a precaution, every Tesseract call runs on one thread (`OMP_THREAD_LIMIT`, `VECLIB_MAXIMUM_THREADS` and `OPENBLAS_NUM_THREADS` set to 1), recorded as `tesseract:threads` in `producer.components`.
+  - A test reads one page with the real Tesseract, idle and under load, and requires the same output, guarding against regressions.
 
 ### Record
 
 - New page signal `ocr_layer_check_pooled` (additive, within v1).
+- New flag and unread reason `ocr_call_failed`, and page signal `ocr_calls_failed` (additive, within v1).
 - New document flags `bundled_model_unavailable` and `routed_model_unavailable` (additive, within v1).
 
 ## 0.1.2

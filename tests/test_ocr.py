@@ -84,6 +84,7 @@ class OcrRouteTest(unittest.TestCase):
         components = doc.to_dict()["producer"]["components"]
         self.assertEqual(components["tesseract"], "tesseract 5.9.9")
         self.assertEqual(components["tesseract:psm"], "3")
+        self.assertEqual(components["tesseract:threads"], "1")
         expected = hashlib.sha256(b"fake heb model").hexdigest()
         self.assertEqual(components["tesseract:heb.traineddata"], f"sha256:{expected}")
         self.assertNotIn(str(self.tessdata), doc.to_json())
@@ -608,6 +609,56 @@ class TsvTest(unittest.TestCase):
         self.assertEqual(result.words, 4)
         self.assertEqual(result.lines[2].paragraph, ("2", "1"))
 
+
+
+
+class OcrCallFailureTest(unittest.TestCase):
+    """A Tesseract call that fails or times out, caught by a second reading or a check, leaves a trace."""
+
+    setUp = OcrRouteTest.setUp
+
+    def test_a_failed_call_is_flagged_on_its_page_and_in_unread(self) -> None:
+        from unittest import mock
+
+        from heocr.ocr import tesseract
+
+        real = tesseract.Tesseract._recognize_call
+
+        def flaky(self, source, base, dpi, psm):
+            if psm == 7:  # every one-line reading (the layer check's) times out
+                raise tesseract.OcrUnavailable("tesseract timed out")
+            return real(self, source, base, dpi, psm)
+
+        pdf = make_pdf([PdfPage(lines=lines_block(HEBREW), invisible=True, images=FULL_PAGE)])
+        with mock.patch.object(tesseract.Tesseract, "_recognize_call", flaky):
+            doc = heocr.extract(pdf, tesseract=FAKE, ocr_model="heb")
+        page = doc.pages[0]
+        self.assertIn("ocr_call_failed", page.flags)
+        self.assertGreater(page.signals["ocr_calls_failed"], 0)
+        self.assertIn("ocr_call_failed", doc.flags)
+        self.assertTrue(any(u.reason == "ocr_call_failed" for u in doc.unread))
+        self.assertEqual(heocr.validate(doc.to_dict()), [])
+
+    def test_no_failure_no_flag(self) -> None:
+        pdf = make_pdf([PdfPage(lines=lines_block(HEBREW), invisible=True, images=FULL_PAGE)])
+        doc = heocr.extract(pdf, tesseract=FAKE, ocr_model="heb")
+        self.assertNotIn("ocr_call_failed", doc.flags)
+        self.assertNotIn("ocr_call_failed", doc.pages[0].flags)
+
+class TesseractThreadsTest(unittest.TestCase):
+    def test_every_call_runs_on_one_thread(self) -> None:
+        # A page read twice must read the same, however busy the machine: no thread pool splits the arithmetic.
+        from unittest import mock
+
+        from heocr.ocr import tesseract
+
+        with mock.patch.dict(os.environ, {"OMP_THREAD_LIMIT": "8", "VECLIB_MAXIMUM_THREADS": "8"}), mock.patch.object(
+            tesseract.subprocess, "run"
+        ) as run:
+            tesseract._run(["tesseract", "--version"], 5.0)
+        env = run.call_args.kwargs["env"]
+        self.assertEqual((env["OMP_THREAD_LIMIT"], env["VECLIB_MAXIMUM_THREADS"], env["OPENBLAS_NUM_THREADS"]), ("1", "1", "1"))
+        self.assertEqual(env.get("PATH"), os.environ.get("PATH"))
 
 if __name__ == "__main__":
     unittest.main()
