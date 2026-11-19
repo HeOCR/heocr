@@ -425,6 +425,7 @@ class LayerCheck:
     confidence: float | None  # our line OCR's mean word confidence
     layer_misspelt: float | None  # the layer's share of misspelt words (``misspelt_share``)
     ocr_misspelt: float | None  # the same, in our reading of the sampled lines
+    pooled: bool = False  # short lines were pooled, as no line had LAYER_CHECK_MIN_LETTERS letters
 
     @property
     def disagrees(self) -> bool:
@@ -437,6 +438,12 @@ class LayerCheck:
         wrong: on a hard scan a good foreign layer can beat our OCR."""
         if not self.disagrees or self.confidence is None or self.confidence < REGION_MIN_CONFIDENCE:
             return False
+        if (LAYER_POOLED_REPLACE and self.pooled and self.layer_misspelt is None and self.ocr_misspelt is None
+                and self.agreement < LAYER_STRONG_DISAGREEMENT and self.confidence >= LAYER_POOLED_MIN_CONFIDENCE):
+            # A page of short cells (codes, numbers, one-word cells) gives neither side words enough to
+            # spell-check. There, a very confident reading that shares under a third of the layer's letters
+            # replaces it (the open synthetic set G: wrong layers 0.125, right ones 1.0, at confidence 91.5).
+            return True
         strong = (self.agreement < LAYER_STRONG_DISAGREEMENT and self.confidence >= LAYER_STRONG_MIN_CONFIDENCE
                   and self.ocr_misspelt is not None)
         floor = LAYER_MISSPELT_MIN_STRONG if strong else LAYER_MISSPELT_MIN
@@ -452,6 +459,8 @@ class LayerCheck:
             out["ocr_layer_misspelt_share"] = round(self.layer_misspelt, 3)
         if self.ocr_misspelt is not None:
             out["ocr_check_misspelt_share"] = round(self.ocr_misspelt, 3)
+        if self.pooled:
+            out["ocr_layer_check_pooled"] = 1
         return out
 
 
@@ -461,32 +470,40 @@ def _check_ocr_layer(doc: Document, page, built: PageLines) -> LayerCheck | None
     Up to ``LAYER_CHECK_LINES`` lines with at least ``LAYER_CHECK_MIN_LETTERS`` letters, spread over the
     page, are OCR'd one by one (``--psm 7``) and compared with the layer, letters only. The result
     also holds our reading's confidence and both sides' misspelt-word shares, from which
-    ``LayerCheck.layer_is_wrong`` decides. None when there is no OCR engine, or no line to check.
+    ``LayerCheck.layer_is_wrong`` decides. When no line has that many letters, short lines are pooled
+    (``_pooled_lines``). None when there is no OCR engine, or nothing to check.
     """
     import difflib
 
     engine = engine_for(doc)
     if engine is None:
         return None
-    lines = [line for line in built.lines if sum(ch.isalpha() for ch in line.text) >= LAYER_CHECK_MIN_LETTERS]
-    if not lines:
+    letters = lambda text: sum(ch.isalpha() for ch in text)
+    groups = [[line] for line in built.lines if letters(line.text) >= LAYER_CHECK_MIN_LETTERS]
+    pooled = False
+    if not groups and LAYER_CHECK_POOLED:
+        groups, pooled = _pooled_lines(built.lines, letters), True
+    if not groups:
         return None
-    step = max(1, len(lines) // LAYER_CHECK_LINES)
-    sample = lines[::step][:LAYER_CHECK_LINES]
+    step = max(1, len(groups) // LAYER_CHECK_LINES)
+    sample = groups[::step][:LAYER_CHECK_LINES]
     image, scale = _render(page, frame_of(page))
     ratios, confidences, readings = [], [], []
-    for line in sample:
-        box = line.bbox
-        crop = image.crop((max(0, int((box[0] - 2) * scale)), max(0, int((box[1] - 2) * scale)), int((box[2] + 2) * scale), int((box[3] + 2) * scale)))
-        try:
-            result = engine.recognize(crop, dpi=round(scale * 72), psm=7)
-        except OcrUnavailable:
-            return None
-        text = " ".join(line_.text for line_ in result.lines)
+    for group in sample:
+        texts = []
+        for line in group:
+            box = line.bbox
+            crop = image.crop((max(0, int((box[0] - 2) * scale)), max(0, int((box[1] - 2) * scale)), int((box[2] + 2) * scale), int((box[3] + 2) * scale)))
+            try:
+                result = engine.recognize(crop, dpi=round(scale * 72), psm=7)
+            except OcrUnavailable:
+                return None
+            texts.append(" ".join(line_.text for line_ in result.lines))
+            confidences.extend(c for line_ in result.lines for c in line_.confidences)
+        text = " ".join(texts)
         readings.append(text)
-        confidences.extend(c for line_ in result.lines for c in line_.confidences)
         read = "".join(ch for ch in text if ch.isalpha())
-        layer = "".join(ch for ch in line.text if ch.isalpha())
+        layer = "".join(ch for line in group for ch in line.text if ch.isalpha())
         ratios.append(difflib.SequenceMatcher(None, layer, read, autojunk=False).ratio())
     ratios.sort()
     return LayerCheck(
@@ -494,7 +511,32 @@ def _check_ocr_layer(doc: Document, page, built: PageLines) -> LayerCheck | None
         confidence=sum(confidences) / len(confidences) if confidences else None,
         layer_misspelt=misspelt_share(" ".join(line.text for line in built.lines)),
         ocr_misspelt=misspelt_share(" ".join(readings)),
+        pooled=pooled,
     )
+
+
+# A page whose layer has no line of LAYER_CHECK_MIN_LETTERS letters (a table of one-word cells) was not
+# checked at all, so a wrong layer there was kept by default (the open synthetic set G). Its short lines are
+# pooled instead: consecutive lines of at least LAYER_POOL_MIN_LETTERS letters, in reading order, until a
+# group reaches LAYER_CHECK_MIN_LETTERS. Each line is still read on its own crop.
+LAYER_CHECK_POOLED = True
+LAYER_POOL_MIN_LETTERS = 2
+# Off: evaluation's held-out check (a fresh seed base) found no page for it to act on, so its gain is unshown.
+# Kept, switchable, for a held-out set with all-table pages to test it.
+LAYER_POOLED_REPLACE = False  # a pooled page with no spelling evidence on either side may be replaced (LayerCheck.layer_is_wrong)
+LAYER_POOLED_MIN_CONFIDENCE = 85.0
+
+
+def _pooled_lines(lines, letters) -> list[list]:
+    groups, group = [], []
+    for line in lines:
+        if letters(line.text) < LAYER_POOL_MIN_LETTERS:
+            continue
+        group.append(line)
+        if sum(letters(item.text) for item in group) >= LAYER_CHECK_MIN_LETTERS:
+            groups.append(group)
+            group = []
+    return groups
 
 
 def read_t1(doc: Document, page_index: int, built: PageLines) -> int:
