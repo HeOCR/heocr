@@ -113,7 +113,11 @@ class ConverterTest(unittest.TestCase):
         conversions = [c for c in calls if "--convert-to" in c]
         self.assertEqual([c[c.index("--convert-to") + 1] for c in conversions], ["docx:MS Word 2007 XML"] * 2)
         self.assertTrue(all("--headless" in c for c in conversions))
-        self.assertFalse(any("txt" in a for c in calls for a in c))
+        # Never a text export: no --convert-to value is a txt filter, and no argument names a .txt output.
+        # (Not a substring test over every argument: a random temp profile path may hold "txt".)
+        targets = [c[c.index("--convert-to") + 1] for c in calls if "--convert-to" in c]
+        self.assertFalse(any(t.lower().startswith("txt") for t in targets))
+        self.assertFalse(any(a.lower().startswith("txt:") or a.lower().endswith(".txt") for c in calls for a in c))
         self.assertEqual(sum("--version" in c for c in calls), 1)  # the version is found once
 
     def test_a_hanging_converter_is_stopped_with_its_children(self) -> None:
