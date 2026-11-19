@@ -4,6 +4,18 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 [HeOCR/heocr](https://github.com/HeOCR/heocr). The milestones (D1–D5) are planned in
 [`planning/milestones/`](planning/milestones/).
 
+## Unreleased → 0.3.0 (pre-release 0.3.0a1)
+
+### Added
+
+- **Word output:** `doc.to_docx()`, `heocr.write_docx(doc, path)`, and `-f docx` on the command line (or `-o name.docx`).
+  - Paragraphs are right to left, with Hebrew runs marked right to left, in Arial at 12 pt.
+  - Headings use Word's Heading 1–6 styles. List items keep their labels as read. Tables are Word tables, right to left when the table is, with their merged cells. Each page of a PDF starts on a new page.
+  - Notes, comments, headers and footers follow the body in their own sections, as in `doc.text`. Their titles are Hebrew when most of the body is Hebrew ("הערות שוליים", "כותרות עליונות"), else English.
+  - Known limitation: footnote and endnote references are not marked in the body, as in `doc.text`; the notes are listed, with their numbers, in their section.
+  - The file is a plain OOXML package written with the standard library: no new dependency. heocr's own DOCX reader reads it back to the same body text.
+  - Writing a Word file to a terminal is refused: give `-o` or redirect the output.
+
 ## Unreleased → 0.2.0 (release candidate 0.2.0rc1, RC2)
 
 0.2.0rc1 is a release candidate: RC2's registered gate measures it. Nothing in it is measured on a held-out set yet.

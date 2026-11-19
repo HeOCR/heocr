@@ -10,8 +10,8 @@ from heocr import __version__
 from heocr.api import extract
 from heocr.contract import MAX_PAGES
 
-_FORMATS = ("text", "markdown", "json")
-_BY_SUFFIX = {".md": "markdown", ".markdown": "markdown", ".json": "json", ".txt": "text"}
+_FORMATS = ("text", "markdown", "json", "docx")
+_BY_SUFFIX = {".md": "markdown", ".markdown": "markdown", ".json": "json", ".txt": "text", ".docx": "docx"}
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -25,7 +25,7 @@ def _parser() -> argparse.ArgumentParser:
         "-f",
         "--format",
         choices=_FORMATS,
-        help="output format (default: from the output suffix, else text)",
+        help="output format: text, markdown, json, or docx (a Word file) (default: from the output suffix, else text)",
     )
     parser.add_argument(
         "--no-repairs",
@@ -81,6 +81,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.file is None:
         parser.error("a file is required (or --download-model NAME)")
     fmt = args.format or (_BY_SUFFIX.get(args.output.suffix.lower(), "text") if args.output else "text")
+    if fmt == "docx" and not args.output and sys.stdout.isatty():
+        parser.error("a Word file is not shown on a terminal: give -o FILE.docx, or redirect the output")
     try:
         doc = extract(
             args.file,
@@ -101,13 +103,20 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError) as exc:
         print(f"heocr: {exc}", file=sys.stderr)
         return 1
-    if fmt == "json":
+    if fmt == "docx":
+        out = doc.to_docx()
+    elif fmt == "json":
         out = doc.to_json() + "\n"
     elif fmt == "markdown":
         out = doc.markdown
     else:
         out = doc.text
-    if args.output:
+    if isinstance(out, bytes):
+        if args.output:
+            args.output.write_bytes(out)
+        else:
+            sys.stdout.buffer.write(out)
+    elif args.output:
         args.output.write_text(out, encoding="utf-8")
     else:
         if hasattr(sys.stdout, "reconfigure"):
