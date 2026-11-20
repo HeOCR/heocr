@@ -4,7 +4,32 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 [HeOCR/heocr](https://github.com/HeOCR/heocr). The milestones (D1–D5) are planned in
 [`planning/milestones/`](planning/milestones/).
 
-## Unreleased → 0.3.0 (pre-release 0.3.0a1)
+## Unreleased → 0.3.0
+
+### Changed
+
+- **The bundled models' DOIs point at their current Zenodo versions:** `heocr_modern_v1` at [10.5281/zenodo.24395097](https://doi.org/10.5281/zenodo.24395097) (v4) and `heocr_oldprint_v1` at [10.5281/zenodo.24395013](https://doi.org/10.5281/zenodo.24395013) (v3). The earlier versions' records are withdrawn. The weights are byte-identical (same sha256), so outputs do not change. `heocr_modern_v1`'s bundled NOTICE is the v4 deposit's.
+
+### Fixed
+
+- **An unruled table on a page read by OCR comes out in rows, not column by column.**
+  - Tesseract reads a page block by block. On a table without rulings it can read each column as a block of its own, so every cell of one column came out, then every cell of the next.
+  - heocr now finds such a table from the boxes of Tesseract's words (`heocr.pdf.ocrrows`): runs of at least 3 rows of short pieces a column gap apart, whose rows Tesseract read as lines of their own, with columns that line up in every row. Its cells are given back in rows, as a table block (`unruled_table`) placed among the page's blocks by its top edge.
+  - A table Tesseract already read row by row keeps its order, and so does prose in columns. A run whose columns do not line up is left as Tesseract read it.
+  - A number Tesseract split over two blocks, and the number model read again whole, could come out twice; in such a table the repeat is dropped, and the block records it (`ocr.duplicate_lines_dropped`).
+  - Its effect is not measured on a held-out set yet.
+
+### Record
+
+- On OCR pages: the block flag `unruled_table`, the page flag `unruled_tables` and the key `ocr.duplicate_lines_dropped` (additive, within v1).
+
+## 0.3.0a2 (2026-11-20, a pre-release of 0.3.0)
+
+Documentation only beyond 0.3.0a1: the same code, with results measured on generated documents removed from the README, the changelog and the release notes, as in 0.2.1, and the guide to consuming heocr's output (`docs/agent-guide.md`). Install it with `pip install --pre heocr` (or `heocr==0.3.0a2`).
+
+## 0.3.0a1 (2026-11-20, a pre-release of 0.3.0)
+
+A pre-release from `main`, to try what comes after 0.2.0: Word output, the command-line warning for a missing OCR model, and a fix for correct OCR layers over pages of amounts, dates and codes. Install it with `pip install --pre heocr` (or `heocr==0.3.0a1`); plain `pip install heocr` stays on 0.2.0. Its changes are not measured on a held-out set yet.
 
 ### Added
 
@@ -15,15 +40,10 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
   - Known limitation: footnote and endnote references are not marked in the body, as in `doc.text`; the notes are listed, with their numbers, in their section.
   - The file is a plain OOXML package written with the standard library: no new dependency. heocr's own DOCX reader reads it back to the same body text.
   - Writing a Word file to a terminal is refused: give `-o` or redirect the output.
+- **A missing OCR model is reported on the command line.** An install from the repository has no bundled models, so the default model falls back to stock Tesseract, flagged `bundled_model_unavailable`. The command line now prints a warning on stderr whenever that happens, even with `-q`, and the README says how to fetch the models before installing from git.
 
 ### Fixed
 
-- **An unruled table on a page read by OCR comes out in rows, not column by column.**
-  - Tesseract reads a page block by block. On a table without rulings it can read each column as a block of its own, so every cell of one column came out, then every cell of the next.
-  - heocr now finds such a table from the boxes of Tesseract's words (`heocr.pdf.ocrrows`): runs of at least 3 rows of short pieces a column gap apart, whose rows Tesseract read as lines of their own, with columns that line up in every row. Its cells are given back in rows, as a table block (`unruled_table`) placed among the page's blocks by its top edge.
-  - A table Tesseract already read row by row keeps its order, and so does prose in columns. A run whose columns do not line up is left as Tesseract read it.
-  - A number Tesseract split over two blocks, and the number model read again whole, could come out twice; in such a table the repeat is dropped, and the block records it (`ocr.duplicate_lines_dropped`).
-  - Its effect is not measured on a held-out set yet.
 - **A correct OCR layer over a page of amounts, dates and codes is no longer dropped as foreign.**
   - A page under an OCR layer with little Hebrew was taken for another language's OCR (`foreign_ocr_layer`) and read again, its layer ignored. A table of numbers and codes has no Hebrew either, and its layer may well be right, so correct layers were dropped.
   - Foreign now needs Latin text: at least 10 Latin letters in words without a digit, and at least a quarter of the layer's letters and digits. A code such as `QX-418` is not a Latin word. Real foreign layers hold far more.
@@ -31,12 +51,41 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 
 ### Record
 
-- On OCR pages: the block flag `unruled_table`, the page flag `unruled_tables` and the key `ocr.duplicate_lines_dropped` (additive, within v1).
 - New page flags `ocr_layer_numbers_and_codes` and `ocr_layer_kept_by_digits`, and page signals `latin_word_letters`, `latin_word_share`, `ocr_layer_digit_agreement`, `ocr_layer_digits` and `ocr_layer_digit_confidence` (all additive, within v1).
 
-## Unreleased → 0.2.0 (release candidate 0.2.0rc1, RC2)
+## 0.2.1 (2026-11-20)
 
-0.2.0rc1 is a release candidate: RC2's registered gate measures it. Nothing in it is measured on a held-out set yet.
+Documentation only: the code is 0.2.0's, with the version changed. Results measured on generated documents are removed from the README, the changelog and the release notes; heocr reports results on real material only (PS-v1, NQ1 and handwriting). 0.2.1 supersedes 0.2.0 and the 0.1 releases.
+
+## 0.2.0 (2026-11-20)
+
+0.2.0 is the code of `0.2.0rc1` with its version and documentation updated. The default OCR model is HeOCR's own `heocr_modern_v1`.
+
+### Note: no niqqud from the default model
+
+The default model, `heocr_modern_v1`, does not output niqqud: on HeOCR's held-out pointed-print test (NQ1) it wrote no vowel marks, so pointed text comes out unpointed. Stock Tesseract's `heb` model recovers some of them: 24.6% of the vowel marks with tessdata_best and 32.6% with tessdata_fast, read by plain Tesseract. To read pointed text with stock Tesseract, use `--ocr-model heb` (or `ocr_model="heb"`); it reads with the `heb` model installed with your Tesseract, which is tessdata_fast in Homebrew and most Linux packages. Pointed-text support is planned.
+
+### Held-out results (real pages only)
+
+All figures come from real held-out sets: photographs of real printed or handwritten pages that no HeOCR model was trained, tuned or chosen on, scored once under rules fixed before the run. They were measured with heocr 0.2.0. 95% intervals are in brackets.
+
+**Printed pages photographed by phone (PS-v1).** 12 pages of modern printed Hebrew, typeset by us, printed and photographed with three phones (154 photos).
+
+- heocr's own model adds nothing here: +0.08 points of character error against stock Tesseract's model inside heocr [−0.74, +1.28].
+- Against plain Tesseract (tessdata_best), heocr is slightly worse on flat photos from all phones: +3.6 points [+1.5, +6.3]. On the headline photos (flat, main phone) the difference is +1.0 [−0.3, +2.6], not significant.
+- heocr finds more of the numbers: 76.8% against 69.9% on the headline photos.
+
+Not a sample of real-world documents: one printer, three phones, our typesetting.
+
+**Pointed print (niqqud) photographed by phone (NQ1).** 25 pages of modern pointed Hebrew in open fonts, 101 photos.
+
+- heocr's default model writes no niqqud: pointed text comes out unpointed.
+- Stock Tesseract (tessdata_best) recovers 24.6% of the vowel marks.
+- On the letters alone, heocr matches stock Tesseract's model inside heocr: +0.6 points [−0.1, +1.3].
+
+Modern pointed print in open fonts, not old pointed books.
+
+**Handwriting (not supported yet).** On 225 held-out handwritten lines by 10 writers, from ivrit.ai's [Hebrew handwriting OCR benchmark](https://huggingface.co/datasets/ivrit-ai/hebrew-handwriting-ocr-benchmark) (test split), every reader gets most characters wrong: heocr 83.1% character error [79.3, 88.0], stock Tesseract 75.4% [71.0, 80.4]. No HeOCR model is trained on handwriting.
 
 ### Added
 
@@ -48,7 +97,7 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
   - Otherwise a probe samples up to 8 lines from up to 3 OCR pages, read again by each other candidate, and switches only when one scores clearly better. The deciding page is then read again by it.
   - Every OCR block records `ocr.model_route` (mode, domain, reason, and the probe's scores).
 - **Bundled models:** the models in `MODELS` gain a `domain` and a `bundled` flag, and a model shipped inside the package (`heocr/models_data/`) resolves without a download, after the download cache.
-- **HeOCR's own models ship inside the wheel:** `heocr_modern_v1` (modern and office print, [10.5281/zenodo.24372349](https://doi.org/10.5281/zenodo.24372349)) and `heocr_oldprint_v1` (old and rabbinic print, [10.5281/zenodo.24372352](https://doi.org/10.5281/zenodo.24372352)), both Apache-2.0, with their notices. Their accuracy is not measured on a held-out set yet: RC2's registered gate measures the default.
+- **HeOCR's own models ship inside the wheel:** `heocr_modern_v1` (modern and office print, [10.5281/zenodo.24395097](https://doi.org/10.5281/zenodo.24395097)) and `heocr_oldprint_v1` (old and rabbinic print, [10.5281/zenodo.24395013](https://doi.org/10.5281/zenodo.24395013)), both Apache-2.0, with their notices. The default's held-out results are above; `heocr_oldprint_v1` is not measured on a held-out set yet.
   - Without the bundled files (an install from the repository), stock `heb` reads instead, and the document is flagged `bundled_model_unavailable` (with `auto`, `routed_model_unavailable`). `python scripts/fetch_models.py` fetches them.
 
 ### Fixed
@@ -62,8 +111,6 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
   - The check of a foreign OCR layer reads a few of its lines again, but only lines of at least 8 letters. A table of one-word cells (codes, numbers, dates) had none, so its layer was never checked and was kept by default, wrong or right.
   - Such a page's short lines are now pooled until a group reaches 8 letters (`LAYER_CHECK_POOLED`), so the check runs and a disagreeing layer is flagged.
   - Replacing such a layer is possible but off by default (`LAYER_POOLED_REPLACE`): on a pooled page where neither side has words enough to spell-check, a reading at least 85% confident that shares under 35% of the layer's letters would replace it. Its evidence is one tuned page, and evaluation's held-out check found no page for it to act on, so the page is flagged (`ocr_layer_disagrees_kept`) instead.
-  - On every other document checked (the open synthetic sets, open real scans and the development split), nothing changes.
-- **A missing OCR model is reported on the command line.** An install from the repository has no bundled models, so the default model falls back to stock Tesseract, flagged `bundled_model_unavailable`. The command line now prints a warning on stderr whenever that happens, even with `-q`, and the README says how to fetch the models before installing from git.
 - **A Tesseract call that fails or times out is never silent.** A second reading of numbers, a layer check, the page-number pass or a table cell caught the failure, carried on without its reading, and left no trace, so a slow or paused machine could change the output unseen. Every failed call is now counted: its page is flagged `ocr_call_failed` (with `signals.ocr_calls_failed`), and the document is flagged and gets an `unread` entry, `ocr_call_failed`.
 
 ### Record
@@ -90,7 +137,7 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
   - A foreign OCR layer is replaced only when our confident reading disagrees with it and the layer is misspelt on its own evidence (at least 15% of its words) and well beyond our reading.
   - A table page's layer is mostly short cells, numbers and dates, which a scrambled layer misspells less, so such a layer could stay under that floor and be kept, though the two readings shared few of their letters.
   - When they share under 35%, and our reading is clearly credible (confidence at least 80, with enough words of its own to be spell-checked), the layer's own floor is now 10%; the margin over our reading still holds.
-  - It fixes one known case, not a class: on every other document checked, including held-out ones, nothing changes.
+  - It fixes one known case, not a class.
 
 ### Record
 
@@ -104,18 +151,18 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
   - The path guard checked the OCR readings in a block's `checks.number_readings` (`first`, `second`, `replaced`) as if they were provenance.
   - A reading of a digit run such as `/2.` matched the guard, and `to_dict()` raised ContractError, so the document had no record at all.
   - Those readings are now treated as content, like block text. Every other key is still guarded, including a reading's `model`.
-  - Found on two synthetic office-number scans in the release gate's synthetic set.
+  - Found during development.
 
 - **A scanned page with a small table no longer reads its bare paper as text.**
   - A page's ruled tables are read cell by cell, and the rest of the page is read once with the tables taken out.
   - When that rest was bare paper, Tesseract's global threshold fell inside the paper's texture, and the page gained thousands of characters of symbols and single letters.
   - When no ink is left, not even faint ink (the same tests as for a table cell), the rest is no longer read.
-  - Found on a synthetic T4 page in the release gate's synthetic set.
+  - Found during development.
 
 - **Faint text beside a scanned table is no longer skipped as bare paper.**
   - The check that the rest of a page holds no ink measured ink as a share of the whole page. A short faint line, 43 to 65 grey levels under the paper, held fewer such pixels than that share, so the rest was skipped and its text lost.
   - Ink is now looked for in 30 pt tiles: the rest counts as bare only when no tile holds 50 pixels 25 levels or more under the paper.
-  - Found by evaluation on its synthetic grain-and-table stress set.
+  - Found during development.
 
 - **A cut outline label that two readings agree on is restored.**
   - On a scan whose labels heb cut ("2.2.4." read as "4."), the number model's deeper reading of a low-confidence label is used only when a neighbouring label vouches for the sequence. When the neighbours are cut too, nothing vouches.
@@ -129,8 +176,7 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 
 ## 0.1.0 (D5, release readiness)
 
-0.1.0 is exactly `0.1.0rc1`, the release candidate the registered D-bench release gate judged. Its verdicts are in
-`docs/release-notes-0.1.0.md`.
+0.1.0 is `0.1.0rc1` with only its version changed. Its notes are in `docs/release-notes-0.1.0.md`.
 
 ### Record
 
@@ -151,7 +197,7 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 - The JSON Schema and the frozen-contract rules [71]; a reference for the record, and CONTRIBUTING [72].
 - `image_region_text_in_layer` and `image_region_blank` are no longer unread entries. They are no loss, and are now counted in coverage [65].
 
-### Gaps from the first D-bench report (synthetic and dev only)
+### Fixed during development
 
 - **Fonts and layers:**
   - a font that carries Hebrew as its cp1255 byte is decoded (`cp1255_shifted_font`) [56];

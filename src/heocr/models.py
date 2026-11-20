@@ -7,9 +7,9 @@ Each model is a Tesseract ``.traineddata`` that HeOCR released openly (Apache-2.
   the user supplies by path, or one downloaded on purpose with ``heocr --download-model NAME``
   (``download()``). The download is checked against the pinned sha256 and size before it is
   kept.
-- **The default is stock.** The OCR route keeps stock Tesseract ``heb`` by default. A HeOCR
-  model becomes the default for a document set only when evaluation shows it beating stock
-  on that set (decisions 0018 and 0020).
+- **Bundled models.** ``heocr_modern_v1`` (the default OCR model since 0.2.0) and
+  ``heocr_oldprint_v1`` ship inside the package and resolve without a download.
+  ``ocr_model="heb"`` (or ``"stock"``) reads with stock Tesseract ``heb``.
 """
 
 from __future__ import annotations
@@ -52,7 +52,7 @@ MODELS: dict[str, ReleasedModel] = {
             sha256="6275943bf68f3d44ecc32f8d4c4195c890c96602111542ebe1f0ae0d8a6a5201",
             size=3_704_077,
             url="https://huggingface.co/HeOCR/heocr-modern-v1-tesseract-heb/resolve/main/heocr_modern_v1.traineddata",
-            doi="10.5281/zenodo.24372349",
+            doi="10.5281/zenodo.24395097",
             licence="Apache-2.0",
             domain="modern",
             bundled=True,
@@ -63,7 +63,7 @@ MODELS: dict[str, ReleasedModel] = {
             sha256="f8090760b5b02d09cf4ddb435e7a5e34089f6f17cde9cfb6c67fd06c6f17ec02",
             size=3_628_595,
             url="https://huggingface.co/HeOCR/heocr-oldprint-v1-tesseract-heb/resolve/main/heocr_oldprint_v1.traineddata",
-            doi="10.5281/zenodo.24372352",
+            doi="10.5281/zenodo.24395013",
             licence="Apache-2.0",
             domain="old",
             bundled=True,
