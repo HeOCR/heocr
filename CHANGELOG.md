@@ -4,9 +4,20 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 [HeOCR/heocr](https://github.com/HeOCR/heocr). The milestones (D1–D5) are planned in
 [`planning/milestones/`](planning/milestones/).
 
-## Unreleased → 0.2.0 (release candidate 0.2.0rc1, RC2)
+## 0.2.0 (2026-11-20)
 
-0.2.0rc1 is a release candidate: RC2's registered gate measures it. Nothing in it is measured on a held-out set yet.
+0.2.0 is the code of `0.2.0rc1`, the release candidate RC2's registered gate measured, with its version and documentation updated. The default OCR model is HeOCR's own `heocr_modern_v1`.
+
+### Note: no niqqud from the default model
+
+The default model, `heocr_modern_v1`, does not output niqqud. On HeOCR's held-out pointed-print test (NQ1) it wrote no vowel marks, so pointed text comes out unpointed. Stock Tesseract's `heb` keeps only about a quarter of them (24% on NQ1). For pointed text, read with stock Tesseract: `--ocr-model heb`, or `ocr_model="heb"` in Python. Pointed-text support is planned.
+
+### Held-out results (all on 0.2.0rc1; read them together)
+
+- **RC2, generated documents:** 9 of 10 cells supported, T4 and T5 newly so. PDF T6 is not supported: the held-out real documents veto it, because amounts came out reversed in 0.454% of cases, above stock Tesseract's interval (at most 0.272%).
+  - What the model adds against the same pipeline with stock `heb`: 1.5 points fewer character errors on scans (T5), 2.0 on pages under someone else's OCR layer (T4), and 1.1 on scanned tables, with fewer numbers missed. Text layers and office files are unchanged.
+- **PS-v1, real phone photos:** no gain from the model. On flat photos, heocr makes 3.6 points more character errors than plain Tesseract [1.5, 6.3], which comes from heocr's photo processing, not the model. It finds more numbers than stock Tesseract (63.7% against 59.2%).
+- **NQ1, pointed print:** no niqqud from the default model (above).
 
 ### Added
 
@@ -18,7 +29,7 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
   - Otherwise a probe samples up to 8 lines from up to 3 OCR pages, read again by each other candidate, and switches only when one scores clearly better. The deciding page is then read again by it.
   - Every OCR block records `ocr.model_route` (mode, domain, reason, and the probe's scores).
 - **Bundled models:** the models in `MODELS` gain a `domain` and a `bundled` flag, and a model shipped inside the package (`heocr/models_data/`) resolves without a download, after the download cache.
-- **HeOCR's own models ship inside the wheel:** `heocr_modern_v1` (modern and office print, [10.5281/zenodo.24372349](https://doi.org/10.5281/zenodo.24372349)) and `heocr_oldprint_v1` (old and rabbinic print, [10.5281/zenodo.24372352](https://doi.org/10.5281/zenodo.24372352)), both Apache-2.0, with their notices. Their accuracy is not measured on a held-out set yet: RC2's registered gate measures the default.
+- **HeOCR's own models ship inside the wheel:** `heocr_modern_v1` (modern and office print, [10.5281/zenodo.24372349](https://doi.org/10.5281/zenodo.24372349)) and `heocr_oldprint_v1` (old and rabbinic print, [10.5281/zenodo.24372352](https://doi.org/10.5281/zenodo.24372352)), both Apache-2.0, with their notices. The default's held-out results are above; `heocr_oldprint_v1` is not measured on a held-out set yet.
   - Without the bundled files (an install from the repository), stock `heb` reads instead, and the document is flagged `bundled_model_unavailable` (with `auto`, `routed_model_unavailable`). `python scripts/fetch_models.py` fetches them.
 
 ### Fixed

@@ -9,7 +9,7 @@
 
 Every decision is recorded in the output. Text that could not be read is reported in `unread`, never dropped silently.
 
-> Status: **0.2.0rc1 is a release candidate**, in RC2's registered release gate. Its changes since 0.1.2 are in the [changelog](CHANGELOG.md); none of them is measured on a held-out set yet. Install it with `pip install --pre heocr` (or `heocr==0.2.0rc1`); plain `pip install heocr` installs 0.1.2, the gated 0.1.0 plus the fixes made since. The 0.1.0 gate's verdicts, per format and page class, are [below](#what-the-release-gate-supports).
+> Status: **0.2.0**. The default OCR model is HeOCR's own `heocr_modern_v1`, and the code is the `0.2.0rc1` that RC2's registered gate measured. The [held-out results](#held-out-results-for-020) are below, all three together. **Note: the default model writes no niqqud**, so pointed text comes out unpointed; see [Pointed text](#pointed-text-niqqud) for the stock-Tesseract option. Changes since 0.1.2 are in the [changelog](CHANGELOG.md).
 
 ## Quickstart
 
@@ -68,9 +68,11 @@ PDF page classes:
 | T5 | An image with no text layer (a scan) | OCR |
 | T6 | A text layer with significant images | Text layer, plus region OCR |
 
-## What the release gate supports
+## Held-out results for 0.2.0
 
-heocr's claims come from a release gate registered before the candidate existed. Per cell, heocr is compared with stock Tesseract, Docling, MarkItDown, pymupdf4llm and a production tender-extraction pipeline, on a fresh synthetic set with exact gold. A held-out split of real documents can veto a cell. Verdicts for the release candidate `0.1.0rc1` (aggregates only):
+0.2.0 is the code of `0.2.0rc1`, the release candidate that RC2's registered gate measured. The three held-out tests below were all run on that candidate. Read them together: each covers what the others don't.
+
+**1. RC2, on generated documents** (a fresh synthetic set with exact gold, with a held-out split of real documents that can veto a cell). Per cell, heocr is compared with stock Tesseract, Docling, MarkItDown, pymupdf4llm and a production tender-extraction pipeline. **9 of 10 cells are supported:**
 
 | Cell | Verdict | Why |
 |---|---|---|
@@ -79,13 +81,40 @@ heocr's claims come from a release gate registered before the candidate existed.
 | PDF T1 (good text layers) | Supported | |
 | PDF T2 (text layers in visual order) | Supported | |
 | PDF T3 (broken font mappings) | Supported | |
+| PDF T4 (under someone else's OCR layer) | Supported | |
+| PDF T5 (scans) | Supported | |
 | PDF spread (two pages side by side) | Supported | |
 | Scanned tables | Supported | |
-| PDF T4 (under someone else's OCR layer) | Not supported | Character errors above stock Tesseract's margin. Most of the excess came from one page whose bare paper was read as text: addressed in 0.1.1; not yet re-gated (RC2 decides). |
-| PDF T5 (scans) | Not supported | Character errors just above stock Tesseract's margin, from two documents that produced no record; that crash is gone in 0.1.1. Numbers missed more often than pymupdf4llm, which reads scans with Tesseract's English model: addressed in part in 0.1.1. The cell itself is not yet re-gated (RC2 decides). |
-| PDF T6 (text layers with image regions) | Not supported | Vetoed by the held-out real documents: amounts in mixed right-to-left and left-to-right text came out reversed more often than stock Tesseract's. |
+| PDF T6 (text layers with image regions) | Not supported | Vetoed by the held-out real documents: amounts came out reversed in 0.454% of cases, above stock Tesseract's interval (at most 0.272%). |
 
-"Not supported" means no claim is made for that cell. heocr still reads those pages, and its record still flags what it could not read. 0.1.1's fixes are not yet gated: a fresh registered gate (RC2) decides the next claims.
+What the model adds, measured on the same run: heocr against the same pipeline reading with stock Tesseract's `heb`. The intervals are two-sided 95%:
+- **Scans (T5):** 1.5 points fewer character errors [1.2, 1.7], and 10.3 points fewer numbers missed.
+- **Pages under someone else's OCR layer (T4):** 2.0 points fewer character errors [1.7, 2.3].
+- **Scanned tables:** 1.1 points fewer character errors [0.9, 1.2].
+- **Text layers and office files:** no change. They don't go through OCR.
+
+**2. PS-v1, on real phone photos** (12 printed pages, photographed with three phones, flat and under harder conditions):
+- **No gain from the model.** On flat photos, heocr and the same pipeline with stock `heb` are within noise of each other.
+- **Slightly worse than plain Tesseract on flat photos.** heocr makes 3.6 points more character errors than stock `tesseract` [1.5, 6.3]. The cause is in heocr's own processing of photos, not the model, and is being worked on.
+- **More numbers found:** heocr finds more of the numbers on the page than stock Tesseract does (number recall 63.7% against 59.2% on flat photos).
+
+**3. NQ1, pointed print** (photos of pointed Hebrew print): the default model writes **no niqqud**; see [Pointed text](#pointed-text-niqqud) below.
+
+"Not supported" means no claim is made for that cell. heocr still reads those pages, and its record still flags what it could not read.
+
+## Pointed text (niqqud)
+
+The default model, `heocr_modern_v1`, does not output niqqud. On HeOCR's held-out pointed-print test (NQ1) it wrote no vowel marks at all, so pointed text comes out unpointed. Stock Tesseract's `heb` model keeps only about a quarter of the marks (24% on NQ1). To read pointed text with stock Tesseract:
+
+```sh
+heocr poem.jpg --ocr-model heb
+```
+
+```python
+doc = heocr.extract("poem.jpg", ocr_model="heb")
+```
+
+Pointed-text support is planned.
 
 ## What the record tells you
 
@@ -145,7 +174,7 @@ The core runs without them. Without them, the parts that need them are reported 
 
 - **Tesseract** (Apache-2.0), for OCR, with the `heb` model (and `eng` for the second reading of numbers). heocr finds it on the `PATH`, in `$HEOCR_TESSERACT`, or through `tesseract=` / `--tesseract`. Other options:
   - `ocr_lang` / `--ocr-lang` for the languages (default `heb`);
-  - `ocr_model` / `--ocr-model` for the OCR model. The default is HeOCR's own modern-print model, `heocr_modern_v1`, which ships inside the package. `oldprint` reads with the old-print model, `heocr_oldprint_v1`, and `auto` picks one of the two per document by a short probe, recorded in each OCR block's `ocr.model_route`. Their accuracy is not measured on a held-out set yet. `--ocr-model heb` (or `stock`) reads with stock Tesseract, as heocr 0.1 did. Another released model's name or a `.traineddata` path reads with that model; models downloaded on purpose are kept in `$HEOCR_MODELS`.
+  - `ocr_model` / `--ocr-model` for the OCR model. The default is HeOCR's own modern-print model, `heocr_modern_v1`, which ships inside the package. `oldprint` reads with the old-print model, `heocr_oldprint_v1`, and `auto` picks one of the two per document by a short probe, recorded in each OCR block's `ocr.model_route`. The default's held-out results are [above](#held-out-results-for-020); `oldprint` and `auto` are not measured on a held-out set yet. Neither of HeOCR's models reads niqqud ([Pointed text](#pointed-text-niqqud)). `--ocr-model heb` (or `stock`) reads with stock Tesseract, as heocr 0.1 did. Another released model's name or a `.traineddata` path reads with that model; models downloaded on purpose are kept in `$HEOCR_MODELS`.
 - **LibreOffice** (MPL-2.0), for DOC, RTF, ODT, ODS, XLS, ODP and PPT. heocr finds it on the `PATH`, in `$HEOCR_SOFFICE`, or through `soffice=` / `--soffice`; on macOS also in `/Applications`. It runs with a throwaway profile and a time limit. `convert=False` / `--no-convert` turns conversion off.
 
 Neither is bundled. heocr records the version and executable hash of each one it uses in the record's `producer.components`.
