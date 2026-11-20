@@ -10,7 +10,7 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 
 ### Note: no niqqud from the default model
 
-The default model, `heocr_modern_v1`, does not output niqqud: on HeOCR's held-out pointed-print test (NQ1) it wrote no vowel marks, so pointed text comes out unpointed. Stock Tesseract's `heb` model (tessdata_best) recovers 24.6% of the vowel marks there. For pointed text, read with stock Tesseract: `--ocr-model heb`, or `ocr_model="heb"` in Python. Pointed-text support is planned.
+The default model, `heocr_modern_v1`, does not output niqqud: on HeOCR's held-out pointed-print test (NQ1) it wrote no vowel marks, so pointed text comes out unpointed. Stock Tesseract's `heb` model recovers some of them: 24.6% of the vowel marks with tessdata_best and 32.6% with tessdata_fast, read by plain Tesseract. To read pointed text with stock Tesseract, use `--ocr-model heb` (or `ocr_model="heb"`); it reads with the `heb` model installed with your Tesseract, which is tessdata_fast in Homebrew and most Linux packages. Pointed-text support is planned.
 
 ### Held-out results (read the three together)
 

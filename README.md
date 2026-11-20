@@ -67,7 +67,7 @@ PDF page classes:
 | T3 | A broken font mapping | Repairs; OCR for the codes left |
 | T4 | Someone else's OCR layer | Ignored; OCR |
 | T5 | An image with no text layer (a scan) | OCR |
-| T6 | A text layer with significant images | Text layer, plus region OCR |
+| T6 | A text layer plus text drawn as images | Text layer, plus region OCR |
 
 ## Held-out results for 0.2.0
 
@@ -118,7 +118,7 @@ Verdicts per document type (the release gate, aggregates only):
 
 ## Pointed text (niqqud)
 
-The default model, `heocr_modern_v1`, does not output niqqud: on HeOCR's held-out pointed-print test (NQ1) it wrote no vowel marks, so pointed text comes out unpointed. Stock Tesseract's `heb` model (tessdata_best) recovers 24.6% of the vowel marks there. To read pointed text with stock Tesseract:
+The default model, `heocr_modern_v1`, does not output niqqud: on HeOCR's held-out pointed-print test (NQ1) it wrote no vowel marks, so pointed text comes out unpointed. Stock Tesseract's `heb` model recovers some of them: 24.6% of the vowel marks with tessdata_best and 32.6% with tessdata_fast, read by plain Tesseract. To read pointed text with stock Tesseract, use `--ocr-model heb` (or `ocr_model="heb"`); it reads with the `heb` model installed with your Tesseract, which is tessdata_fast in Homebrew and most Linux packages. For example:
 
 ```sh
 heocr poem.jpg --ocr-model heb
