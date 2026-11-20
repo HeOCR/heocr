@@ -16,6 +16,7 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 - **A number beside a Latin parenthetical keeps its place in RTL text-layer lines.** In a line like "משנת 2018 (Assigning responsibilities), ..." the year and the parenthetical were read as one left-to-right run, so the year came out after the Latin text, with a bracket on each side ("Assigning responsibilities) 2018)"). Where the document's brackets were mirrored, both brackets then opened the same way. The brackets now take the paragraph's direction when the number stands outside them, as the page shows it, and the pair is read "(" then ")" whatever characters the layer gives it (LibreOffice writes both as ")"). A number inside the brackets ("(Annual Report 2020)") stays in the Latin run.
 - The document's bracket mirroring (`rtl_bracket_order`) never changes a block twice.
 - Reported by an outside tester on an invented LibreOffice PDF, on 0.1.2 and 0.2.0rc1. Its effect is not measured on a held-out set yet.
+- **Tesseract runs with a one-thread limit.** The configured limit is recorded as `tesseract:threads` in `producer.components`.
 
 ## 0.3.0a2 (2026-11-20, a pre-release of 0.3.0)
 
