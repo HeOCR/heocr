@@ -6,8 +6,8 @@ PDF page: ruled tables cell by cell (D3e), ink accounting, the number model for 
 - **Pages:** every frame of a TIFF is a page, in file order. An animated GIF is read as its
   first frame only, and says so (``image_frames_skipped``): its frames are animation, not pages.
 - **Orientation:** EXIF orientation is applied before reading, as a viewer shows the image.
-- **Resolution:** the file's own DPI when it gives one; otherwise 300 is assumed and the page is
-  flagged ``dpi_assumed`` (Tesseract's results depend on it). Boxes are in points at that DPI.
+- **Resolution:** use the file's DPI if it is above 72 and at most 2400. Otherwise assume 300 and
+  flag the page ``dpi_assumed``. The record keeps the declared value and the DPI used for boxes.
 - **Size:** a frame over ``MAX_RENDER_PIXELS`` is scaled down to it before OCR and flagged
   ``image_downscaled``; a hostile size cannot allocate unbounded memory, and Pillow's own
   decompression-bomb limit stays on.
@@ -21,11 +21,12 @@ PDF page: ruled tables cell by cell (D3e), ink accounting, the number model for 
 from __future__ import annotations
 
 import io
+from math import isfinite
 
 from heocr.contract import Document, Page, Unread, page_limit, pages_left_unread, time_up
 from heocr.ocr.regions import MAX_RENDER_PIXELS, RENDER_DPI, has_ink
 
-MIN_DPI = 50  # a smaller declared resolution is a placeholder (JFIF's 1:1 aspect, 72 by default in some tools)
+MAX_PLACEHOLDER_DPI = 72  # Exif's default when physical resolution is unknown.
 MAX_DPI = 2400
 ASSUMED_DPI = RENDER_DPI
 
@@ -41,18 +42,23 @@ def _grey(frame):
     return frame.convert("L")
 
 
-def _dpi(frame) -> tuple[float, bool]:
-    dpi = frame.info.get("dpi")
-    if dpi:
-        try:
-            value = float(dpi[0] if isinstance(dpi, (tuple, list)) else dpi)
-        except (TypeError, ValueError):
-            value = 0.0
-        if abs(value - round(value)) < 0.1:
-            value = float(round(value))  # PNG stores pixels per metre: 150 dpi comes back as 149.99
-        if MIN_DPI <= value <= MAX_DPI:
-            return value, False
-    return float(ASSUMED_DPI), True
+def _dpi(frame) -> tuple[float, bool, float | None]:
+    """Return the DPI to use, whether it was assumed, and the declared horizontal DPI."""
+    raw = frame.info.get("dpi")
+    if isinstance(raw, (tuple, list)):
+        raw = raw[0] if raw else None
+    try:
+        declared = float(raw)
+    except (TypeError, ValueError, OverflowError):
+        return float(ASSUMED_DPI), True, None
+    if not isfinite(declared):
+        return float(ASSUMED_DPI), True, None
+    nearest = round(declared)
+    # PNG stores pixels per metre, so 150 dpi can come back as 149.99.
+    dpi = float(nearest) if abs(declared - nearest) < 0.1 else declared
+    if MAX_PLACEHOLDER_DPI < dpi <= MAX_DPI:
+        return dpi, False, declared
+    return float(ASSUMED_DPI), True, declared
 
 
 def read_image(body: bytes, doc: Document) -> None:
@@ -87,7 +93,7 @@ def read_image(body: bytes, doc: Document) -> None:
         except (OSError, ValueError, EOFError) as exc:
             doc.unread.append(Unread(scope="page", reason="image_unreadable", page=index, detail=f"frame {index}: {type(exc).__name__}"))
             continue
-        dpi, assumed = _dpi(image)
+        dpi, assumed, declared = _dpi(image)
         flags = ["dpi_assumed"] if assumed else []
         scale = dpi / 72  # pixels per point
         width, height = frame.size[0] / scale, frame.size[1] / scale
@@ -97,6 +103,8 @@ def read_image(body: bytes, doc: Document) -> None:
             scale *= factor
             flags.append("image_downscaled")
         signals = {"image_format": (image.format or "").lower(), "frame": index, "dpi": round(dpi, 1), "pixels": list(frame.size)}
+        if declared is not None:
+            signals["dpi_declared"] = declared
         if not has_ink(frame):
             doc.pages.append(Page(index, round(width, 2), round(height, 2), "empty", "none", signals, {"chars_total": 0, "chars_read": 0, "status": "nothing_to_read"}, flags))
             continue

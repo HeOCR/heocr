@@ -59,6 +59,34 @@ class ImageInputTest(unittest.TestCase):
         self.assertEqual(doc.format, "jpeg")
         self.assertIn("dpi_assumed", doc.pages[0].flags)
         self.assertEqual(doc.pages[0].signals["dpi"], 300.0)
+        self.assertNotIn("dpi_declared", doc.pages[0].signals)
+
+    def test_declared_jpeg_dpi_is_recorded_and_placeholder_uses_the_assumed_dpi(self) -> None:
+        from PIL import Image
+        from PIL.TiffImagePlugin import IFDRational
+
+        image = page_image().convert("RGB")
+        for source, declared, used in (("Exif", 72, 300), ("JFIF", 72, 300), ("Exif", 73, 73)):
+            with self.subTest(source=source, declared=declared):
+                if source == "Exif":
+                    exif = Image.Exif()
+                    exif[0x011A] = exif[0x011B] = IFDRational(declared)
+                    exif[0x0128] = 2  # pixels per inch
+                    body = encoded(image, "JPEG", exif=exif.tobytes())
+                else:
+                    body = encoded(image, "JPEG", dpi=(declared, declared))
+
+                log = Path(self.tmp.name) / f"{source}-{declared}.jsonl"
+                with mock.patch.dict(os.environ, {"FAKE_LOG": str(log)}):
+                    doc = heocr.extract(body, tesseract=FAKE, check_numbers=False)
+                (page,) = doc.pages
+                self.assertEqual(page.signals["dpi_declared"], declared)
+                self.assertEqual(page.signals["dpi"], used)
+                self.assertEqual(page.signals["render_dpi"], used)
+                self.assertEqual("dpi_assumed" in page.flags, used != declared)
+                self.assertEqual(page.width, round(image.width * 72 / used, 2))
+                (call,) = [args for args in map(json.loads, log.read_text().splitlines()) if "--dpi" in args]
+                self.assertEqual(call[call.index("--dpi") + 1], str(used))
 
     def test_every_tiff_frame_is_a_page_and_a_blank_one_is_empty(self) -> None:
         frames = [page_image(), page_image(ink=False), page_image()]

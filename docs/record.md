@@ -29,6 +29,11 @@ Each page has:
 - `coverage`: what was read (`chars_total`, `chars_read`, `chars_ocr`, `status`, image region counts, number checks);
 - `flags`.
 
+On standalone image pages, `signals.dpi_declared` preserves the horizontal DPI read from the
+file when available. `signals.dpi` gives the DPI used to size the page in points. Missing or
+unusable DPI, including the Exif placeholder of 72 DPI, falls back to 300 and sets `dpi_assumed`.
+When OCR is available, `signals.render_dpi` gives the raster DPI after any downscaling.
+
 ## Blocks
 
 Each block has an `id` (`b0`, `b1`, …), a `kind`, a `role`, a `source`, a `tool`, `repairs` and `flags`, and depending on what it is:

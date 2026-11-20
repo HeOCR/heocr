@@ -8,6 +8,9 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 
 ### Changed
 
+- **Image OCR uses 300 DPI for placeholder densities.** A standalone image with a declared
+  DPI of 72 or lower now takes the same path as an image with no DPI. The page is flagged
+  `dpi_assumed` and its record keeps the declared value in `signals.dpi_declared`.
 - **The bundled models' DOIs point at their current Zenodo versions:** `heocr_modern_v1` at [10.5281/zenodo.24395097](https://doi.org/10.5281/zenodo.24395097) (v4) and `heocr_oldprint_v1` at [10.5281/zenodo.24395013](https://doi.org/10.5281/zenodo.24395013) (v3). The earlier versions' records are withdrawn. The weights are byte-identical (same sha256), so outputs do not change. `heocr_modern_v1`'s bundled NOTICE is the v4 deposit's.
 
 ## 0.3.0a2 (2026-11-20, a pre-release of 0.3.0)
