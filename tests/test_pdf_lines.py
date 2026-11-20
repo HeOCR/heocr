@@ -214,5 +214,58 @@ class CellGapTest(unittest.TestCase):
         row = _cells(("בתכ", 320.0), ("4", 300.0), ("3,", 285.0), ("Ps", 265.0))
         self.assertEqual([l.text for l in build_lines(row, default_rtl=True).lines], ["כתב Ps 3, 4"])
 
+
+class NumberBesideLatinPairTest(unittest.TestCase):
+    """A year set beside a Latin parenthetical in an RTL line, outside its brackets (an invented line).
+
+    LibreOffice draws "משנת 2018 (Assigning responsibilities), ..." right to left and writes both
+    brackets of the pair as ")" in its layer. Read as one left-to-right run with the Latin text, the year
+    came out after it, with a bracket each side: "משנת Assigning responsibilities) 2018),"."""
+
+    def line(self, left: str, right: str, *, year_inside_line: bool = False):
+        if year_inside_line:  # the year after the parenthetical, logically
+            return visual(",", HUG, "2018", WORD_SPACE, left, HUG, "Assigning", WORD_SPACE, "responsibilities", HUG, right, WORD_SPACE, "תנשמ")
+        return visual(",", HUG, left, HUG, "Assigning", WORD_SPACE, "responsibilities", HUG, right, WORD_SPACE, "2018", WORD_SPACE, "תנשמ")
+
+    def test_the_year_reads_before_the_parenthetical_whatever_the_layer_calls_the_brackets(self) -> None:
+        for left, right in ((")", ")"), ("(", ")"), (")", "("), ("(", "(")):
+            with self.subTest(layer=left + right):
+                out, direction, flags = logical_text(self.line(left, right), True)
+                self.assertEqual(out, "משנת 2018 (Assigning responsibilities),")
+                self.assertEqual(direction, "rtl")
+                self.assertNotIn("bidi_ambiguous_ltr_run", flags)
+
+    def test_a_year_after_the_parenthetical(self) -> None:
+        self.assertEqual(text(self.line(")", ")", year_inside_line=True)), "משנת (Assigning responsibilities) 2018,")
+
+    def test_a_number_inside_the_brackets_stays_in_the_latin_run(self) -> None:
+        self.assertEqual(text(visual("(", HUG, "Annual", WORD_SPACE, "Report", WORD_SPACE, "2020", HUG, "(", WORD_SPACE, "חוד")), "דוח (Annual Report 2020)")
+
+    def test_the_documents_bracket_mirroring_keeps_the_pair(self) -> None:
+        line = text(self.line(")", ")"))
+        self.assertEqual(repairs.mirror_brackets(line), line)
+
+
+class BracketRepairOnceTest(unittest.TestCase):
+    """``rtl_bracket_order`` is decided once per document and changes a span once: mirroring is its own
+    inverse, so a second pass would undo the first."""
+
+    def test_a_second_pass_changes_nothing(self) -> None:
+        from heocr.contract import Block, Document, Line
+        from heocr.pdf.reader import _repair_rtl_brackets
+
+        doc = Document(sha256="0" * 64, size=1, format="pdf", format_evidence="test")
+        texts = ["הסעיף )ראו להלן( חל", "המסמך )בנוסחו המעודכן( מצורף", "ההחלטה )מיום ראשון( התקבלה", "משנת 2018 (Assigning responsibilities), חלוקת"]
+        for t in texts:
+            doc.blocks.append(Block(kind="text", text=t, source="text_layer", direction="rtl", lines=[Line(t, [0, 0, 1, 1], "rtl")], flags=["rtl_brackets_unverified"]))
+        _repair_rtl_brackets(doc)
+        once = [(b.text, list(b.repairs), sorted(b.flags)) for b in doc.blocks]
+        self.assertEqual(once[0][0], "הסעיף (ראו להלן) חל")
+        self.assertEqual(once[3][0], "משנת 2018 (Assigning responsibilities), חלוקת")
+        self.assertEqual([r["count"] for r in once[0][1]], [1, 1])
+        _repair_rtl_brackets(doc)
+        self.assertEqual([(b.text, list(b.repairs), sorted(b.flags)) for b in doc.blocks], once)
+
+
 if __name__ == "__main__":
     unittest.main()

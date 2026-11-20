@@ -10,6 +10,12 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 
 - **The bundled models' DOIs point at their current Zenodo versions:** `heocr_modern_v1` at [10.5281/zenodo.24395097](https://doi.org/10.5281/zenodo.24395097) (v4) and `heocr_oldprint_v1` at [10.5281/zenodo.24395013](https://doi.org/10.5281/zenodo.24395013) (v3). The earlier versions' records are withdrawn. The weights are byte-identical (same sha256), so outputs do not change. `heocr_modern_v1`'s bundled NOTICE is the v4 deposit's.
 
+### Fixed
+
+- **A number beside a Latin parenthetical keeps its place in RTL text-layer lines.** In a line like "משנת 2018 (Assigning responsibilities), ..." the year and the parenthetical were read as one left-to-right run, so the year came out after the Latin text, with a bracket on each side ("Assigning responsibilities) 2018)"). Where the document's brackets were mirrored, both brackets then opened the same way. The brackets now take the paragraph's direction when the number stands outside them, as the page shows it, and the pair is read "(" then ")" whatever characters the layer gives it (LibreOffice writes both as ")"). A number inside the brackets ("(Annual Report 2020)") stays in the Latin run.
+- The document's bracket mirroring (`rtl_bracket_order`) never changes a block twice.
+- Reported by an outside tester on an invented LibreOffice PDF, on 0.1.2 and 0.2.0rc1. Its effect is not measured on a held-out set yet.
+
 ## 0.3.0a2 (2026-11-20, a pre-release of 0.3.0)
 
 Documentation only beyond 0.3.0a1: the same code, with results measured on generated documents removed from the README, the changelog and the release notes, as in 0.2.1, and the guide to consuming heocr's output (`docs/agent-guide.md`). Install it with `pip install --pre heocr` (or `heocr==0.3.0a2`).
