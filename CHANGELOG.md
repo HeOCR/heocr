@@ -6,7 +6,6 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 
 ## Unreleased → 0.3.0 (pre-release 0.3.0a1)
 
-<<<<<<< HEAD
 ### Added
 
 - **Word output:** `doc.to_docx()`, `heocr.write_docx(doc, path)`, and `-f docx` on the command line (or `-o name.docx`).
@@ -16,7 +15,7 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
   - Known limitation: footnote and endnote references are not marked in the body, as in `doc.text`; the notes are listed, with their numbers, in their section.
   - The file is a plain OOXML package written with the standard library: no new dependency. heocr's own DOCX reader reads it back to the same body text.
   - Writing a Word file to a terminal is refused: give `-o` or redirect the output.
-=======
+
 ### Fixed
 
 - **An unruled table on a page read by OCR comes out in rows, not column by column.**
@@ -29,7 +28,6 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 ### Record
 
 - On OCR pages: the block flag `unruled_table`, the page flag `unruled_tables` and the key `ocr.duplicate_lines_dropped` (additive, within v1).
->>>>>>> 49b4385 (fix(pdf): an unruled table read by OCR column by column comes back in rows)
 
 ### Fixed
 
