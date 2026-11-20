@@ -10,6 +10,9 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 
 - **Public releases are paused.** Install the development version from GitHub. HeOCR will publish a package or model release only after it beats existing readers on at least one document type. The GitHub install has no bundled weights and falls back to stock Tesseract `heb`, flagged `bundled_model_unavailable`. Tag-triggered package publishing has been removed.
 - **Model provenance records the final deposits** for the previously distributed bundled models. The weights and their SHA-256 hashes did not change. `heocr_modern_v1`'s notice is from the v4 deposit.
+- **Image OCR uses 300 DPI for placeholder densities.** A standalone image with a declared
+  DPI of 72 or lower now takes the same path as an image with no DPI. The page is flagged
+  `dpi_assumed` and its record keeps the declared value in `signals.dpi_declared`.
 
 ### Fixed
 
