@@ -6,7 +6,7 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 
 ## 0.2.1 (2026-11-20)
 
-Documentation only: the code is 0.2.0's, with the version changed. Results measured on generated documents are removed from the README, the changelog and the release notes; heocr reports results on real material only (PS-v1, NQ1 and handwriting, below under 0.2.0). 0.2.1 supersedes 0.2.0 and the 0.1 releases.
+Documentation only: the code is 0.2.0's, with the version changed. Results measured on generated documents are removed from the README, the changelog and the release notes; heocr reports results on real material only (PS-v1, NQ1 and handwriting). 0.2.1 supersedes 0.2.0 and the 0.1 releases.
 
 ## 0.2.0 (2026-11-20)
 
@@ -16,9 +16,9 @@ Documentation only: the code is 0.2.0's, with the version changed. Results measu
 
 The default model, `heocr_modern_v1`, does not output niqqud: on HeOCR's held-out pointed-print test (NQ1) it wrote no vowel marks, so pointed text comes out unpointed. Stock Tesseract's `heb` model recovers some of them: 24.6% of the vowel marks with tessdata_best and 32.6% with tessdata_fast, read by plain Tesseract. To read pointed text with stock Tesseract, use `--ocr-model heb` (or `ocr_model="heb"`); it reads with the `heb` model installed with your Tesseract, which is tessdata_fast in Homebrew and most Linux packages. Pointed-text support is planned.
 
-### Held-out results (real material only)
+### Held-out results (real pages only)
 
-All figures come from held-out sets: material no HeOCR model was trained, tuned or chosen on, scored once under rules fixed before the run. 95% intervals are in brackets.
+All figures come from real held-out sets: photographs of real printed or handwritten pages that no HeOCR model was trained, tuned or chosen on, scored once under rules fixed before the run. They were measured with heocr 0.2.0. 95% intervals are in brackets.
 
 **Printed pages photographed by phone (PS-v1).** 12 pages of modern printed Hebrew, typeset by us, printed and photographed with three phones (154 photos).
 
@@ -34,9 +34,9 @@ Not a sample of real-world documents: one printer, three phones, our typesetting
 - Stock Tesseract (tessdata_best) recovers 24.6% of the vowel marks.
 - On the letters alone, heocr matches stock Tesseract's model inside heocr: +0.6 points [−0.1, +1.3].
 
-If you need niqqud, use `ocr_model` with stock `heb` for now. Modern pointed print in open fonts, not old pointed books.
+Modern pointed print in open fonts, not old pointed books.
 
-**Handwriting is not supported yet.** On ivrit.ai's held-out handwriting lines (225 lines, 10 writers), every reader gets most characters wrong: heocr 83.1% character error [79.3, 88.0], stock Tesseract 75.4% [71.0, 80.4]. No HeOCR model is trained on handwriting. The lines are from ivrit.ai's [Hebrew handwriting OCR benchmark](https://huggingface.co/datasets/ivrit-ai/hebrew-handwriting-ocr-benchmark).
+**Handwriting (not supported yet).** On 225 held-out handwritten lines by 10 writers, from ivrit.ai's [Hebrew handwriting OCR benchmark](https://huggingface.co/datasets/ivrit-ai/hebrew-handwriting-ocr-benchmark) (test split), every reader gets most characters wrong: heocr 83.1% character error [79.3, 88.0], stock Tesseract 75.4% [71.0, 80.4]. No HeOCR model is trained on handwriting.
 
 ### Added
 
