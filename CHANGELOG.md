@@ -4,7 +4,9 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 [HeOCR/heocr](https://github.com/HeOCR/heocr). The milestones (D1–D5) are planned in
 [`planning/milestones/`](planning/milestones/).
 
-## Unreleased → 0.3.0 (pre-release 0.3.0a1)
+## 0.3.0a1 (2026-11-20, a pre-release of 0.3.0)
+
+A pre-release from `main`, to try what comes after 0.2.0: Word output, the command-line warning for a missing OCR model, and a fix for correct OCR layers over pages of amounts, dates and codes. Install it with `pip install --pre heocr` (or `heocr==0.3.0a1`); plain `pip install heocr` stays on 0.2.0. Its changes are not measured on a held-out set yet.
 
 ### Added
 
@@ -15,6 +17,7 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
   - Known limitation: footnote and endnote references are not marked in the body, as in `doc.text`; the notes are listed, with their numbers, in their section.
   - The file is a plain OOXML package written with the standard library: no new dependency. heocr's own DOCX reader reads it back to the same body text.
   - Writing a Word file to a terminal is refused: give `-o` or redirect the output.
+- **A missing OCR model is reported on the command line.** An install from the repository has no bundled models, so the default model falls back to stock Tesseract, flagged `bundled_model_unavailable`. The command line now prints a warning on stderr whenever that happens, even with `-q`, and the README says how to fetch the models before installing from git.
 
 ### Fixed
 
