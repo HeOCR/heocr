@@ -249,6 +249,24 @@ class OcrRouteTest(unittest.TestCase):
             self.assertFalse(wrong(0.40, 91.0))
             self.assertFalse(wrong(1.0, 91.0))
 
+    def test_a_layer_of_numbers_is_kept_when_its_digits_agree(self) -> None:
+        # A table of amounts, dates and codes: no words to spell-check, and letters a Hebrew model reads poorly.
+        # Its digits, read in eng, decide whether the layer is kept; otherwise it is read as foreign.
+        from heocr.pdf.reader import LayerCheck
+
+        def kept(digit_agreement, digit_confidence=90.0, digits=60):
+            return LayerCheck(0.0, 50.0, None, None, True, digit_agreement, digits, digit_confidence).digits_agree
+
+        self.assertTrue(kept(1.0))
+        self.assertTrue(kept(0.85))
+        self.assertFalse(kept(0.0))
+        self.assertFalse(kept(0.6))  # agreeing on barely more than half is not evidence the layer is right
+        self.assertFalse(kept(1.0, digit_confidence=55.0))  # our reading is not confident
+        self.assertFalse(kept(1.0, digits=20))  # too few digits to say
+        self.assertFalse(kept(None))  # no line with digits
+        # Digits never replace a layer: a layer that is checked otherwise keeps its own rule.
+        self.assertFalse(LayerCheck(0.0, 90.0, None, None, True, 0.0, 60, 90.0).layer_is_wrong)
+
     def test_short_lines_are_pooled_to_eight_letters(self) -> None:
         from types import SimpleNamespace
 
@@ -608,6 +626,39 @@ class TsvTest(unittest.TestCase):
         self.assertEqual(result.words, 4)
         self.assertEqual(result.lines[2].paragraph, ("2", "1"))
 
+
+class NumbersAndCodesLayerTest(unittest.TestCase):
+    """A page under an OCR layer of amounts, dates and codes, decided by its digits (values invented)."""
+
+    setUp = OcrRouteTest.setUp
+
+    def page(self) -> bytes:
+        rows = [TextLine("QX-418 62 14.03.2022", 50, 780 - 18 * i, rtl=False) for i in range(6)]
+        return make_pdf([PdfPage(lines=rows, invisible=True, images=FULL_PAGE)])
+
+    def test_a_layer_whose_digits_agree_is_kept(self) -> None:
+        with mock.patch.dict(os.environ, {"FAKE_LINE": "QX-418 62 14.03.2022"}):
+            doc = heocr.extract(self.page(), tesseract=FAKE, ocr_model="heb")
+        page = doc.pages[0]
+        self.assertEqual(page.page_class, "T1")
+        self.assertIn("ocr_layer_kept_by_digits", page.flags)
+        self.assertEqual(page.signals["ocr_layer_digit_agreement"], 1.0)
+
+    def test_a_layer_of_bare_numbers_is_checked_by_its_digits_alone(self) -> None:
+        # No letters at all, so the letter check has nothing to read: the digits are compared on their own.
+        rows = [TextLine("418 62 14.03.2022", 50, 780 - 18 * i, rtl=False) for i in range(6)]
+        pdf = make_pdf([PdfPage(lines=rows, invisible=True, images=FULL_PAGE)])
+        with mock.patch.dict(os.environ, {"FAKE_LINE": "418 62 14.03.2022"}):
+            doc = heocr.extract(pdf, tesseract=FAKE, ocr_model="heb")
+        self.assertIn("ocr_layer_kept_by_digits", doc.pages[0].flags)
+
+    def test_a_layer_whose_digits_disagree_is_read_as_foreign(self) -> None:
+        with mock.patch.dict(os.environ, {"FAKE_LINE": "AB-905 17 02.11.2021"}):
+            doc = heocr.extract(self.page(), tesseract=FAKE, ocr_model="heb")
+        page = doc.pages[0]
+        self.assertEqual(page.page_class, "T4")
+        self.assertIn("foreign_ocr_layer", page.flags)
+        self.assertNotIn("text_layer_is_ocr", page.flags)
 
 if __name__ == "__main__":
     unittest.main()

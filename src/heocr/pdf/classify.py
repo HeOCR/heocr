@@ -32,6 +32,12 @@ BROKEN_SHARE = 0.005
 # An OCR layer (invisible text over a page image) is foreign OCR; below this Hebrew share it is garbage.
 INVISIBLE_SHARE = 0.5
 OCR_HEBREW_SHARE = 0.3
+# A layer with little Hebrew is foreign (another language's OCR read the page) only when it holds Latin text:
+# Latin letters in words without a digit, at least this many and this share of the layer's letters and digits.
+# A table of amounts, dates and codes ("QX-418") has a few Latin letters and no Hebrew, and its layer may well
+# be right; its digits decide instead (``ocr_layer_numbers_and_codes``).
+FOREIGN_MIN_LATIN_WORD_LETTERS = 10
+FOREIGN_MIN_LATIN_WORD_SHARE = 0.25
 # A two-page spread is twice a standard portrait page at the same height (the volunteer's rule).
 # Aspect alone cannot tell: A4 landscape has the same aspect as two A4 pages side by side.
 # A5 is left out on purpose: two A5 pages are exactly A4 landscape, which is common (slides).
@@ -162,6 +168,12 @@ def text_signals(chars: str, lines: list[BuiltLine], invisible: int, total: int,
     latin = sum(1 for ch in chars if "LATIN" in unicodedata.name(ch, "") and unicodedata.category(ch).startswith("L"))
     built = "\n".join(line.text for line in lines)
     rate, words = _final_start_rate(built)
+    alnum = sum(1 for ch in built if ch.isalnum())
+    latin_word_letters = sum(
+        sum(1 for ch in word if "LATIN" in unicodedata.name(ch, "") and unicodedata.category(ch).startswith("L"))
+        for word in built.split()
+        if not any(ch.isdigit() for ch in word)
+    )
     latin1_adjacent = 0
     for word in re.findall(r"\S+", built):
         if _HEBREW_LETTER.search(word):
@@ -178,6 +190,8 @@ def text_signals(chars: str, lines: list[BuiltLine], invisible: int, total: int,
         "chars": total,
         "hebrew_letters": hebrew,
         "latin_letters": latin,
+        "latin_word_letters": latin_word_letters,
+        "latin_word_share": round(latin_word_letters / alnum, 4) if alnum else 0.0,
         "hebrew_share": round(hebrew / letters, 4) if letters else 0.0,
         "hebrew_words": words,
         "final_start_rate": round(rate, 4),
@@ -215,8 +229,15 @@ def classify(signals: dict) -> tuple[str, list[str]]:
     reversed_words = signals["hebrew_words"] >= MIN_HEBREW_WORDS and signals["final_start_rate"] >= FINAL_START_RATE
     ocr_layer = signals["invisible_share"] >= INVISIBLE_SHARE and coverage >= PAGE_IMAGE
     if ocr_layer:
-        if signals["hebrew_share"] < OCR_HEBREW_SHARE or reversed_words:
+        low_hebrew = signals["hebrew_share"] < OCR_HEBREW_SHARE
+        latin_text = (signals.get("latin_word_letters", signals["latin_letters"]) >= FOREIGN_MIN_LATIN_WORD_LETTERS
+                      and signals.get("latin_word_share", 1.0) >= FOREIGN_MIN_LATIN_WORD_SHARE)
+        if (low_hebrew and latin_text) or reversed_words:
             return "T4", flags + ["foreign_ocr_layer"]
+        if low_hebrew:
+            # Neither Hebrew nor Latin text: the reader keeps the layer only when its digits agree with a
+            # second reading (``LayerCheck.digits_agree``), and otherwise reads the page as foreign.
+            return "T1", flags + ["text_layer_is_ocr", "ocr_layer_numbers_and_codes"]
         flags.append("text_layer_is_ocr")
     broken = signals["replacement_chars"] + signals["private_use_next_to_hebrew"] + signals["latin1_next_to_hebrew"]
     if broken >= BROKEN_MIN and broken >= BROKEN_SHARE * chars:
