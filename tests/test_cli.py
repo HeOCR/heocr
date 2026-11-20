@@ -62,7 +62,9 @@ class CliTest(unittest.TestCase):
                 with mock.patch.object(heocr.cli, "extract", return_value=doc), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
                     self.assertEqual(main([str(self.input), *quiet]), 0)
                 self.assertIn("heocr_modern_v1 is not installed", err.getvalue())
-                self.assertIn("scripts/fetch_models.py", err.getvalue())
+                self.assertIn("falls back to stock Tesseract", err.getvalue())
+                self.assertNotIn("scripts/fetch_models.py", err.getvalue())
+                self.assertNotIn("PyPI", err.getvalue())
 
     def test_no_model_warning_when_the_model_is_there(self) -> None:
         err = io.StringIO()

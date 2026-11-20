@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "heocr"
 version = "0.3.0a2"
-description = "The best open pipeline for getting Hebrew text out of any document"
+description = "An open pipeline for getting Hebrew text out of documents"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"

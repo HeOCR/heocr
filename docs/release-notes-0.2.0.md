@@ -2,9 +2,7 @@
 
 0.2.0 makes HeOCR's own modern-print model, `heocr_modern_v1`, the default OCR model. It ships inside the package. The code is `0.2.0rc1` (commit `9d99d5e`) with only its version and documentation changed. It is superseded by 0.2.1, which reports results on real material only.
 
-```sh
-pip install heocr==0.2.0
-```
+These are historical release notes. To try the current code, use the [GitHub install](guide.md#install).
 
 **Read this first:** the default model writes no niqqud. For pointed text, use `--ocr-model heb` (see the note below).
 

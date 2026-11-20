@@ -17,7 +17,7 @@ _BY_SUFFIX = {".md": "markdown", ".markdown": "markdown", ".json": "json", ".txt
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="heocr",
-        description="Extract the Hebrew text of a document through the best open pipeline for it.",
+        description="Extract Hebrew text from documents.",
     )
     parser.add_argument("file", type=Path, nargs="?", help="input document: PDF, DOCX, DOC, RTF, ODT, XLSX, ODS, XLS, PPTX, ODP, PPT, HTML or an image")
     parser.add_argument("-o", "--output", type=Path, help="write here instead of standard output")
@@ -51,14 +51,14 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--ocr-model",
         default="heocr_modern_v1",
-        help="the OCR model (default: heocr_modern_v1, HeOCR's modern-print model, when --ocr-lang is heb); "
-        "oldprint for the old-print model; auto to pick one of the two per document; heb or stock for stock "
-        "Tesseract; or a released HeOCR model's name (e.g. heocr_r8b) or a .traineddata path",
+        help="the OCR model (the default falls back to stock Tesseract with the GitHub install); "
+        "heb or stock to use Tesseract's installed language data explicitly; "
+        "or pass a local .traineddata file",
     )
     parser.add_argument(
         "--download-model",
         metavar="NAME",
-        help="download a released HeOCR model on purpose, check its pinned sha256, and exit",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument("-q", "--quiet", action="store_true", help="do not report unread parts on stderr (a missing OCR model is still reported)")
     parser.add_argument("--version", action="version", version=f"heocr {__version__}")
@@ -79,7 +79,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"heocr: {args.download_model} is ready ({path.name}, sha256 checked)", file=sys.stderr)
         return 0
     if args.file is None:
-        parser.error("a file is required (or --download-model NAME)")
+        parser.error("a file is required")
     fmt = args.format or (_BY_SUFFIX.get(args.output.suffix.lower(), "text") if args.output else "text")
     if fmt == "docx" and not args.output and sys.stdout.isatty():
         parser.error("a Word file is not shown on a terminal: give -o FILE.docx, or redirect the output")
@@ -139,10 +139,8 @@ def _model_warnings(doc) -> list[str]:
         return []
     model = (doc.options.get("ocr") or {}).get("model", "the default model")
     return [
-        f"heocr: warning: the OCR model {model} is not installed with this copy of heocr, so stock Tesseract read"
-        " instead, and the results differ from a release's.",
-        "heocr: warning: an install from the repository has no bundled models: run scripts/fetch_models.py before"
-        " pip install ., or install heocr from PyPI.",
+        f"heocr: warning: the OCR model {model} is not installed. "
+        "OCR falls back to stock Tesseract language data when available."
     ]
 
 

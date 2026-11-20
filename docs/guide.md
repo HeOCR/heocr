@@ -4,19 +4,15 @@ How to install heocr, read documents with it from Python or the command line, an
 
 ## Install
 
-heocr needs Python 3.11 or later. Install the latest release from PyPI:
+heocr needs Python 3.11 or later and Git. Install the development version from GitHub:
 
 ```sh
-pip install heocr
+pip install git+https://github.com/HeOCR/heocr
 ```
 
-Or, for the unreleased changes on `main`, install it from the repository:
+HeOCR has no current public package or model release. We will publish a release only after heocr beats existing readers on at least one document type.
 
-```sh
-pip install "git+https://github.com/HeOCR/heocr"
-```
-
-An install from the repository has no bundled OCR models: they ship in the released package only. From git, run `python scripts/fetch_models.py` in a clone before `pip install .`, or you get stock Tesseract. It fetches the models and checks their pinned hashes. Without them, the default model falls back to stock Tesseract `heb`: the document is flagged `bundled_model_unavailable`, and the command line prints a warning, even with `-q`.
+The GitHub install has no bundled OCR models. With Tesseract and Hebrew language data installed, the default OCR falls back to stock `heb`. The CLI warns and the record includes `bundled_model_unavailable`. The warning is printed even with `-q`. Use `--ocr-model heb` or `ocr_model="heb"` to select stock explicitly.
 
 The core needs only pypdfium2, Pillow and defusedxml. It reads text-layer PDFs, DOCX, XLSX, PPTX and HTML on its own. Two optional programs add the rest:
 - **Tesseract,** for scans, images and image regions;
@@ -105,7 +101,7 @@ The options, all keyword-only:
 | `ocr` | `True` | Run OCR where the text exists only as an image. `False` reports those pages unread. |
 | `ocr_lang`, `ocr_psm` | `"heb"`, `3` | Tesseract's languages and page segmentation mode |
 | `tesseract` | found | The Tesseract program, when it is not on the `PATH` |
-| `ocr_model` | `"heocr_modern_v1"` | HeOCR's bundled modern-print model, for every document, when `ocr_lang` is `heb`. `"oldprint"`: the bundled old-print model. `"auto"`: one of the two per document from the route table (`heocr.ocr.routes`), recorded in each OCR block's `ocr.model_route`. `"heb"`, `"stock"` or `None`: stock Tesseract. Or another released HeOCR model's name or a `.traineddata` path, used instead of `ocr_lang`. The default's held-out results are in the [README](../README.md#held-out-results); `"oldprint"` and `"auto"` are not measured on a held-out set yet. Neither model reads niqqud: for pointed text, use `"heb"` ([why](../README.md#pointed-text-niqqud)) |
+| `ocr_model` | `"heocr_modern_v1"` | The GitHub install has no bundled models and falls back to stock Tesseract with `bundled_model_unavailable`. Choose `"heb"`, `"stock"` or `None` to select stock explicitly, or pass a local `.traineddata` path. |
 | `force_ocr` | `False` | Read every PDF page by OCR, its text layer ignored (`--force-ocr`); flags each page `ocr_forced`. Needs `ocr` |
 | `check_numbers` | `"suspect"` | The second reading of numbers (below) |
 | `repairs` | `True` | `False` turns every repair rule off: the text exactly as extracted |

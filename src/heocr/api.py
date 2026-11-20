@@ -69,15 +69,15 @@ def extract(
     ``ocr`` runs the OCR route on pages and regions that need it, through stock Tesseract
     when it is installed (``heocr.ocr.tesseract``): ``ocr_lang`` is ``heb`` by default,
     ``ocr_psm`` is 3, and ``tesseract`` names the program when it is not on the PATH.
-    ``ocr_model`` is HeOCR's modern-print model, ``heocr_modern_v1``, by default, for every document; it
-    ships in the package. ``"oldprint"`` reads with the old-print model, ``heocr_oldprint_v1``, and
+    ``ocr_model`` requests HeOCR's modern-print model, ``heocr_modern_v1``, by default. The GitHub
+    install has no bundled models. If you have local model files, ``"oldprint"`` requests
+    ``heocr_oldprint_v1``, and
     ``"auto"`` picks one of the two per document from the route table (``heocr.ocr.routes``), with a probe
     of a few lines, recorded in each OCR block's ``ocr.model_route``. The default and ``auto`` apply when
     ``ocr_lang`` is ``heb``; with another ``ocr_lang``, stock Tesseract reads with it. When a bundled model's
     file is missing (an install from the repository), stock Tesseract reads instead and the document is
     flagged ``bundled_model_unavailable``. ``ocr_model="heb"`` (or ``"stock"``, or ``None``) reads with stock
-    Tesseract ``ocr_lang``, as heocr 0.1 did. Any other released model's name (downloaded on purpose first,
-    ``heocr.models.download``) or a ``.traineddata`` path runs that model instead of ``ocr_lang``.
+    Tesseract ``ocr_lang``. A local ``.traineddata`` path runs that model instead of ``ocr_lang``.
     Without Tesseract, or with ``ocr=False``, those pages are recorded as unread.
     ``force_ocr`` reads every PDF page by OCR, its text layer ignored (flag ``ocr_forced``): a workaround
     for a text layer heocr reads badly. It needs ``ocr``.

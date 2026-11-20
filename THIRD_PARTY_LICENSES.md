@@ -1,4 +1,4 @@
-# Third-party licences: an audit of what `pip install heocr` brings
+# Third-party licences of the heocr installation
 
 heocr is Apache-2.0. **Its wheel is pure Python and bundles no third-party code or binary.** It depends on three packages, which bring their own compiled libraries. Decision 0020 keeps the default install free of copyleft. This file records how that was checked, so the claim is checked rather than assumed.
 

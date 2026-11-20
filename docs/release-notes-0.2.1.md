@@ -2,9 +2,7 @@
 
 0.2.1 is 0.2.0 with its documentation corrected: results measured on generated documents are removed, and heocr reports results on real material only. The code is 0.2.0's, with the version changed. It supersedes 0.2.0 and the 0.1 releases.
 
-```sh
-pip install heocr==0.2.1
-```
+These are historical release notes. To try the current code, use the [GitHub install](guide.md#install).
 
 **Read this first:** the default model, `heocr_modern_v1`, writes no niqqud. For pointed text, use `--ocr-model heb` (see the note below).
 

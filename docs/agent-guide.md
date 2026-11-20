@@ -1,6 +1,6 @@
 # Consuming heocr output: a guide for people and agents
 
-This guide describes `heocr_document.v1` as emitted by the current repository, including additions after the 0.2.0 release. Install the stable release with `pip install heocr==0.2.0`. For measured results see [the benchmarks](https://heocr.org/en/benchmarks.html). Check `producer.version` when interpreting a record: earlier releases need not emit every flag listed here. The [record reference](record.md), [schema](../src/heocr/schemas/heocr_document.v1.schema.json), and [v1 compatibility rules](contract-v1.md) are the detailed contract.
+This guide describes `heocr_document.v1` as emitted by the current repository. Install it with `pip install git+https://github.com/HeOCR/heocr`. Check `producer.version` when interpreting a record, because older versions may emit fewer flags. The [record reference](record.md), [schema](../src/heocr/schemas/heocr_document.v1.schema.json), and [v1 compatibility rules](contract-v1.md) are the detailed contract.
 
 ## The record and its views
 
@@ -31,7 +31,7 @@ Flags are open strings, not a closed enum; preserve and surface unknown flags fo
 | `no_text` | Reader found no text; inspect the input before assuming it is blank. |
 | `page_limit_reached`, `time_limit_reached` | Processing stopped at a limit; inspect `unread` and rerun with an appropriate limit. |
 | `ocr_call_failed` | One or more OCR calls failed or timed out; inspect `unread` and retry. |
-| `bundled_model_unavailable`, `routed_model_unavailable` | Requested bundled or auto-selected model was unavailable; stock OCR used instead. Inspect provenance and install the intended model before comparing results. |
+| `bundled_model_unavailable`, `routed_model_unavailable` | The requested or auto-selected model was unavailable. OCR falls back to stock Tesseract when installed. Inspect model provenance before comparing results. |
 | `numbers_not_checked` | Number checking could not be completed; verify numbers independently. |
 | `numbers_read_with_main_model` | The separate number model was unavailable; check numbers independently. |
 | `converted_by_libreoffice` | Input was converted before reading; inspect conversion if fidelity matters. |
@@ -117,9 +117,9 @@ Flags are open strings, not a closed enum; preserve and surface unknown flags fo
 
 ## OCR models and export formats
 
-`ocr_model="heocr_modern_v1"` is the default for Hebrew OCR when `ocr_lang` is `heb` (with other languages, such as `heb+eng`, stock Tesseract reads); `oldprint` selects the old-print model, `auto` chooses per document, and `heb` or `stock` uses the installed Tesseract Hebrew model. A released model name or `.traineddata` path may also be supplied. Tesseract is an optional external program and must be installed for OCR. HeOCR's own models write no niqqud (the default model) or almost none (the old-print model); for pointed text try stock Tesseract with `ocr_model="heb"` or `--ocr-model heb`, and verify the marks against the source. The setting affects OCR, not a retained text layer.
+The GitHub install has no bundled OCR models. With Tesseract and Hebrew language data installed, the default OCR falls back to stock `heb`. The CLI warns and the record includes `bundled_model_unavailable`. Use `ocr_model="heb"` or `--ocr-model heb` to select stock explicitly. Verify any niqqud against the source. These settings affect OCR only.
 
-TXT (`doc.text`, `-f text`, `.txt`) and Markdown (`doc.markdown`, `-f markdown`, `.md`) are available in 0.2.0. DOCX export (`heocr.write_docx`, `-f docx`, `.docx`) requires the **0.3.0a1 pre-release**: `pip install --pre heocr`. It creates an editable Word view; keep JSON for the full record. On 0.2.0, `-o name.docx` silently writes plain text under that name; use 0.3.0a1 or later, and check `heocr --version`.
+TXT (`doc.text`, `-f text`, `.txt`), Markdown (`doc.markdown`, `-f markdown`, `.md`), and DOCX (`heocr.write_docx`, `-f docx`, `.docx`) work with the GitHub install. DOCX creates an editable Word view. Keep JSON for the full record.
 
 ## Copy-paste recipes
 

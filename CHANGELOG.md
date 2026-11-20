@@ -8,7 +8,8 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 
 ### Changed
 
-- **The bundled models' DOIs point at their current Zenodo versions:** `heocr_modern_v1` at [10.5281/zenodo.24395097](https://doi.org/10.5281/zenodo.24395097) (v4) and `heocr_oldprint_v1` at [10.5281/zenodo.24395013](https://doi.org/10.5281/zenodo.24395013) (v3). The earlier versions' records are withdrawn. The weights are byte-identical (same sha256), so outputs do not change. `heocr_modern_v1`'s bundled NOTICE is the v4 deposit's.
+- **Public releases are paused.** Install the development version from GitHub. HeOCR will publish a package or model release only after it beats existing readers on at least one document type. The GitHub install has no bundled weights and falls back to stock Tesseract `heb`, flagged `bundled_model_unavailable`. Tag-triggered package publishing has been removed.
+- **Model provenance records the final deposits** for the previously distributed bundled models. The weights and their SHA-256 hashes did not change. `heocr_modern_v1`'s notice is from the v4 deposit.
 
 ### Fixed
 
@@ -18,11 +19,11 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 
 ## 0.3.0a2 (2026-11-20, a pre-release of 0.3.0)
 
-Documentation only beyond 0.3.0a1: the same code, with results measured on generated documents removed from the README, the changelog and the release notes, as in 0.2.1, and the guide to consuming heocr's output (`docs/agent-guide.md`). Install it with `pip install --pre heocr` (or `heocr==0.3.0a2`).
+Documentation only beyond 0.3.0a1: the same code, with results measured on generated documents removed from the README, the changelog and the release notes, as in 0.2.1, and the guide to consuming heocr's output (`docs/agent-guide.md`).
 
 ## 0.3.0a1 (2026-11-20, a pre-release of 0.3.0)
 
-A pre-release from `main`, to try what comes after 0.2.0: Word output, the command-line warning for a missing OCR model, and a fix for correct OCR layers over pages of amounts, dates and codes. Install it with `pip install --pre heocr` (or `heocr==0.3.0a1`); plain `pip install heocr` stays on 0.2.0. Its changes are not measured on a held-out set yet.
+A pre-release from `main`, to try what comes after 0.2.0: Word output, the command-line warning for a missing OCR model, and a fix for correct OCR layers over pages of amounts, dates and codes. Its changes are not measured on a held-out set yet.
 
 ### Added
 
@@ -33,7 +34,7 @@ A pre-release from `main`, to try what comes after 0.2.0: Word output, the comma
   - Known limitation: footnote and endnote references are not marked in the body, as in `doc.text`; the notes are listed, with their numbers, in their section.
   - The file is a plain OOXML package written with the standard library: no new dependency. heocr's own DOCX reader reads it back to the same body text.
   - Writing a Word file to a terminal is refused: give `-o` or redirect the output.
-- **A missing OCR model is reported on the command line.** An install from the repository has no bundled models, so the default model falls back to stock Tesseract, flagged `bundled_model_unavailable`. The command line now prints a warning on stderr whenever that happens, even with `-q`, and the README says how to fetch the models before installing from git.
+- **A missing OCR model is reported on the command line.** An install from the repository has no bundled models, so the default model falls back to stock Tesseract, flagged `bundled_model_unavailable`. The command line now prints a warning on stderr whenever that happens, even with `-q`,.
 
 ### Fixed
 
@@ -91,7 +92,7 @@ Modern pointed print in open fonts, not old pointed books.
   - Every OCR block records `ocr.model_route` (mode, domain, reason, and the probe's scores).
 - **Bundled models:** the models in `MODELS` gain a `domain` and a `bundled` flag, and a model shipped inside the package (`heocr/models_data/`) resolves without a download, after the download cache.
 - **HeOCR's own models ship inside the wheel:** `heocr_modern_v1` (modern and office print, [10.5281/zenodo.24395097](https://doi.org/10.5281/zenodo.24395097)) and `heocr_oldprint_v1` (old and rabbinic print, [10.5281/zenodo.24395013](https://doi.org/10.5281/zenodo.24395013)), both Apache-2.0, with their notices. The default's held-out results are above; `heocr_oldprint_v1` is not measured on a held-out set yet.
-  - Without the bundled files (an install from the repository), stock `heb` reads instead, and the document is flagged `bundled_model_unavailable` (with `auto`, `routed_model_unavailable`). `python scripts/fetch_models.py` fetches them.
+  - Without the bundled files (an install from the repository), stock `heb` reads instead, and the document is flagged `bundled_model_unavailable` (with `auto`, `routed_model_unavailable`).
 
 ### Fixed
 
