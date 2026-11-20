@@ -82,7 +82,7 @@ Flags are open lists of strings: a later v1 may add more. The main ones, by what
   - `ocr_call_failed` (a page, and the document, where a Tesseract call failed or timed out; the page's `signals.ocr_calls_failed` counts them);
   - `from_image_region`, `layer_text_masked`, `repeated_image_text`.
 - **Tables:**
-  - `ruled_table`, `unruled_table`, `ocr_tables`;
+  - `ruled_table`, `unruled_table` (on a text layer, or on an OCR page, whose Tesseract columns are given back in rows; its `ocr.duplicate_lines_dropped` counts a number read twice), `ocr_tables`;
   - `table_cells_ink_unread`, `table_cell_unconfirmed`, `table_cell_garbled`, `table_cell_not_a_number`, `faint_ink_read`, `number_read_at_half_resolution`, `merged_above`, `span_capped`.
 - **Numbers:**
   - `number_read_by_number_model`, `numbers_from_second_reading`;

@@ -17,6 +17,16 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 - The document's bracket mirroring (`rtl_bracket_order`) never changes a block twice.
 - Reported by an outside tester on an invented LibreOffice PDF, on 0.1.2 and 0.2.0rc1. Its effect is not measured on a held-out set yet.
 - **Tesseract runs with a one-thread limit.** The configured limit is recorded as `tesseract:threads` in `producer.components`.
+- **Unruled tables on OCR pages are returned in row order.**
+  - Tesseract reads a page block by block. On a table without rulings it can read each column as a block of its own, so every cell of one column came out, then every cell of the next.
+  - heocr now finds such a table from the boxes of Tesseract's words (`heocr.pdf.ocrrows`): runs of at least 3 rows of short pieces a column gap apart, whose rows Tesseract read as lines of their own, with columns that line up in every row. Its cells are given back in rows, as a table block (`unruled_table`) placed among the page's blocks by its top edge.
+  - A table Tesseract already read row by row keeps its order, and so does prose in columns. A run whose columns do not line up is left as Tesseract read it.
+  - A number Tesseract split over two blocks, and the number model read again whole, could come out twice; in such a table the repeat is dropped, and the block records it (`ocr.duplicate_lines_dropped`).
+  - Its effect is not measured on a held-out set yet.
+
+### Record
+
+- On OCR pages: the block flag `unruled_table`, the page flag `unruled_tables` and the key `ocr.duplicate_lines_dropped` (additive, within v1).
 
 ## 0.3.0a2 (2026-11-20, a pre-release of 0.3.0)
 
