@@ -9,7 +9,7 @@
 
 Every decision is recorded in the output. Text that could not be read is reported in `unread`, never dropped silently.
 
-> Status: **0.2.0**. The default OCR model is HeOCR's own `heocr_modern_v1`, and the code is the `0.2.0rc1` that RC2's registered gate measured. The [held-out results](#held-out-results-for-020) are below, all three together. **Note: the default model writes no niqqud**, so pointed text comes out unpointed; see [Pointed text](#pointed-text-niqqud) for the stock-Tesseract option. Changes since 0.1.2 are in the [changelog](CHANGELOG.md). This branch, `main`, also holds changes for 0.3.0 that are not released yet (listed there too).
+> Status: **0.2.0**. The default OCR model is HeOCR's own `heocr_modern_v1`, and the code is the `0.2.0rc1` that RC2's registered gate measured. The [held-out results](#held-out-results-for-020) are below, all three together. **Note: the default model writes no niqqud**, so pointed text comes out unpointed; see [Pointed text](#pointed-text-niqqud) for the stock-Tesseract option. Changes since 0.1.2 are in the [changelog](CHANGELOG.md). A pre-release, **0.3.0a1**, adds Word output (`-f docx`, `heocr.write_docx`) and the fixes listed in the changelog: `pip install --pre heocr`. Its changes are not measured on a held-out set yet.
 
 ## Quickstart
 
