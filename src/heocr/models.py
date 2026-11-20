@@ -7,9 +7,9 @@ Each model is a Tesseract ``.traineddata`` that HeOCR released openly (Apache-2.
   the user supplies by path, or one downloaded on purpose with ``heocr --download-model NAME``
   (``download()``). The download is checked against the pinned sha256 and size before it is
   kept.
-- **The default is stock.** The OCR route keeps stock Tesseract ``heb`` by default. A HeOCR
-  model becomes the default for a document set only when evaluation shows it beating stock
-  on that set (decisions 0018 and 0020).
+- **Bundled models.** ``heocr_modern_v1`` (the default OCR model since 0.2.0) and
+  ``heocr_oldprint_v1`` ship inside the package and resolve without a download.
+  ``ocr_model="heb"`` (or ``"stock"``) reads with stock Tesseract ``heb``.
 """
 
 from __future__ import annotations

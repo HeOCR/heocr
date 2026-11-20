@@ -27,9 +27,41 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 
 - New page flags `ocr_layer_numbers_and_codes` and `ocr_layer_kept_by_digits`, and page signals `latin_word_letters`, `latin_word_share`, `ocr_layer_digit_agreement`, `ocr_layer_digits` and `ocr_layer_digit_confidence` (all additive, within v1).
 
-## Unreleased → 0.2.0 (release candidate 0.2.0rc1, RC2)
+## 0.2.0 (2026-11-20)
 
-0.2.0rc1 is a release candidate: RC2's registered gate measures it. Nothing in it is measured on a held-out set yet.
+0.2.0 is the code of `0.2.0rc1`, the release candidate RC2's registered gate measured, with its version and documentation updated. The default OCR model is HeOCR's own `heocr_modern_v1`.
+
+### Note: no niqqud from the default model
+
+The default model, `heocr_modern_v1`, does not output niqqud: on HeOCR's held-out pointed-print test (NQ1) it wrote no vowel marks, so pointed text comes out unpointed. Stock Tesseract's `heb` model recovers some of them: 24.6% of the vowel marks with tessdata_best and 32.6% with tessdata_fast, read by plain Tesseract. To read pointed text with stock Tesseract, use `--ocr-model heb` (or `ocr_model="heb"`); it reads with the `heb` model installed with your Tesseract, which is tessdata_fast in Homebrew and most Linux packages. Pointed-text support is planned.
+
+### Held-out results (read the three together)
+
+All figures come from held-out sets: material no HeOCR model was trained, tuned or chosen on, scored once under rules fixed before the run. 95% intervals are in brackets.
+
+**Generated documents (the release gate).** heocr 0.2.0rc1 was scored on a fresh set of generated Word and PDF documents, made after its code was frozen. It is supported in 9 of 10 document types. The tenth, PDFs with a text layer plus text drawn as images (T6), is held back by the real-document check: on real tender pages heocr reversed 0.454% of amounts, above stock Tesseract's interval (≤ 0.272%). Inside the same pipeline, heocr's own model (heocr_modern_v1), compared with stock Tesseract's Hebrew model:
+
+- scans with a wrong OCR text layer (T4): character error 1.26% vs 3.27%, numbers missed 5.2% vs 22.7%;
+- image-only scans (T5): character error 2.83% vs 4.30%, numbers missed 4.5% vs 14.9%;
+- scanned tables: character error 0.38% vs 1.43%.
+
+These documents come from the same generators heocr is developed against, so they favour it; the photo results below are the counterweight.
+
+**Printed pages photographed by phone (PS-v1).** 12 pages of modern printed Hebrew, typeset by us, printed and photographed with three phones (154 photos).
+
+- heocr's own model adds nothing here: +0.08 points of character error against stock Tesseract's model inside heocr [−0.74, +1.28].
+- Against plain Tesseract (tessdata_best), heocr is slightly worse on flat photos from all phones: +3.6 points [+1.5, +6.3]. On the headline photos (flat, main phone) the difference is +1.0 [−0.3, +2.6], not significant.
+- heocr finds more of the numbers: 76.8% against 69.9% on the headline photos.
+
+Not a sample of real-world documents: one printer, three phones, our typesetting.
+
+**Pointed print (niqqud) photographed by phone (NQ1).** 25 pages of modern pointed Hebrew in open fonts, 101 photos.
+
+- heocr's default model writes no niqqud: pointed text comes out unpointed.
+- Stock Tesseract (tessdata_best) recovers 24.6% of the vowel marks.
+- On the letters alone, heocr matches stock Tesseract's model inside heocr: +0.6 points [−0.1, +1.3].
+
+If you need niqqud, use `ocr_model` with stock `heb` for now. Modern pointed print in open fonts, not old pointed books.
 
 ### Added
 
@@ -41,7 +73,7 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
   - Otherwise a probe samples up to 8 lines from up to 3 OCR pages, read again by each other candidate, and switches only when one scores clearly better. The deciding page is then read again by it.
   - Every OCR block records `ocr.model_route` (mode, domain, reason, and the probe's scores).
 - **Bundled models:** the models in `MODELS` gain a `domain` and a `bundled` flag, and a model shipped inside the package (`heocr/models_data/`) resolves without a download, after the download cache.
-- **HeOCR's own models ship inside the wheel:** `heocr_modern_v1` (modern and office print, [10.5281/zenodo.24372349](https://doi.org/10.5281/zenodo.24372349)) and `heocr_oldprint_v1` (old and rabbinic print, [10.5281/zenodo.24372352](https://doi.org/10.5281/zenodo.24372352)), both Apache-2.0, with their notices. Their accuracy is not measured on a held-out set yet: RC2's registered gate measures the default.
+- **HeOCR's own models ship inside the wheel:** `heocr_modern_v1` (modern and office print, [10.5281/zenodo.24372349](https://doi.org/10.5281/zenodo.24372349)) and `heocr_oldprint_v1` (old and rabbinic print, [10.5281/zenodo.24372352](https://doi.org/10.5281/zenodo.24372352)), both Apache-2.0, with their notices. The default's held-out results are above; `heocr_oldprint_v1` is not measured on a held-out set yet.
   - Without the bundled files (an install from the repository), stock `heb` reads instead, and the document is flagged `bundled_model_unavailable` (with `auto`, `routed_model_unavailable`). `python scripts/fetch_models.py` fetches them.
 
 ### Fixed
@@ -56,7 +88,6 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
   - Such a page's short lines are now pooled until a group reaches 8 letters (`LAYER_CHECK_POOLED`), so the check runs and a disagreeing layer is flagged.
   - Replacing such a layer is possible but off by default (`LAYER_POOLED_REPLACE`): on a pooled page where neither side has words enough to spell-check, a reading at least 85% confident that shares under 35% of the layer's letters would replace it. Its evidence is one tuned page, and evaluation's held-out check found no page for it to act on, so the page is flagged (`ocr_layer_disagrees_kept`) instead.
   - On every other document checked (the open synthetic sets, open real scans and the development split), nothing changes.
-- **A missing OCR model is reported on the command line.** An install from the repository has no bundled models, so the default model falls back to stock Tesseract, flagged `bundled_model_unavailable`. The command line now prints a warning on stderr whenever that happens, even with `-q`, and the README says how to fetch the models before installing from git.
 - **A Tesseract call that fails or times out is never silent.** A second reading of numbers, a layer check, the page-number pass or a table cell caught the failure, carried on without its reading, and left no trace, so a slow or paused machine could change the output unseen. Every failed call is now counted: its page is flagged `ocr_call_failed` (with `signals.ocr_calls_failed`), and the document is flagged and gets an `unread` entry, `ocr_call_failed`.
 
 ### Record
