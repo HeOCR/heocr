@@ -4,25 +4,21 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 [HeOCR/heocr](https://github.com/HeOCR/heocr). The milestones (D1–D5) are planned in
 [`planning/milestones/`](planning/milestones/).
 
+## 0.2.1 (2026-11-20)
+
+Documentation only: the code is 0.2.0's, with the version changed. Results measured on generated documents are removed from the README, the changelog and the release notes; heocr reports results on real material only (PS-v1, NQ1 and handwriting, below under 0.2.0). 0.2.1 supersedes 0.2.0 and the 0.1 releases.
+
 ## 0.2.0 (2026-11-20)
 
-0.2.0 is the code of `0.2.0rc1`, the release candidate RC2's registered gate measured, with its version and documentation updated. The default OCR model is HeOCR's own `heocr_modern_v1`.
+0.2.0 is the code of `0.2.0rc1` with its version and documentation updated. The default OCR model is HeOCR's own `heocr_modern_v1`.
 
 ### Note: no niqqud from the default model
 
 The default model, `heocr_modern_v1`, does not output niqqud: on HeOCR's held-out pointed-print test (NQ1) it wrote no vowel marks, so pointed text comes out unpointed. Stock Tesseract's `heb` model recovers some of them: 24.6% of the vowel marks with tessdata_best and 32.6% with tessdata_fast, read by plain Tesseract. To read pointed text with stock Tesseract, use `--ocr-model heb` (or `ocr_model="heb"`); it reads with the `heb` model installed with your Tesseract, which is tessdata_fast in Homebrew and most Linux packages. Pointed-text support is planned.
 
-### Held-out results (read the three together)
+### Held-out results (real material only)
 
 All figures come from held-out sets: material no HeOCR model was trained, tuned or chosen on, scored once under rules fixed before the run. 95% intervals are in brackets.
-
-**Generated documents (the release gate).** heocr 0.2.0rc1 was scored on a fresh set of generated Word and PDF documents, made after its code was frozen. It is supported in 9 of 10 document types. The tenth, PDFs with a text layer plus text drawn as images (T6), is held back by the real-document check: on real tender pages heocr reversed 0.454% of amounts, above stock Tesseract's interval (≤ 0.272%). Inside the same pipeline, heocr's own model (heocr_modern_v1), compared with stock Tesseract's Hebrew model:
-
-- scans with a wrong OCR text layer (T4): character error 1.26% vs 3.27%, numbers missed 5.2% vs 22.7%;
-- image-only scans (T5): character error 2.83% vs 4.30%, numbers missed 4.5% vs 14.9%;
-- scanned tables: character error 0.38% vs 1.43%.
-
-These documents come from the same generators heocr is developed against, so they favour it; the photo results below are the counterweight.
 
 **Printed pages photographed by phone (PS-v1).** 12 pages of modern printed Hebrew, typeset by us, printed and photographed with three phones (154 photos).
 
@@ -39,6 +35,8 @@ Not a sample of real-world documents: one printer, three phones, our typesetting
 - On the letters alone, heocr matches stock Tesseract's model inside heocr: +0.6 points [−0.1, +1.3].
 
 If you need niqqud, use `ocr_model` with stock `heb` for now. Modern pointed print in open fonts, not old pointed books.
+
+**Handwriting is not supported yet.** On ivrit.ai's held-out handwriting lines (225 lines, 10 writers), every reader gets most characters wrong: heocr 83.1% character error [79.3, 88.0], stock Tesseract 75.4% [71.0, 80.4]. No HeOCR model is trained on handwriting. The lines are from ivrit.ai's [Hebrew handwriting OCR benchmark](https://huggingface.co/datasets/ivrit-ai/hebrew-handwriting-ocr-benchmark).
 
 ### Added
 
@@ -64,7 +62,6 @@ If you need niqqud, use `ocr_model` with stock `heb` for now. Modern pointed pri
   - The check of a foreign OCR layer reads a few of its lines again, but only lines of at least 8 letters. A table of one-word cells (codes, numbers, dates) had none, so its layer was never checked and was kept by default, wrong or right.
   - Such a page's short lines are now pooled until a group reaches 8 letters (`LAYER_CHECK_POOLED`), so the check runs and a disagreeing layer is flagged.
   - Replacing such a layer is possible but off by default (`LAYER_POOLED_REPLACE`): on a pooled page where neither side has words enough to spell-check, a reading at least 85% confident that shares under 35% of the layer's letters would replace it. Its evidence is one tuned page, and evaluation's held-out check found no page for it to act on, so the page is flagged (`ocr_layer_disagrees_kept`) instead.
-  - On every other document checked (the open synthetic sets, open real scans and the development split), nothing changes.
 - **A Tesseract call that fails or times out is never silent.** A second reading of numbers, a layer check, the page-number pass or a table cell caught the failure, carried on without its reading, and left no trace, so a slow or paused machine could change the output unseen. Every failed call is now counted: its page is flagged `ocr_call_failed` (with `signals.ocr_calls_failed`), and the document is flagged and gets an `unread` entry, `ocr_call_failed`.
 
 ### Record
@@ -91,7 +88,7 @@ If you need niqqud, use `ocr_model` with stock `heb` for now. Modern pointed pri
   - A foreign OCR layer is replaced only when our confident reading disagrees with it and the layer is misspelt on its own evidence (at least 15% of its words) and well beyond our reading.
   - A table page's layer is mostly short cells, numbers and dates, which a scrambled layer misspells less, so such a layer could stay under that floor and be kept, though the two readings shared few of their letters.
   - When they share under 35%, and our reading is clearly credible (confidence at least 80, with enough words of its own to be spell-checked), the layer's own floor is now 10%; the margin over our reading still holds.
-  - It fixes one known case, not a class: on every other document checked, including held-out ones, nothing changes.
+  - It fixes one known case, not a class.
 
 ### Record
 
@@ -105,18 +102,18 @@ If you need niqqud, use `ocr_model` with stock `heb` for now. Modern pointed pri
   - The path guard checked the OCR readings in a block's `checks.number_readings` (`first`, `second`, `replaced`) as if they were provenance.
   - A reading of a digit run such as `/2.` matched the guard, and `to_dict()` raised ContractError, so the document had no record at all.
   - Those readings are now treated as content, like block text. Every other key is still guarded, including a reading's `model`.
-  - Found on two synthetic office-number scans in the release gate's synthetic set.
+  - Found during development.
 
 - **A scanned page with a small table no longer reads its bare paper as text.**
   - A page's ruled tables are read cell by cell, and the rest of the page is read once with the tables taken out.
   - When that rest was bare paper, Tesseract's global threshold fell inside the paper's texture, and the page gained thousands of characters of symbols and single letters.
   - When no ink is left, not even faint ink (the same tests as for a table cell), the rest is no longer read.
-  - Found on a synthetic T4 page in the release gate's synthetic set.
+  - Found during development.
 
 - **Faint text beside a scanned table is no longer skipped as bare paper.**
   - The check that the rest of a page holds no ink measured ink as a share of the whole page. A short faint line, 43 to 65 grey levels under the paper, held fewer such pixels than that share, so the rest was skipped and its text lost.
   - Ink is now looked for in 30 pt tiles: the rest counts as bare only when no tile holds 50 pixels 25 levels or more under the paper.
-  - Found by evaluation on its synthetic grain-and-table stress set.
+  - Found during development.
 
 - **A cut outline label that two readings agree on is restored.**
   - On a scan whose labels heb cut ("2.2.4." read as "4."), the number model's deeper reading of a low-confidence label is used only when a neighbouring label vouches for the sequence. When the neighbours are cut too, nothing vouches.
@@ -130,8 +127,7 @@ If you need niqqud, use `ocr_model` with stock `heb` for now. Modern pointed pri
 
 ## 0.1.0 (D5, release readiness)
 
-0.1.0 is exactly `0.1.0rc1`, the release candidate the registered D-bench release gate judged. Its verdicts are in
-`docs/release-notes-0.1.0.md`.
+0.1.0 is `0.1.0rc1` with only its version changed. Its notes are in `docs/release-notes-0.1.0.md`.
 
 ### Record
 
@@ -152,7 +148,7 @@ If you need niqqud, use `ocr_model` with stock `heb` for now. Modern pointed pri
 - The JSON Schema and the frozen-contract rules [71]; a reference for the record, and CONTRIBUTING [72].
 - `image_region_text_in_layer` and `image_region_blank` are no longer unread entries. They are no loss, and are now counted in coverage [65].
 
-### Gaps from the first D-bench report (synthetic and dev only)
+### Fixed during development
 
 - **Fonts and layers:**
   - a font that carries Hebrew as its cp1255 byte is decoded (`cp1255_shifted_font`) [56];

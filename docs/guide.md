@@ -42,7 +42,7 @@ sudo apt install tesseract-ocr tesseract-ocr-heb tesseract-ocr-eng
 
 **Windows:** install Tesseract from the [UB Mannheim builds](https://github.com/UB-Mannheim/tesseract/wiki), and tick Hebrew under the additional languages. If `tesseract.exe` is not on the `PATH`, point heocr at it with the environment variable `HEOCR_TESSERACT`, or with `tesseract=` / `--tesseract`.
 
-**The `heb` model the release gate used** is the one from `tessdata_best`. System packages often ship a faster, less accurate model. To use the best one, put it in a folder of your own with `eng`, and point `TESSDATA_PREFIX` at that folder:
+**Which `heb` model:** system packages often ship `tessdata_fast`'s `heb`. To use `tessdata_best`'s instead, put it in a folder of your own with `eng`, and point `TESSDATA_PREFIX` at that folder:
 
 ```sh
 mkdir -p ~/tessdata
@@ -104,7 +104,7 @@ The options, all keyword-only:
 | `ocr` | `True` | Run OCR where the text exists only as an image. `False` reports those pages unread. |
 | `ocr_lang`, `ocr_psm` | `"heb"`, `3` | Tesseract's languages and page segmentation mode |
 | `tesseract` | found | The Tesseract program, when it is not on the `PATH` |
-| `ocr_model` | `"heocr_modern_v1"` | HeOCR's bundled modern-print model, for every document, when `ocr_lang` is `heb`. `"oldprint"`: the bundled old-print model. `"auto"`: one of the two per document from the route table (`heocr.ocr.routes`), recorded in each OCR block's `ocr.model_route`. `"heb"`, `"stock"` or `None`: stock Tesseract. Or another released HeOCR model's name or a `.traineddata` path, used instead of `ocr_lang`. The default's held-out results are in the [README](../README.md#held-out-results-for-020); `"oldprint"` and `"auto"` are not measured on a held-out set yet. Neither model reads niqqud: for pointed text, use `"heb"` ([why](../README.md#pointed-text-niqqud)) |
+| `ocr_model` | `"heocr_modern_v1"` | HeOCR's bundled modern-print model, for every document, when `ocr_lang` is `heb`. `"oldprint"`: the bundled old-print model. `"auto"`: one of the two per document from the route table (`heocr.ocr.routes`), recorded in each OCR block's `ocr.model_route`. `"heb"`, `"stock"` or `None`: stock Tesseract. Or another released HeOCR model's name or a `.traineddata` path, used instead of `ocr_lang`. The default's held-out results are in the [README](../README.md#held-out-results); `"oldprint"` and `"auto"` are not measured on a held-out set yet. Neither model reads niqqud: for pointed text, use `"heb"` ([why](../README.md#pointed-text-niqqud)) |
 | `force_ocr` | `False` | Read every PDF page by OCR, its text layer ignored (`--force-ocr`); flags each page `ocr_forced`. Needs `ocr` |
 | `check_numbers` | `"suspect"` | The second reading of numbers (below) |
 | `repairs` | `True` | `False` turns every repair rule off: the text exactly as extracted |
