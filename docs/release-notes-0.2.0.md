@@ -69,4 +69,4 @@ Pointed-text support is planned.
 
 ## Changes since 0.1.2
 
-See the [changelog](https://github.com/HeOCR/heocr/blob/main/CHANGELOG.md#020-2026-11-20).
+See the [changelog](https://github.com/HeOCR/heocr/blob/v0.2.0/CHANGELOG.md#020-2026-11-20).
