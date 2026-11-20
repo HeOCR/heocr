@@ -74,9 +74,7 @@ PDF page classes:
 
 ## Held-out results
 
-These are measured on real material only.
-
-All figures come from held-out sets: material no HeOCR model was trained, tuned or chosen on, scored once under rules fixed before the run. 95% intervals are in brackets.
+All figures come from real held-out sets: photographs of real printed or handwritten pages that no HeOCR model was trained, tuned or chosen on, scored once under rules fixed before the run. They were measured with heocr 0.2.0. 95% intervals are in brackets.
 
 **Printed pages photographed by phone (PS-v1).** 12 pages of modern printed Hebrew, typeset by us, printed and photographed with three phones (154 photos).
 
@@ -92,9 +90,9 @@ Not a sample of real-world documents: one printer, three phones, our typesetting
 - Stock Tesseract (tessdata_best) recovers 24.6% of the vowel marks.
 - On the letters alone, heocr matches stock Tesseract's model inside heocr: +0.6 points [−0.1, +1.3].
 
-If you need niqqud, use `ocr_model` with stock `heb` for now. Modern pointed print in open fonts, not old pointed books.
+Modern pointed print in open fonts, not old pointed books.
 
-**Handwriting is not supported yet.** On ivrit.ai's held-out handwriting lines (225 lines, 10 writers), every reader gets most characters wrong: heocr 83.1% character error [79.3, 88.0], stock Tesseract 75.4% [71.0, 80.4]. No HeOCR model is trained on handwriting. The lines are from ivrit.ai's [Hebrew handwriting OCR benchmark](https://huggingface.co/datasets/ivrit-ai/hebrew-handwriting-ocr-benchmark).
+**Handwriting (not supported yet).** On 225 held-out handwritten lines by 10 writers, from ivrit.ai's [Hebrew handwriting OCR benchmark](https://huggingface.co/datasets/ivrit-ai/hebrew-handwriting-ocr-benchmark) (test split), every reader gets most characters wrong: heocr 83.1% character error [79.3, 88.0], stock Tesseract 75.4% [71.0, 80.4]. No HeOCR model is trained on handwriting.
 
 ## Pointed text (niqqud)
 
