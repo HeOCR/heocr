@@ -73,6 +73,7 @@ Flags are open strings, not a closed enum; preserve and surface unknown flags fo
 | `reading_order_invalid_geometry`, `reading_order_unresolved_columns`, `reading_order_row_major_unverified`, `reading_order_column_major_unverified` | Geometry or column order is uncertain; compare the order with the page. |
 | `columns_were_page_furniture`, `columns_were_site_menu` | Apparent columns were classified as page furniture or site navigation; check roles if order matters. |
 | `ruled_tables`, `unruled_tables`, `ocr_tables` | Tables were detected using rules, layout, or OCR; inspect table blocks and cells. |
+| `image_region_tables` | A PDF page's image regions held tables, which were read as tables; inspect those table blocks and cells. |
 | `table_grid_unresolved`, `table_rejected_crosses_text` | Table geometry was unresolved or a candidate crossed text; check the page for lost structure. |
 | `site_menu`, `site_footer_menu` | Browser-print navigation was identified; inspect navigation blocks before filtering. |
 
@@ -116,9 +117,9 @@ Flags are open strings, not a closed enum; preserve and surface unknown flags fo
 
 ## OCR models and export formats
 
-`ocr_model="heocr_modern_v1"` is the default for Hebrew OCR; `oldprint` selects the old-print model, `auto` chooses per document, and `heb` or `stock` uses the installed Tesseract Hebrew model. A released model name or `.traineddata` path may also be supplied. Tesseract is an optional external program and must be installed for OCR. Neither bundled HeOCR model outputs niqqud; for pointed text try stock Tesseract with `ocr_model="heb"` or `--ocr-model heb`, and verify the marks against the source. The setting affects OCR, not a retained text layer.
+`ocr_model="heocr_modern_v1"` is the default for Hebrew OCR when `ocr_lang` is `heb` (with other languages, such as `heb+eng`, stock Tesseract reads); `oldprint` selects the old-print model, `auto` chooses per document, and `heb` or `stock` uses the installed Tesseract Hebrew model. A released model name or `.traineddata` path may also be supplied. Tesseract is an optional external program and must be installed for OCR. HeOCR's own models write no niqqud (the default model) or almost none (the old-print model); for pointed text try stock Tesseract with `ocr_model="heb"` or `--ocr-model heb`, and verify the marks against the source. The setting affects OCR, not a retained text layer.
 
-TXT (`doc.text`, `-f text`, `.txt`) and Markdown (`doc.markdown`, `-f markdown`, `.md`) are available in 0.2.0. DOCX export (`heocr.write_docx`, `-f docx`, `.docx`) requires the **0.3.0a1 pre-release**: `pip install --pre heocr`. It creates an editable Word view; keep JSON for the full record.
+TXT (`doc.text`, `-f text`, `.txt`) and Markdown (`doc.markdown`, `-f markdown`, `.md`) are available in 0.2.0. DOCX export (`heocr.write_docx`, `-f docx`, `.docx`) requires the **0.3.0a1 pre-release**: `pip install --pre heocr`. It creates an editable Word view; keep JSON for the full record. On 0.2.0, `-o name.docx` silently writes plain text under that name; use 0.3.0a1 or later, and check `heocr --version`.
 
 ## Copy-paste recipes
 
