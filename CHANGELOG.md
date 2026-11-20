@@ -24,13 +24,6 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
   - A table Tesseract already read row by row keeps its order, and so does prose in columns. A run whose columns do not line up is left as Tesseract read it.
   - A number Tesseract split over two blocks, and the number model read again whole, could come out twice; in such a table the repeat is dropped, and the block records it (`ocr.duplicate_lines_dropped`).
   - Its effect is not measured on a held-out set yet.
-
-### Record
-
-- On OCR pages: the block flag `unruled_table`, the page flag `unruled_tables` and the key `ocr.duplicate_lines_dropped` (additive, within v1).
-
-### Fixed
-
 - **A correct OCR layer over a page of amounts, dates and codes is no longer dropped as foreign.**
   - A page under an OCR layer with little Hebrew was taken for another language's OCR (`foreign_ocr_layer`) and read again, its layer ignored. A table of numbers and codes has no Hebrew either, and its layer may well be right, so correct layers were dropped.
   - Foreign now needs Latin text: at least 10 Latin letters in words without a digit, and at least a quarter of the layer's letters and digits. A code such as `QX-418` is not a Latin word. Real foreign layers hold far more.
@@ -38,6 +31,7 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 
 ### Record
 
+- On OCR pages: the block flag `unruled_table`, the page flag `unruled_tables` and the key `ocr.duplicate_lines_dropped` (additive, within v1).
 - New page flags `ocr_layer_numbers_and_codes` and `ocr_layer_kept_by_digits`, and page signals `latin_word_letters`, `latin_word_share`, `ocr_layer_digit_agreement`, `ocr_layer_digits` and `ocr_layer_digit_confidence` (all additive, within v1).
 
 ## Unreleased → 0.2.0 (release candidate 0.2.0rc1, RC2)
