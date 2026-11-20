@@ -10,41 +10,46 @@ pip install heocr==0.2.0
 
 ## Held-out results
 
-0.2.0 is the code of `0.2.0rc1`, the release candidate that RC2's registered gate measured. The three held-out tests below were all run on that candidate. Read them together: each covers what the others don't.
+All figures come from held-out sets: material no HeOCR model was trained, tuned or chosen on, scored once under rules fixed before the run. 95% intervals are in brackets.
 
-**1. RC2, on generated documents** (a fresh synthetic set with exact gold, with a held-out split of real documents that can veto a cell). Per cell, heocr is compared with stock Tesseract, Docling, MarkItDown, pymupdf4llm and a production tender-extraction pipeline. **9 of 10 cells are supported:**
+**Generated documents (the release gate).** heocr 0.2.0rc1 was scored on a fresh set of generated Word and PDF documents, made after its code was frozen. It is supported in 9 of 10 document types. The tenth, PDFs with a text layer plus text drawn as images (T6), is held back by the real-document check: on real tender pages heocr reversed 0.454% of amounts, above stock Tesseract's interval (≤ 0.272%). Inside the same pipeline, heocr's own model (heocr_modern_v1), compared with stock Tesseract's Hebrew model:
+- scans with a wrong OCR text layer (T4): character error 1.26% vs 3.27%, numbers missed 5.2% vs 22.7%;
+- image-only scans (T5): character error 2.83% vs 4.30%, numbers missed 4.5% vs 14.9%;
+- scanned tables: character error 0.38% vs 1.43%.
+These documents come from the same generators heocr is developed against, so they favour it; the photo results below are the counterweight.
 
-| Cell | Verdict | Why |
-|---|---|---|
-| DOCX | Supported | |
-| DOC | Supported | |
-| PDF T1 (good text layers) | Supported | |
-| PDF T2 (text layers in visual order) | Supported | |
-| PDF T3 (broken font mappings) | Supported | |
-| PDF T4 (under someone else's OCR layer) | Supported | |
-| PDF T5 (scans) | Supported | |
-| PDF spread (two pages side by side) | Supported | |
-| Scanned tables | Supported | |
-| PDF T6 (text layers with image regions) | Not supported | Vetoed by the held-out real documents: amounts came out reversed in 0.454% of cases, above stock Tesseract's interval (at most 0.272%). |
+**Printed pages photographed by phone (PS-v1).** 12 pages of modern printed Hebrew, typeset by us, printed and photographed with three phones (154 photos).
+- heocr's own model adds nothing here: +0.08 points of character error against stock Tesseract's model inside heocr [−0.74, +1.28].
+- Against plain Tesseract (tessdata_best), heocr is slightly worse on flat photos from all phones: +3.6 points [+1.5, +6.3]. On the headline photos (flat, main phone) the difference is +1.0 [−0.3, +2.6], not significant.
+- heocr finds more of the numbers: 76.8% against 69.9% on the headline photos.
+Not a sample of real-world documents: one printer, three phones, our typesetting.
 
-What the model adds, measured on the same run: heocr against the same pipeline reading with stock Tesseract's `heb`. The intervals are two-sided 95%:
-- **Scans (T5):** 1.5 points fewer character errors [1.2, 1.7], and 10.3 points fewer numbers missed.
-- **Pages under someone else's OCR layer (T4):** 2.0 points fewer character errors [1.7, 2.3].
-- **Scanned tables:** 1.1 points fewer character errors [0.9, 1.2].
-- **Text layers and office files:** no change. They don't go through OCR.
+**Pointed print (niqqud) photographed by phone (NQ1).** 25 pages of modern pointed Hebrew in open fonts, 101 photos.
+- heocr's default model writes no niqqud: pointed text comes out unpointed.
+- Stock Tesseract (tessdata_best) recovers 24.6% of the vowel marks.
+- On the letters alone, heocr matches stock Tesseract's model inside heocr: +0.6 points [−0.1, +1.3].
+If you need niqqud, use `ocr_model` with stock `heb` for now. Modern pointed print in open fonts, not old pointed books.
 
-**2. PS-v1, on real phone photos** (12 printed pages, photographed with three phones, flat and under harder conditions):
-- **No gain from the model.** On flat photos, heocr and the same pipeline with stock `heb` are within noise of each other.
-- **Slightly worse than plain Tesseract on flat photos.** heocr makes 3.6 points more character errors than stock `tesseract` [1.5, 6.3]. The cause is in heocr's own processing of photos, not the model, and is being worked on.
-- **More numbers found:** heocr finds more of the numbers on the page than stock Tesseract does (number recall 63.7% against 59.2% on flat photos).
+Verdicts per document type (the release gate, aggregates only):
 
-**3. NQ1, pointed print** (photos of pointed Hebrew print): the default model writes **no niqqud**; see [Pointed text](#note-pointed-text-niqqud) below.
+| Cell | Verdict |
+|---|---|
+| DOCX | Supported |
+| DOC | Supported |
+| PDF T1 (good text layers) | Supported |
+| PDF T2 (text layers in visual order) | Supported |
+| PDF T3 (broken font mappings) | Supported |
+| PDF T4 (scans with a wrong OCR text layer) | Supported |
+| PDF T5 (image-only scans) | Supported |
+| PDF spread (two pages side by side) | Supported |
+| Scanned tables | Supported |
+| PDF T6 (a text layer plus text drawn as images) | Not supported: held back by the real-document check |
 
-"Not supported" means no claim is made for that cell. heocr still reads those pages, and its record still flags what it could not read.
+"Not supported" means no claim is made for that type. heocr still reads those pages, and its record still flags what it could not read.
 
 ## Note: pointed text (niqqud)
 
-The default model, `heocr_modern_v1`, does not output niqqud. On HeOCR's held-out pointed-print test (NQ1) it wrote no vowel marks at all, so pointed text comes out unpointed. Stock Tesseract's `heb` model keeps only about a quarter of the marks (24% on NQ1). To read pointed text with stock Tesseract:
+The default model, `heocr_modern_v1`, does not output niqqud: on HeOCR's held-out pointed-print test (NQ1) it wrote no vowel marks, so pointed text comes out unpointed. Stock Tesseract's `heb` model (tessdata_best) recovers 24.6% of the vowel marks there. To read pointed text with stock Tesseract:
 
 ```sh
 heocr poem.jpg --ocr-model heb
