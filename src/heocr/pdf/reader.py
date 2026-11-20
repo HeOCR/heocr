@@ -43,6 +43,7 @@ from heocr.pdf.classify import FIGURE_IMAGE, PAGE_IMAGE, classify, object_stats,
 from heocr.pdf.frame import frame_of
 from heocr.pdf.lines import Atom, PageLines, build_lines, line_is_rtl, paragraphs
 from heocr.pdf.columns import UNRESOLVED, Segment, arrange
+from heocr.pdf.ocrrows import TableRows, table_rows
 from heocr.pdf.ocrtables import cell_crop, cell_has_faint_ink, cell_has_ink, cell_psm, faint_cell_image, image_rulings, tables_in
 from heocr.pdf.tables import find_tables, rulings, table_blocks
 from heocr.textflags import is_private_use, text_flags
@@ -2122,7 +2123,15 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
             page_numbers = _page_number_pass(numbers, page_image, result, round(scale * 72))
         except OcrUnavailable:
             page_numbers = None
-    read = _ocr_blocks(doc, index, engine, result, scale)
+    # An unruled table is read by Tesseract column by column; its cells are given back in rows.
+    unruled = table_rows(result.lines, scale, doc._rtl) if OCR_TABLE_ROWS else []
+    taken = {id(line) for table in unruled for line in table.lines}
+    read = _ocr_blocks(doc, index, engine, OcrResult([line for line in result.lines if id(line) not in taken]), scale)
+    if unruled:
+        row_blocks, in_rows = _ocr_row_tables(doc, index, engine, unruled, scale)
+        _place_tables(doc, first, row_blocks)
+        read += in_rows
+        flags = flags + ["unruled_tables"]
     if grids:
         t_blocks, in_cells = _ocr_tables(doc, index, engine, image, scale, grids, None if numbers is engine else numbers)
         _place_tables(doc, first, t_blocks)
@@ -2154,6 +2163,40 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
               **({"page_number_tokens": page_numbers[0], "page_number_words_replaced": page_numbers[1]} if page_numbers else {}),
               "status": "ocr" if found and not short else "partial" if found else "unread"}, flags)
     )
+
+
+# Unruled tables on OCR pages (``heocr.pdf.ocrrows``): off, the page keeps Tesseract's block order.
+OCR_TABLE_ROWS = True
+
+
+def _ocr_row_tables(doc: Document, index: int, engine, tables: list[TableRows], scale: float) -> tuple[list[Block], int]:
+    """Table blocks for unruled tables found in an OCR result, their cells in rows. Returns the
+    blocks and their characters."""
+    to_pt = 1 / scale
+    blocks: list[Block] = []
+    read = 0
+    for table in tables:
+        cells = [[Cell(" ".join(piece.text for piece in cell)) for cell in row] for row in table.rows]
+        read += sum(1 for row in cells for cell in row for ch in cell.text if not ch.isspace())
+        replaced = sum(line.numbers_replaced for line in table.lines)
+        readings = [r for line in table.lines for r in line.number_readings]
+        blocks.append(
+            Block(
+                kind="table",
+                cells=cells,
+                page=index,
+                bbox=[v * to_pt for v in table.bbox],
+                source="ocr",
+                tool=engine.version,
+                direction="rtl" if doc._rtl else "ltr",
+                ocr={**block_ocr(engine, table.lines), "dpi": round(scale * 72, 1), **({"number_words_replaced": replaced} if replaced else {}),
+                     **({"duplicate_lines_dropped": table.duplicates} if table.duplicates else {})},
+                checks={"number_readings": readings} if readings else None,
+                flags=["unruled_table", "ocr_unverified"] + (["render_dpi_reduced"] if scale * 72 < RENDER_DPI else [])
+                + (["numbers_from_second_reading"] if replaced else []),
+            )
+        )
+    return blocks, read
 
 
 def _without(image, scale: float, boxes) -> object:
