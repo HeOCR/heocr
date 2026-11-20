@@ -9,7 +9,7 @@
 
 Every decision is recorded in the output. Text that could not be read is reported in `unread`, never dropped silently.
 
-> Status: **0.2.0**. The default OCR model is HeOCR's own `heocr_modern_v1`, and the code is the `0.2.0rc1` that RC2's registered gate measured. The [held-out results](#held-out-results-for-020) are below, all three together. **Note: the default model writes no niqqud**, so pointed text comes out unpointed; see [Pointed text](#pointed-text-niqqud) for the stock-Tesseract option. Changes since 0.1.2 are in the [changelog](CHANGELOG.md). A pre-release, **0.3.0a1**, adds Word output (`-f docx`, `heocr.write_docx`) and the fixes listed in the changelog: `pip install --pre heocr`. Its changes are not measured on a held-out set yet.
+> Status: **0.2.1**. The default OCR model is HeOCR's own `heocr_modern_v1`. The [held-out results](#held-out-results), on real material, are below. **Note: the default model writes no niqqud**, so pointed text comes out unpointed; see [Pointed text](#pointed-text-niqqud) for the stock-Tesseract option. Changes since 0.1.2 are in the [changelog](CHANGELOG.md). A pre-release, **0.3.0a2**, adds Word output (`-f docx`, `heocr.write_docx`) and the fixes listed in the changelog: `pip install --pre heocr`. Its changes are not measured on a held-out set yet.
 
 ## Quickstart
 
@@ -72,19 +72,9 @@ PDF page classes:
 | T5 | An image with no text layer (a scan) | OCR |
 | T6 | A text layer plus text drawn as images | Text layer, plus region OCR |
 
-## Held-out results for 0.2.0
+## Held-out results
 
-0.2.0 is the code of `0.2.0rc1`, the release candidate these tests measured. Read the three together.
-
-All figures come from held-out sets: material no HeOCR model was trained, tuned or chosen on, scored once under rules fixed before the run. 95% intervals are in brackets.
-
-**Generated documents (the release gate).** heocr 0.2.0rc1 was scored on a fresh set of generated Word and PDF documents, made after its code was frozen. It is supported in 9 of 10 document types. The tenth, PDFs with a text layer plus text drawn as images (T6), is held back by the real-document check: on real tender pages heocr reversed 0.454% of amounts, above stock Tesseract's interval (≤ 0.272%). Inside the same pipeline, heocr's own model (heocr_modern_v1), compared with stock Tesseract's Hebrew model:
-
-- scans with a wrong OCR text layer (T4): character error 1.26% vs 3.27%, numbers missed 5.2% vs 22.7%;
-- image-only scans (T5): character error 2.83% vs 4.30%, numbers missed 4.5% vs 14.9%;
-- scanned tables: character error 0.38% vs 1.43%.
-
-These documents come from the same generators heocr is developed against, so they favour it; the photo results below are the counterweight.
+All figures come from real held-out sets: photographs of real printed or handwritten pages that no HeOCR model was trained, tuned or chosen on, scored once under rules fixed before the run. They were measured with heocr 0.2.0. 95% intervals are in brackets.
 
 **Printed pages photographed by phone (PS-v1).** 12 pages of modern printed Hebrew, typeset by us, printed and photographed with three phones (154 photos).
 
@@ -100,24 +90,9 @@ Not a sample of real-world documents: one printer, three phones, our typesetting
 - Stock Tesseract (tessdata_best) recovers 24.6% of the vowel marks.
 - On the letters alone, heocr matches stock Tesseract's model inside heocr: +0.6 points [−0.1, +1.3].
 
-If you need niqqud, use `ocr_model` with stock `heb` for now. Modern pointed print in open fonts, not old pointed books.
+Modern pointed print in open fonts, not old pointed books.
 
-Verdicts per document type (the release gate, aggregates only):
-
-| Cell | Verdict |
-|---|---|
-| DOCX | Supported |
-| DOC | Supported |
-| PDF T1 (good text layers) | Supported |
-| PDF T2 (text layers in visual order) | Supported |
-| PDF T3 (broken font mappings) | Supported |
-| PDF T4 (scans with a wrong OCR text layer) | Supported |
-| PDF T5 (image-only scans) | Supported |
-| PDF spread (two pages side by side) | Supported |
-| Scanned tables | Supported |
-| PDF T6 (a text layer plus text drawn as images) | Not supported: held back by the real-document check |
-
-"Not supported" means no claim is made for that type. heocr still reads those pages, and its record still flags what it could not read.
+**Handwriting (not supported yet).** On 225 held-out handwritten lines by 10 writers, from ivrit.ai's [Hebrew handwriting OCR benchmark](https://huggingface.co/datasets/ivrit-ai/hebrew-handwriting-ocr-benchmark) (test split), every reader gets most characters wrong: heocr 83.1% character error [79.3, 88.0], stock Tesseract 75.4% [71.0, 80.4]. No HeOCR model is trained on handwriting.
 
 ## Pointed text (niqqud)
 
@@ -193,7 +168,7 @@ The core runs without them. Without them, the parts that need them are reported 
 
 - **Tesseract** (Apache-2.0), for OCR, with the `heb` model (and `eng` for the second reading of numbers). heocr finds it on the `PATH`, in `$HEOCR_TESSERACT`, or through `tesseract=` / `--tesseract`. Other options:
   - `ocr_lang` / `--ocr-lang` for the languages (default `heb`);
-  - `ocr_model` / `--ocr-model` for the OCR model. The default is HeOCR's own modern-print model, `heocr_modern_v1`, which ships inside the package. `oldprint` reads with the old-print model, `heocr_oldprint_v1`, and `auto` picks one of the two per document by a short probe, recorded in each OCR block's `ocr.model_route`. The default's held-out results are [above](#held-out-results-for-020); `oldprint` and `auto` are not measured on a held-out set yet. Neither of HeOCR's models reads niqqud ([Pointed text](#pointed-text-niqqud)). `--ocr-model heb` (or `stock`) reads with stock Tesseract, as heocr 0.1 did. Another released model's name or a `.traineddata` path reads with that model; models downloaded on purpose are kept in `$HEOCR_MODELS`.
+  - `ocr_model` / `--ocr-model` for the OCR model. The default is HeOCR's own modern-print model, `heocr_modern_v1`, which ships inside the package. `oldprint` reads with the old-print model, `heocr_oldprint_v1`, and `auto` picks one of the two per document by a short probe, recorded in each OCR block's `ocr.model_route`. The default's held-out results are [above](#held-out-results); `oldprint` and `auto` are not measured on a held-out set yet. Neither of HeOCR's models reads niqqud ([Pointed text](#pointed-text-niqqud)). `--ocr-model heb` (or `stock`) reads with stock Tesseract, as heocr 0.1 did. Another released model's name or a `.traineddata` path reads with that model; models downloaded on purpose are kept in `$HEOCR_MODELS`.
 - **LibreOffice** (MPL-2.0), for DOC, RTF, ODT, ODS, XLS, ODP and PPT. heocr finds it on the `PATH`, in `$HEOCR_SOFFICE`, or through `soffice=` / `--soffice`; on macOS also in `/Applications`. It runs with a throwaway profile and a time limit. `convert=False` / `--no-convert` turns conversion off.
 
 Neither is bundled. heocr records the version and executable hash of each one it uses in the record's `producer.components`.
