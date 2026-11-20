@@ -22,13 +22,13 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
   - A page under an OCR layer with little Hebrew was taken for another language's OCR (`foreign_ocr_layer`) and read again, its layer ignored. A table of numbers and codes has no Hebrew either, and its layer may well be right, so correct layers were dropped.
   - Foreign now needs Latin text: at least 10 Latin letters in words without a digit, and at least a quarter of the layer's letters and digits. A code such as `QX-418` is not a Latin word. Real foreign layers hold far more.
   - A layer with neither (`ocr_layer_numbers_and_codes`) is kept when its digits agree with a second reading of a few of its lines by the number model (`ocr_layer_kept_by_digits`). Otherwise, or without OCR, the page is read as foreign, as before. Digits never replace a layer that was kept before.
+- **A number beside a Latin parenthetical keeps its place in RTL text-layer lines.** In a line like "משנת 2018 (Assigning responsibilities), ..." the year and the parenthetical were read as one left-to-right run, so the year came out after the Latin text, with a bracket on each side ("Assigning responsibilities) 2018)"). Where the document's brackets were mirrored, both brackets then opened the same way. The brackets now take the paragraph's direction when the number stands outside them, as the page shows it, and the pair is read "(" then ")" whatever characters the layer gives it (LibreOffice writes both as ")"). A number inside the brackets ("(Annual Report 2020)") stays in the Latin run.
+- The document's bracket mirroring (`rtl_bracket_order`) never changes a block twice.
+- Reported by an outside tester on an invented LibreOffice PDF, on 0.1.2 and 0.2.0rc1. Its effect is not measured on a held-out set yet.
 
 ### Record
 
 - New page flags `ocr_layer_numbers_and_codes` and `ocr_layer_kept_by_digits`, and page signals `latin_word_letters`, `latin_word_share`, `ocr_layer_digit_agreement`, `ocr_layer_digits` and `ocr_layer_digit_confidence` (all additive, within v1).
-- **A number beside a Latin parenthetical keeps its place in RTL text-layer lines.** In a line like "משנת 2018 (Assigning responsibilities), ..." the year and the parenthetical were read as one left-to-right run, so the year came out after the Latin text, with a bracket on each side ("Assigning responsibilities) 2018)"). Where the document's brackets were mirrored, both brackets then opened the same way. The brackets now take the paragraph's direction when the number stands outside them, as the page shows it, and the pair is read "(" then ")" whatever characters the layer gives it (LibreOffice writes both as ")"). A number inside the brackets ("(Annual Report 2020)") stays in the Latin run.
-- The document's bracket mirroring (`rtl_bracket_order`) never changes a block twice.
-- Reported by an outside tester on an invented LibreOffice PDF, on 0.1.2 and 0.2.0rc1. Its effect is not measured on a held-out set yet.
 
 ## Unreleased → 0.2.0 (release candidate 0.2.0rc1, RC2)
 
