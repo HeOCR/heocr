@@ -87,9 +87,20 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+# Every Tesseract call runs on one thread, as a precaution. Tesseract can run its arithmetic on several,
+# through OpenMP (Linux builds) or Apple's Accelerate framework (macOS builds), split according to the
+# machine's load; one thread takes that out of the picture. heocr runs one Tesseract call at a time per
+# document, so little speed is lost.
+THREAD_ENV = {"OMP_THREAD_LIMIT": "1", "VECLIB_MAXIMUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1"}
+
+
+def _env() -> dict[str, str]:
+    return {**os.environ, **THREAD_ENV}
+
+
 def _run(cmd: list[str], timeout: float) -> subprocess.CompletedProcess:
     try:
-        return subprocess.run(cmd, capture_output=True, timeout=timeout, check=False)
+        return subprocess.run(cmd, capture_output=True, timeout=timeout, check=False, env=_env())
     except FileNotFoundError as exc:
         raise OcrUnavailable("tesseract not found") from exc
     except subprocess.TimeoutExpired as exc:
@@ -196,6 +207,7 @@ class Tesseract:
             "tesseract:executable_sha256": self.executable_sha256,
             "tesseract:lang": self.lang,
             "tesseract:psm": str(self.psm),
+            "tesseract:threads": "1",
         }
         for language, sha in self.models.items():
             out[f"tesseract:{language}.traineddata"] = f"sha256:{sha}"

@@ -660,5 +660,20 @@ class NumbersAndCodesLayerTest(unittest.TestCase):
         self.assertIn("foreign_ocr_layer", page.flags)
         self.assertNotIn("text_layer_is_ocr", page.flags)
 
+class TesseractThreadsTest(unittest.TestCase):
+    def test_every_call_runs_on_one_thread(self) -> None:
+        from unittest import mock
+
+        from heocr.ocr import tesseract
+
+        with mock.patch.dict(os.environ, {"OMP_THREAD_LIMIT": "8", "VECLIB_MAXIMUM_THREADS": "8"}), mock.patch.object(
+            tesseract.subprocess, "run"
+        ) as run:
+            tesseract._run(["tesseract", "--version"], 5.0)
+        env = run.call_args.kwargs["env"]
+        self.assertEqual((env["OMP_THREAD_LIMIT"], env["VECLIB_MAXIMUM_THREADS"], env["OPENBLAS_NUM_THREADS"]), ("1", "1", "1"))
+        self.assertEqual(env.get("PATH"), os.environ.get("PATH"))
+
+
 if __name__ == "__main__":
     unittest.main()
