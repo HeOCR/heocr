@@ -108,7 +108,7 @@ def _type3_space_candidate(raw, obj, box) -> bool:
     if raw.FPDFTextObj_GetTextRenderMode(obj) != 0:
         return False
     font = raw.FPDFTextObj_GetFont(obj)
-    size = ctypes.c_ulong()
+    size = ctypes.c_size_t()
     return bool(font and raw.FPDFFont_GetIsEmbedded(font) == 1
                 and raw.FPDFFont_GetFontData(font, None, 0, ctypes.byref(size)) and size.value == 0)
 
