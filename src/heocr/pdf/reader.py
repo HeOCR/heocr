@@ -11,7 +11,7 @@ import copy
 import ctypes
 from bisect import bisect_right
 from collections import Counter, defaultdict
-from itertools import pairwise
+from itertools import groupby, pairwise
 import math
 import re
 import unicodedata
@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from heocr import repairs
 from heocr.contract import Block, Cell, Document, Line, Page, Unread, page_limit, pages_left_unread, time_up
 from heocr.ocr import OcrUnavailable, block_ocr, call_failures, engine_for, latin_reviewer_for, number_engine_for, routes, unavailable_reason
-from heocr.ocr.tesseract import OcrResult, OcrWord
+from heocr.ocr.tesseract import OcrLine, OcrResult, OcrWord
 from heocr.ocr.regions import (  # noqa: F401  (re-exported for callers of the PDF route)
     INK_LEVEL,
     MAX_RENDER_PIXELS,
@@ -46,6 +46,7 @@ from heocr.pdf.frame import frame_of
 from heocr.pdf.lines import Atom, PageLines, build_lines, line_is_rtl, paragraphs
 from heocr.pdf.columns import UNRESOLVED, Segment, arrange
 from heocr.pdf.ocrmargins import attach_margin_numbers
+from heocr.pdf.ocrorder import order_across_disjoint_gaps
 from heocr.pdf.ocrrows import TableRows, table_rows
 from heocr.pdf.ocrsparse import recover_scan_lines
 from heocr.pdf.ocrlatin import reread_latin_runs
@@ -2031,9 +2032,41 @@ def _same_ocr_column(box, table) -> bool:
     return overlap >= 0.65 * min(box[2] - box[0], table[2] - table[0])
 
 
+@dataclass
+class _OcrLineRecords:
+    by_line: dict[int, OcrLine] = field(default_factory=dict)
+    attached: set[int] = field(default_factory=set)
+
+
+def _ocr_block(index, engine, lines, group, dpi, flags, attached) -> Block:
+    """Project the line readings and their aggregate checks onto one output block."""
+    text = "\n".join(line.text for line in lines)
+    replaced = sum(line.numbers_replaced for line in group)
+    latin = sum(line.latin_runs_reread for line in group)
+    return Block(
+        kind="text",
+        text=text,
+        page=index,
+        bbox=[min(l.bbox[0] for l in lines), min(l.bbox[1] for l in lines), max(l.bbox[2] for l in lines), max(l.bbox[3] for l in lines)],
+        source="ocr",
+        tool=engine.version,
+        direction="rtl",
+        lines=lines,
+        ocr={**block_ocr(engine, group), "dpi": dpi, **({"number_words_replaced": replaced} if replaced else {}),
+             **({"latin_runs_reread": latin} if latin else {})},
+        checks={"number_readings": [r for line in group for r in line.number_readings]} if replaced or any(line.number_readings for line in group) else None,
+        flags=["ocr_unverified", *flags] + (["render_dpi_reduced"] if dpi < RENDER_DPI else [])
+        + (["numbers_from_second_reading"] if replaced else [])
+        + (["latin_from_second_reading"] if latin else [])
+        + (["reading_order_ocr_margin_numbers_unverified"] if any(id(line) in attached for line in group) else [])
+        + text_flags(text),
+    )
+
+
 def _ocr_blocks(
     doc: Document, index: int, engine, result, render_scale: float, *, offset=(0.0, 0.0), flags=(),
     min_confidence: float | None = None, form_tables=(), margin_page: tuple[int, int] | None = None,
+    line_records: _OcrLineRecords | None = None,
 ) -> int:
     """OCR lines into blocks, one per Tesseract paragraph, with boxes in page points. Returns characters.
 
@@ -2062,31 +2095,36 @@ def _ocr_blocks(
             Line(line.text, [offset[0] + v * scale if i % 2 == 0 else offset[1] + v * scale for i, v in enumerate(line.bbox)])
             for line in group
         ]
-        text = "\n".join(line.text for line in lines)
-        read += sum(1 for ch in text if not ch.isspace())
-        replaced = sum(line.numbers_replaced for line in group)
-        latin = sum(line.latin_runs_reread for line in group)
-        doc.blocks.append(
-            Block(
-                kind="text",
-                text=text,
-                page=index,
-                bbox=[min(l.bbox[0] for l in lines), min(l.bbox[1] for l in lines), max(l.bbox[2] for l in lines), max(l.bbox[3] for l in lines)],
-                source="ocr",
-                tool=engine.version,
-                direction="rtl",
-                lines=lines,
-                ocr={**block_ocr(engine, group), "dpi": dpi, **({"number_words_replaced": replaced} if replaced else {}),
-                     **({"latin_runs_reread": latin} if latin else {})},
-                checks={"number_readings": [r for line in group for r in line.number_readings]} if replaced or any(line.number_readings for line in group) else None,
-                flags=["ocr_unverified", *flags] + (["render_dpi_reduced"] if dpi < RENDER_DPI else [])
-                + (["numbers_from_second_reading"] if replaced else [])
-                + (["latin_from_second_reading"] if latin else [])
-                + (["reading_order_ocr_margin_numbers_unverified"] if any(id(line) in attached for line in group) else [])
-                + text_flags(text),
-            )
-        )
+        block = _ocr_block(index, engine, lines, group, dpi, flags, attached)
+        read += sum(not ch.isspace() for ch in block.text)
+        doc.blocks.append(block)
+        if line_records is not None:
+            line_records.by_line.update((id(line), reading) for line, reading in zip(lines, group))
+    if line_records is not None:
+        line_records.attached = attached
     return read
+
+
+def _order_ocr_gaps(blocks, first, index, engine, scale, records) -> bool:
+    # The margin pass deliberately puts detached clause numbers beside their targets.
+    if records.attached:
+        return False
+    body = blocks[first:]
+    ordered = order_across_disjoint_gaps(body)
+    if ordered is None:
+        return False
+    dpi = round(scale * 72, 1)
+    rebuilt = []
+    for origin, run in groupby(ordered, key=lambda entry: entry[0]):
+        lines = [line for _, line in run]
+        old = body[origin]
+        if lines == old.lines:
+            rebuilt.append(old)
+        else:
+            readings = [records.by_line[id(line)] for line in lines]
+            rebuilt.append(_ocr_block(index, engine, lines, readings, dpi, (), records.attached))
+    blocks[first:] = rebuilt
+    return True
 
 
 def _unrotate_records(doc: Document, first_block: int, first_unread: int, index: int, angle: float, center) -> None:
@@ -2309,12 +2347,17 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
             flags = flags + ["ocr_same_column_lines_recovered"]
     form_tables = [t.bbox for t in grids if "table_open_sides_inferred" in t.flags]
     margin_page = image.size if doc._rtl and not unruled and not (grids or rectified) else None
+    record_lines = page is not None and page_class == "T5" and margin_page is not None
+    line_records = _OcrLineRecords() if record_lines else None
     read = _ocr_blocks(doc, index, engine, OcrResult([line for line in result.lines if id(line) not in taken]), scale,
-                       form_tables=form_tables, margin_page=margin_page)
+                       form_tables=form_tables, margin_page=margin_page, line_records=line_records)
     if _order_ocr_paragraphs(doc.blocks, first):
         flags = flags + ["reading_order_ocr_adjusted_unverified"]
-    if not unruled and not (grids or rectified) and _order_ocr_bands(doc.blocks, first, image, scale):
-        flags = flags + ["reading_order_ocr_bands_unverified"]
+    if not (unruled or grids or rectified):
+        if _order_ocr_bands(doc.blocks, first, image, scale):
+            flags = flags + ["reading_order_ocr_bands_unverified"]
+        elif line_records is not None and _order_ocr_gaps(doc.blocks, first, index, engine, scale, line_records):
+            flags = flags + ["reading_order_ocr_disjoint_gaps_unverified"]
     if unruled:
         row_blocks, in_rows = _ocr_row_tables(doc, index, engine, unruled, scale)
         _place_tables(doc, first, row_blocks)
