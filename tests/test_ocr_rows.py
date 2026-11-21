@@ -158,6 +158,36 @@ class OcrRowsReaderTest(unittest.TestCase):
         self.assertEqual(doc.text, "סיכום תשלומים לשנה\n" + "\n".join(" | ".join(row) for row in ROWS) + "\n")
         self.assertEqual(heocr.validate(doc.to_dict()), [])
 
+    def test_detached_clause_numbers_rejoin_only_unique_lines_in_a_margin_track(self) -> None:
+        header = self.tsv.read_text(encoding="utf-8").splitlines()[0]
+        items = [
+            (1, 1, 554, 230, 8, 6, "19"), (2, 1, 555, 330, 8, 6, "21"),
+            (3, 1, 579, 460, 8, 6, "8"),
+            (4, 1, 300, 205, 219, 10, "מבוא להוראות התחנה"),
+            (4, 2, 300, 228, 219, 10, "הציוד יישאר בתוך הארגז"),
+            (5, 1, 300, 328, 220, 10, "הדלת תיסגר בשעות הערב"),
+            (6, 1, 300, 458, 233, 10, "הארגז יוצב ליד העמוד"),
+        ]
+        for ambiguous in (False, True):
+            with self.subTest(ambiguous=ambiguous):
+                rows = [header]
+                extra = [(7, 1, 299, 328, 221, 10, "שורה נוספת חופפת לחלוטין")] if ambiguous else []
+                for b, l, x, y, w, h, content in items + extra:
+                    dims = "\t".join(str(round(v * SCALE)) for v in (x, y, w, h))
+                    rows.append(f"5\t1\t{b}\t1\t{l}\t1\t{dims}\t90.0\t{content}")
+                self.tsv.write_text("\n".join(rows) + "\n", encoding="utf-8")
+                doc = self.extract()
+                flagged = [b for b in doc.blocks if "reading_order_ocr_margin_numbers_unverified" in b.flags]
+                if ambiguous:
+                    self.assertEqual(flagged, [])
+                    self.assertEqual([b.text for b in doc.blocks[:3]], ["19", "21", "8"])
+                else:
+                    self.assertEqual([b.text for b in flagged], [
+                        "מבוא להוראות התחנה\n19\nהציוד יישאר בתוך הארגז", "21\nהדלת תיסגר בשעות הערב",
+                    ])
+                    self.assertEqual(doc.blocks[0].text, "8")
+                self.assertEqual(heocr.validate(doc.to_dict()), [])
+
     def test_a_full_width_rule_keeps_upper_columns_ahead_of_the_lower_section(self) -> None:
         from PIL import Image, ImageDraw
         from tests.synth.pdf import PdfPage, make_pdf
