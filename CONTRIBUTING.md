@@ -40,6 +40,10 @@ python -m venv .venv && .venv/bin/pip install -e ".[test]"
 - **The record** (`heocr_document.v1`) changes only as [docs/contract-v1.md](docs/contract-v1.md) allows: additive fields within v1, anything else is v2. Update the schema, `contract.validate`, [docs/record.md](docs/record.md) and CHANGELOG.md together.
 - **Text that could not be read is never dropped silently.** It goes into `unread` or a flag. A new limit or route says what it leaves out.
 
+## Release candidate checks
+
+Run the [local regression harness](docs/release-regress.md) alongside the opt-in suite before each release candidate. Keep its bundle and reports private. Reproduce defects in issues and PRs with invented fixtures.
+
 ## Pull requests
 
 - **Branches:** work on a branch, never directly on `main`. `main` is squash-merged.

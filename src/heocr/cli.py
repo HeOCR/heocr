@@ -18,6 +18,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="heocr",
         description="Extract Hebrew text from documents.",
+        epilog="For local release engineering QA, use heocr regress --help.",
     )
     parser.add_argument("file", type=Path, nargs="?", help="input document: PDF, DOCX, DOC, RTF, ODT, XLSX, ODS, XLS, PPTX, ODP, PPT, HTML or an image")
     parser.add_argument("-o", "--output", type=Path, help="write here instead of standard output")
@@ -66,6 +67,11 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["regress"]:
+        from heocr.regress import main as regress
+
+        return regress(argv[1:])
     parser = _parser()
     args = parser.parse_args(argv)
     if args.download_model:

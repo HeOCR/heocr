@@ -11,6 +11,10 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 - **Public releases are paused.** Install the development version from GitHub. HeOCR will publish a package or model release only after it beats existing readers on at least one document type. The GitHub install has no bundled weights and falls back to stock Tesseract `heb`, flagged `bundled_model_unavailable`. Tag-triggered package publishing has been removed.
 - **Model provenance records the final deposits** for the previously distributed bundled models. The weights and their SHA-256 hashes did not change. `heocr_modern_v1`'s notice is from the v4 deposit.
 
+### Added
+
+- `heocr regress` runs the frozen local engineering checks for a release candidate and writes a private report.
+
 ### Fixed
 
 - **A number beside a Latin parenthetical keeps its place in RTL text-layer lines.** In a line like "משנת 2018 (Assigning responsibilities), ..." the year and the parenthetical were read as one left-to-right run, so the year came out after the Latin text, with a bracket on each side ("Assigning responsibilities) 2018)"). Where the document's brackets were mirrored, both brackets then opened the same way. The brackets now take the paragraph's direction when the number stands outside them, as the page shows it, and the pair is read "(" then ")" whatever characters the layer gives it (LibreOffice writes both as ")"). A number inside the brackets ("(Annual Report 2020)") stays in the Latin run.
