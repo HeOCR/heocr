@@ -547,6 +547,38 @@ class OcrTableTest(unittest.TestCase):
         (entry,) = doc.unread
         self.assertEqual((entry.reason, entry.scope, entry.bbox), ("table_cell_not_a_number", "block", [60, 40, 120, 58]))  # the cell's own box (row 2, second in reading order)
 
+    def test_a_horizontal_merge_does_not_shift_numeric_column_checks(self) -> None:
+        from types import SimpleNamespace
+
+        from heocr.contract import Cell
+        from heocr.pdf.reader import _flag_cells_out_of_column
+
+        rows = [
+            [Cell("פריט"), Cell("סוג"), Cell("כמות")],
+            [Cell("עט לסימון", colspan=2), Cell("13")],
+            [Cell("דף"), Cell("נייר"), Cell("24")],
+            [Cell("סרגל קטן", colspan=2), Cell("תש")],
+            [Cell("מחברת קטנה", colspan=2), Cell("35")],
+        ]
+        grid_rows = []
+        for r, row in enumerate(rows):
+            right = 3
+            boxes = []
+            for cell in row:
+                left = right - cell.colspan
+                boxes.append({"col": left, "box": [30 * left, 20 * r, 30 * right, 20 * r + 18]})
+                right = left
+            grid_rows.append(boxes[::-1])
+        grid = SimpleNamespace(rows=grid_rows, bbox=[0, 0, 90, 98])
+        doc = SimpleNamespace(_rtl=True, unread=[])
+
+        _flag_cells_out_of_column(doc, 0, grid, rows, (0.0, 0.0))
+
+        self.assertNotIn("table_cell_not_a_number", rows[2][1].flags or [])
+        self.assertIn("table_cell_not_a_number", rows[3][1].flags)
+        (entry,) = doc.unread
+        self.assertEqual(entry.bbox, [0, 60, 30, 78])
+
     def test_a_cell_whose_two_readings_differ_and_neither_is_confident_is_unconfirmed(self) -> None:
         doc, cell = self.unconfirmed_case("752.25", "1409", "60.0", "40.0")
         self.assertEqual(cell.text, "752.25")  # nothing chosen: the first reading stays
