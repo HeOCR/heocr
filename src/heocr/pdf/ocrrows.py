@@ -103,7 +103,10 @@ def _same(a: Piece, b: Piece) -> bool:
     and the other carries it too, or keeps its own part of it, or a few leftover marks, inside that box."""
     big, small = (a, b) if len(a.text) >= len(b.text) else (b, a)
     # The other piece's own part of the number, or what is left of it: a few marks inside the number's box.
-    leftover = len(small.text) <= LEFTOVER_CHARS and any(ch.isdigit() for ch in big.text)
+    # A short overlapping label is not a stray numeric mark. Dropping it would silently
+    # lose text when OCR boxes overlap (for example in a crowded table).
+    leftover = (len(small.text) <= LEFTOVER_CHARS and not any(ch.isalpha() for ch in small.text)
+                and any(ch.isdigit() for ch in big.text))
     if small.text not in big.text and not leftover:
         return False
     bb, bs = big.bbox, small.bbox

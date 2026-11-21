@@ -78,6 +78,13 @@ class OcrRowsTest(unittest.TestCase):
         table = table_rows(lines, SCALE, rtl=True)[0]
         self.assertEqual([[" ".join(p.text for p in cell) for cell in row] for row in table.rows], [list(row) for row in ROWS])
 
+    def test_overlapping_short_labels_are_not_discarded_as_numeric_marks(self) -> None:
+        lines = column_major()
+        lines += [line([("אב", 1640, 1750)], 300 + 80 * r, "9") for r in range(len(ROWS))]
+        # The overlap leaves two distinct pieces in one band, so reconstruction must
+        # decline the ambiguous table and preserve the original OCR lines.
+        self.assertEqual(table_rows(lines, SCALE, rtl=True), [])
+
     def test_prose_in_two_columns_is_not_a_table(self) -> None:
         words_right = [("אחת", 2100, 2160), ("שתיים", 1990, 2080), ("שלוש", 1890, 1970), ("ארבע", 1790, 1870), ("חמש", 1700, 1770)]
         words_left = [("שש", 1300, 1350), ("שבע", 1200, 1280), ("שמונה", 1090, 1180), ("תשע", 1000, 1070), ("עשר", 900, 980)]
