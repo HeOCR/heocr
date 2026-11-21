@@ -35,6 +35,19 @@ def text(atoms, rtl=True) -> str:
 
 
 class PunctuationSpacingTest(unittest.TestCase):
+    def test_uniform_letter_spacing_in_justified_hebrew_keeps_word_breaks(self) -> None:
+        for tracking, word_gap in ((2.6, 8.5), (-1.2, 1.0), (-2.0, -1.3)):
+            with self.subTest(tracking=tracking, word_gap=word_gap):
+                parts = []
+                for word in ("קוריה", "ליבשב", "םירזופמ", "םיחרפ"):
+                    if parts:
+                        parts.append(word_gap)
+                    for index, char in enumerate(word):
+                        if index:
+                            parts.append(tracking)
+                        parts.append(char)
+                self.assertEqual(text(visual(*parts)), "פרחים מפוזרים בשביל הירוק")
+
     def test_a_comma_in_rtl_text_keeps_the_space_on_its_left(self) -> None:
         # "תאגיד, למעט" drawn right to left: the comma just left of its word, the space beyond it.
         self.assertEqual(text(visual("טעמל", WORD_SPACE, ",", HUG, "דיגאת")), "תאגיד, למעט")
