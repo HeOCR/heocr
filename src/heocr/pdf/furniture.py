@@ -132,6 +132,27 @@ def _sub_block(block: Block, lines, role: str) -> Block:
     )
 
 
+def _ocr_header_row(anchor: Block, blocks: list[Block], rtl: bool) -> list[Block]:
+    """Take the contiguous fragments in the anchor's visual row."""
+    _, top, _, bottom = anchor.bbox
+    height = bottom - top
+    row = sorted((b for b in blocks if min(bottom, b.bbox[3]) - max(top, b.bbox[1])
+                  >= 0.5 * min(height, b.bbox[3] - b.bbox[1])), key=lambda b: b.bbox[0])
+    left = right = next(i for i, b in enumerate(row) if b is anchor)
+    while left > 0 and row[left].bbox[0] - row[left - 1].bbox[2] <= height:
+        left -= 1
+    while right + 1 < len(row) and row[right + 1].bbox[0] - row[right].bbox[2] <= height:
+        right += 1
+    return row[left:right + 1][::(-1 if rtl else 1)]
+
+
+def _ocr_header_text(text: str) -> str:
+    if any(ch.isdigit() for ch in text) or len(text.split()) < 2:
+        return ""
+    normalized = "".join(ch for ch in text.casefold() if ch.isalpha())
+    return normalized if 7 <= len(normalized) <= 60 else ""
+
+
 def mark_ocr_running_headers(doc: Document) -> None:
     """Move a recurring centered scan header and its neighboring OCR fragments out of the body.
 
@@ -149,47 +170,42 @@ def mark_ocr_running_headers(doc: Document) -> None:
                 and 0 < y1 - y0 <= 0.022 * page.height):
             candidates[page.index].append(block)
 
-    anchors: dict[int, list[tuple[Block, str, float, float]]] = {}
+    anchors: dict[int, list[tuple[list[Block], set[str], float, float]]] = {}
     for index, blocks in candidates.items():
         page = pages[index]
         anchors[index] = []
         if len(blocks) > 16:  # Too many fragments to identify a single running title confidently.
             continue
         for block in blocks:
-            if any(ch.isdigit() for ch in block.text) or len(block.text.split()) < 2:
+            if any(ch.isdigit() for ch in block.text) or not any(ch.isalpha() for ch in block.text):
                 continue
-            text = "".join(ch for ch in block.text.casefold() if ch.isalpha())
+            row = _ocr_header_row(block, blocks, doc._rtl)
+            joined = " ".join(b.text for b in row if not any(ch.isdigit() for ch in b.text))
+            texts = {_ocr_header_text(block.text), _ocr_header_text(joined)} - {""}
             x0, y0, x1, y1 = block.bbox
-            if 7 <= len(text) <= 60:
-                anchors[index].append((block, text, (x0 + x1) / (2 * page.width), (y0 + y1) / (2 * page.height)))
+            if texts:
+                anchors[index].append((row, texts, (x0 + x1) / (2 * page.width), (y0 + y1) / (2 * page.height)))
 
     headers = []
     for index, items in anchors.items():
         supported = []
-        for block, text, x, y in items:
+        for row, texts, x, y in items:
             repeats = sum(
                 any(abs(x - xx) <= 0.10 and abs(y - yy) <= 0.025
-                    and SequenceMatcher(None, text, other, autojunk=False).ratio() >= 0.75
-                    for _, other, xx, yy in anchors.get(i, ()))
+                    and any(SequenceMatcher(None, text, other, autojunk=False).ratio() >= 0.75
+                            for text in texts for other in other_texts)
+                    for _, other_texts, xx, yy in anchors.get(i, ()))
                 for i in range(index - 4, index + 5) if i != index
             )
             if repeats >= 2:
-                supported.append((repeats, len(text), block))
+                supported.append((repeats, max(map(len, texts)), row))
         if not supported:
             continue
-        anchor = max(supported, key=lambda item: item[:2])[2]
-        x0, y0, x1, y1 = anchor.bbox
-        height = y1 - y0
-        row = []
-        for block in candidates[index]:
-            left, top, right, bottom = block.bbox
-            overlap = min(bottom, y1) - max(top, y0)
-            if (overlap >= 0.5 * min(height, bottom - top)
-                    and max(x0 - right, left - x1) <= height):
-                block.role = "header"
-                block.flags.append("page_furniture")
-                row.append(block)
-        headers.extend(sorted(row, key=lambda b: b.bbox[0], reverse=doc._rtl))
+        row = max(supported, key=lambda item: item[:2])[2]
+        for block in row:
+            block.role = "header"
+            block.flags.append("page_furniture")
+        headers.extend(row)
 
     if headers:
         selected = {id(b) for b in headers}
