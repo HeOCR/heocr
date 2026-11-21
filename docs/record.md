@@ -29,6 +29,11 @@ Each page has:
 - `coverage`: what was read (`chars_total`, `chars_read`, `chars_ocr`, `status`, image region counts, number checks);
 - `flags`.
 
+For an RGB camera JPEG declared at 72 DPI, `signals.tesseract_dpi_requested`
+records the full-frame recognition hint. `signals.dpi` gives the declared density
+used for page geometry, and `signals.render_dpi` gives the pixel density after
+any downscaling.
+
 ## Blocks
 
 Each block has an `id` (`b0`, `b1`, …), a `kind`, a `role`, a `source`, a `tool`, `repairs` and `flags`, and depending on what it is:

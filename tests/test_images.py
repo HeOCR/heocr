@@ -96,6 +96,41 @@ class ImageInputTest(unittest.TestCase):
         page = doc.pages[0]
         self.assertGreater(page.width, page.height)  # the portrait pixels are shown landscape
 
+    def test_camera_jpeg_uses_rgb_and_separate_recognition_dpi(self) -> None:
+        from PIL import ExifTags, Image
+
+        from heocr.ocr.tesseract import Tesseract
+
+        original_call = Tesseract._recognize_call
+        calls = []
+
+        def record(engine, source, base, dpi, psm):
+            with Image.open(source) as raster:
+                calls.append((raster.mode, round(raster.info["dpi"][0]), dpi))
+            return original_call(engine, source, base, dpi, psm)
+
+        exif = Image.Exif()
+        exif[ExifTags.Base.Model] = "Camera fixture"
+        rgb = page_image().convert("RGB")
+        cases = [
+            ("camera with placeholder", exif, 72, "RGB", 300),
+            ("JPEG without camera metadata", Image.Exif(), 72, "L", 72),
+            ("camera with a declared density", exif, 150, "L", 150),
+        ]
+        for name, metadata, geometry_dpi, mode, ocr_dpi in cases:
+            with self.subTest(name=name):
+                calls.clear()
+                body = encoded(rgb, "JPEG", exif=metadata.tobytes(), dpi=(geometry_dpi, geometry_dpi))
+                with mock.patch.object(Tesseract, "_recognize_call", record):
+                    doc = heocr.extract(body, tesseract=FAKE, ocr_model="heb")
+                page, = doc.pages
+                self.assertEqual(calls[0], (mode, geometry_dpi, ocr_dpi))
+                self.assertEqual(page.width, round(rgb.width * 72 / geometry_dpi, 2))
+                self.assertEqual(page.signals["render_dpi"], geometry_dpi)
+                self.assertEqual(page.signals.get("tesseract_dpi_requested"),
+                                 ocr_dpi if mode == "RGB" else None)
+                self.assertEqual(heocr.validate(doc.to_dict()), [])
+
     def test_transparency_is_flattened_onto_white(self) -> None:
         from PIL import Image, ImageDraw
 

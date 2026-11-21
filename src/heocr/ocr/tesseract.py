@@ -142,6 +142,7 @@ class Tesseract:
     released: object = None  # the heocr.models.ReleasedModel in use, if any
     route: dict | None = None  # ocr_model="auto": how this engine was chosen (heocr.ocr.routes)
     failures: int = 0  # recognize() calls that failed or timed out (heocr.ocr.call_failures)
+    dpi_factor: float = 1.0  # CLI recognition hint relative to the raster DPI
 
     @classmethod
     def find(
@@ -226,7 +227,7 @@ class Tesseract:
             image.save(source, dpi=(dpi, dpi))
             base = Path(temp) / "result"
             try:
-                done = self._recognize_call(source, base, dpi, psm)
+                done = self._recognize_call(source, base, max(1, round(dpi * self.dpi_factor)), psm)
             except OcrUnavailable:
                 self.failures += 1
                 raise

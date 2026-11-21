@@ -15,6 +15,13 @@ if TYPE_CHECKING:  # pragma: no cover
     from heocr.contract import Document
 
 
+def _find_engine(settings: dict, **kwargs) -> Tesseract:
+    engine = Tesseract.find(settings["cmd"], **kwargs)
+    if "dpi_factor" in settings:
+        engine.dpi_factor = settings["dpi_factor"]
+    return engine
+
+
 def engine_for(doc: "Document") -> Tesseract | None:
     """The document's OCR engine, found once; None when OCR is off or unavailable (reason kept).
 
@@ -47,8 +54,8 @@ def engine_for(doc: "Document") -> Tesseract | None:
                 doc.flags.append("bundled_model_unavailable")
             model = None
         try:
-            doc._ocr_engine = Tesseract.find(
-                settings["cmd"], lang=settings["lang"], psm=settings["psm"], model=model
+            doc._ocr_engine = _find_engine(
+                settings, lang=settings["lang"], psm=settings["psm"], model=model
             )
             doc.components.update(doc._ocr_engine.provenance())
         except OcrUnavailable as exc:
@@ -76,7 +83,7 @@ def engine_for_model(doc: "Document", model: str | None) -> Tesseract | None:
     if model in doc._ocr_engines:
         return doc._ocr_engines[model]
     try:
-        engine = Tesseract.find(settings["cmd"], lang=settings["lang"], psm=settings["psm"], model=model)
+        engine = _find_engine(settings, lang=settings["lang"], psm=settings["psm"], model=model)
         doc.components.update(engine.provenance())
     except OcrUnavailable as exc:
         doc._ocr_error = doc._ocr_error or str(exc)
@@ -102,7 +109,7 @@ def number_engine_for(doc: "Document") -> Tesseract | None:
         return None
     if doc._number_engine is None and doc._number_error is None:
         try:
-            doc._number_engine = Tesseract.find(doc._ocr_settings["cmd"], lang=NUMBER_LANG, psm=7)
+            doc._number_engine = _find_engine(doc._ocr_settings, lang=NUMBER_LANG, psm=7)
             doc.components["tesseract:number_lang"] = NUMBER_LANG
             for language, sha in doc._number_engine.models.items():
                 doc.components[f"tesseract:{language}.traineddata"] = f"sha256:{sha}"

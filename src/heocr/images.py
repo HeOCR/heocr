@@ -11,7 +11,8 @@ PDF page: ruled tables cell by cell (D3e), ink accounting, the number model for 
 - **Size:** a frame over ``MAX_RENDER_PIXELS`` is scaled down to it before OCR and flagged
   ``image_downscaled``; a hostile size cannot allocate unbounded memory, and Pillow's own
   decompression-bomb limit stays on.
-- **Colour:** transparency is flattened onto white, and the frame is read in grey levels.
+- **Colour:** transparency is flattened onto white. RGB camera JPEGs with 72 DPI metadata
+  retain their colour for OCR. Tesseract receives a 300 DPI reading hint for these images.
 - **Pages:** at most ``max_pages`` frames are read (``contract.MAX_PAGES``, 2,000 by default);
   the rest are one ``unread`` entry (``page_limit``), and the document is flagged.
 - **Nothing silent:** a frame without ink is an ``empty`` page; a file Pillow cannot decode, or
@@ -28,9 +29,11 @@ from heocr.ocr.regions import MAX_RENDER_PIXELS, RENDER_DPI, has_ink
 MIN_DPI = 50  # a smaller declared resolution is a placeholder (JFIF's 1:1 aspect, 72 by default in some tools)
 MAX_DPI = 2400
 ASSUMED_DPI = RENDER_DPI
+CAMERA_METADATA_DPI = 72
+CAMERA_OCR_DPI = RENDER_DPI
 
 
-def _grey(frame):
+def _prepare_frame(frame, *, keep_colour: bool):
     from PIL import Image, ImageOps
 
     frame = ImageOps.exif_transpose(frame)
@@ -38,7 +41,16 @@ def _grey(frame):
         rgba = frame.convert("RGBA")
         white = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
         frame = Image.alpha_composite(white, rgba)
-    return frame.convert("L")
+    return frame if keep_colour else frame.convert("L")
+
+
+def _camera_jpeg(image, dpi: float) -> bool:
+    from PIL import ExifTags
+
+    if dpi != CAMERA_METADATA_DPI or image.format != "JPEG" or image.mode != "RGB":
+        return False
+    exif = image.getexif()
+    return bool(exif.get(ExifTags.Base.Make) or exif.get(ExifTags.Base.Model))
 
 
 def _dpi(frame) -> tuple[float, bool]:
@@ -83,11 +95,12 @@ def read_image(body: bytes, doc: Document) -> None:
             break
         try:
             image.seek(index)
-            frame = _grey(image.copy())
+            dpi, assumed = _dpi(image)
+            camera_jpeg = _camera_jpeg(image, dpi)
+            frame = _prepare_frame(image.copy(), keep_colour=camera_jpeg)
         except (OSError, ValueError, EOFError) as exc:
             doc.unread.append(Unread(scope="page", reason="image_unreadable", page=index, detail=f"frame {index}: {type(exc).__name__}"))
             continue
-        dpi, assumed = _dpi(image)
         flags = ["dpi_assumed"] if assumed else []
         scale = dpi / 72  # pixels per point
         width, height = frame.size[0] / scale, frame.size[1] / scale
@@ -97,7 +110,11 @@ def read_image(body: bytes, doc: Document) -> None:
             scale *= factor
             flags.append("image_downscaled")
         signals = {"image_format": (image.format or "").lower(), "frame": index, "dpi": round(dpi, 1), "pixels": list(frame.size)}
-        if not has_ink(frame):
+        if not has_ink(frame.convert("L") if camera_jpeg else frame):
             doc.pages.append(Page(index, round(width, 2), round(height, 2), "empty", "none", signals, {"chars_total": 0, "chars_read": 0, "status": "nothing_to_read"}, flags))
             continue
+        if camera_jpeg and doc._ocr_settings is not None:
+            dpi_factor = CAMERA_OCR_DPI / CAMERA_METADATA_DPI
+            doc._ocr_settings["dpi_factor"] = dpi_factor
+            signals["tesseract_dpi_requested"] = max(1, round(round(scale * 72) * dpi_factor))
         _ocr_page(doc, index, None, round(width, 2), round(height, 2), "T5", signals, PageText(), flags, rendered=(frame, scale))
