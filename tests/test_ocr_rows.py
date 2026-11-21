@@ -166,6 +166,28 @@ class OcrRowsReaderTest(unittest.TestCase):
         # Column by column: every cell of the first column comes before any of the second.
         self.assertLess(doc.text.index(ROWS[-1][0]), doc.text.index(ROWS[0][1]))
 
+    def test_a_late_paragraph_in_the_same_column_is_put_above_the_following_text(self) -> None:
+        self.write_paragraphs([
+            (1500, 590, "שורת פתיחה"), (1500, 700, "המשך הטקסט"), (1510, 430, "כותרת מקומית"),
+            (300, 390, "טור נוסף"), (300, 460, "המשך הטור"),
+        ])
+        doc = self.extract()
+        self.assertEqual([b.text for b in doc.blocks], ["כותרת מקומית", "שורת פתיחה", "המשך הטקסט", "טור נוסף", "המשך הטור"])
+        self.assertIn("reading_order_ocr_adjusted_unverified", doc.pages[0].flags)
+        self.assertEqual(heocr.validate(doc.to_dict()), [])
+
+    def test_overlapping_paragraph_boxes_keep_engine_order(self) -> None:
+        self.write_paragraphs([(1500, 590, "קטע ראשון"), (1510, 580, "קטע חופף")])
+        doc = self.extract()
+        self.assertEqual([b.text for b in doc.blocks], ["קטע ראשון", "קטע חופף"])
+        self.assertNotIn("reading_order_ocr_adjusted_unverified", doc.pages[0].flags)
+
+    def write_paragraphs(self, paragraphs) -> None:
+        rows = [self.tsv.read_text(encoding="utf-8").splitlines()[0]]
+        for n, (x, y, text) in enumerate(paragraphs, 1):
+            rows.append(f"5\t1\t{n}\t1\t1\t1\t{x}\t{y}\t700\t{H}\t90.0\t{text}")
+        self.tsv.write_text("\n".join(rows) + "\n", encoding="utf-8")
+
 
 if __name__ == "__main__":
     unittest.main()

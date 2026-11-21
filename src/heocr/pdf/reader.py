@@ -10,6 +10,7 @@ from __future__ import annotations
 import copy
 import ctypes
 from collections import Counter, defaultdict
+from itertools import pairwise
 import math
 import re
 import unicodedata
@@ -2039,6 +2040,45 @@ def _unrotate_records(doc: Document, first_block: int, first_unread: int, index:
             entry.bbox = unrotate_box(entry.bbox, angle, center)
 
 
+def _order_ocr_paragraphs(blocks: list[Block], first: int) -> bool:
+    """Put consecutive, well-aligned paragraphs in the same visual column in vertical order.
+
+    Require a common horizontal span of at least two thirds of the widest paragraph.
+    Overlapping vertical boxes may be different flows, so keep their engine order. A small
+    overlap is allowed for OCR boxes that include ascenders, descenders and stray marks.
+    """
+    changed = False
+
+    def close(start: int, end: int) -> None:
+        nonlocal changed
+        if end - start < 2:
+            return
+        run = blocks[start:end]
+        ordered = sorted(run, key=lambda b: b.bbox[1])
+        if ordered == run:
+            return
+        for upper, lower in pairwise(ordered):
+            a, b = upper.bbox, lower.bbox
+            if a[3] - b[1] > 0.15 * min(a[3] - a[1], b[3] - b[1]):
+                return
+        blocks[start:end] = ordered
+        changed = True
+
+    start = first
+    left = right = widest = 0.0
+    for i in range(first, len(blocks)):
+        x0, _, x1, _ = blocks[i].bbox
+        common_left, common_right = max(left, x0), min(right, x1)
+        width = max(widest, x1 - x0)
+        if i > start and common_right - common_left >= (2 / 3) * width:
+            left, right, widest = common_left, common_right, width
+        else:
+            close(start, i)
+            start, left, right, widest = i, x0, x1, x1 - x0
+    close(start, len(blocks))
+    return changed
+
+
 # Ink in the rest of a page, once its tables are taken out, is looked for tile by tile: a short faint line
 # holds far less ink than a share of a whole page, and was dropped. Bare grainy paper has no tile with a
 # pixel REST_FAINT_DELTA levels under the paper; a faint line's tile has hundreds.
@@ -2127,6 +2167,8 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
     unruled = table_rows(result.lines, scale, doc._rtl) if OCR_TABLE_ROWS else []
     taken = {id(line) for table in unruled for line in table.lines}
     read = _ocr_blocks(doc, index, engine, OcrResult([line for line in result.lines if id(line) not in taken]), scale)
+    if _order_ocr_paragraphs(doc.blocks, first):
+        flags = flags + ["reading_order_ocr_adjusted_unverified"]
     if unruled:
         row_blocks, in_rows = _ocr_row_tables(doc, index, engine, unruled, scale)
         _place_tables(doc, first, row_blocks)
@@ -2165,7 +2207,7 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
     )
 
 
-# Unruled tables on OCR pages (``heocr.pdf.ocrrows``): off, the page keeps Tesseract's block order.
+# Unruled tables on OCR pages (``heocr.pdf.ocrrows``): off, the table stays as OCR text.
 OCR_TABLE_ROWS = True
 
 
