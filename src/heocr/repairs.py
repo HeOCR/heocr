@@ -18,8 +18,12 @@ from __future__ import annotations
 import re
 from collections import Counter
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from heocr.textflags import is_private_use
+
+if TYPE_CHECKING:
+    from heocr.contract import Document
 
 
 @dataclass(frozen=True)
@@ -83,6 +87,17 @@ LATIN_WRAP_BRACKETS = Rule(
         "the last Hebrew letter and it; the next starts with such a stretch holding exactly one, with no "
         "letter or digit between it and the first Hebrew letter; a Latin letter or § lies between the two; "
         "the rest of each line holds an even number of round brackets; and the two do not read as a pair"
+    ),
+)
+
+HEBREW_COMMA_SPACING = Rule(
+    rule_id="hebrew_comma_spacing",
+    reason="Logical Hebrew punctuation attaches a comma to the preceding text.",
+    example=("הפנס כבה ,והחדר החשיך", "הפנס כבה, והחדר החשיך"),
+    formats=("pdf", "ocr"),
+    evidence=(
+        "horizontal whitespace before a comma attached to the next token or at line end, "
+        "with Hebrew as the nearest letter on at least one side; a comma between digits stays as read"
     ),
 )
 
@@ -153,7 +168,8 @@ def cp1255_letter(code: int) -> str | None:
 
 RULES: dict[str, Rule] = {
     rule.rule_id: rule
-    for rule in (SYMBOL_FONT_BULLET, DIRECTION_MARKS, LATIN1_ETH_NUN, RTL_BRACKET_ORDER, LATIN_WRAP_BRACKETS, FONT_PRIVATE_USE_BY_OCR, REVERSED_DIGIT_GROUPS, CP1255_SHIFTED_FONT)
+    for rule in (SYMBOL_FONT_BULLET, DIRECTION_MARKS, LATIN1_ETH_NUN, RTL_BRACKET_ORDER, LATIN_WRAP_BRACKETS,
+                 HEBREW_COMMA_SPACING, FONT_PRIVATE_USE_BY_OCR, REVERSED_DIGIT_GROUPS, CP1255_SHIFTED_FONT)
 }
 
 
@@ -163,6 +179,52 @@ def record(rule: Rule, changes: Counter) -> list[dict]:
         {"rule": rule.rule_id, "from": source, "to": target, "count": count}
         for (source, target), count in sorted(changes.items())
     ]
+
+
+_LINE_ENDS = "\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029"
+_COMMA_SPACE = re.compile(r"[^\S\r\n]+,(?=\S|$)")
+
+
+def _nearest_letter_is_hebrew(chars) -> bool:
+    return "א" <= next((ch for ch in chars if ch.isalpha()), "") <= "ת"
+
+
+def hebrew_comma_spacing(text: str) -> tuple[str, Counter]:
+    """Repair a misplaced space next to a Hebrew comma within each physical line."""
+    changes: Counter = Counter()
+    if "," not in text:
+        return text, changes
+    parts = []
+    for line in text.splitlines(keepends=True):
+        content = line.rstrip(_LINE_ENDS)
+
+        def replace(match: re.Match) -> str:
+            left, right = content[:match.start()], content[match.end():]
+            if left[-1:].isdigit() and right[:1].isdigit():
+                return match.group()
+            if not (_nearest_letter_is_hebrew(reversed(left)) or _nearest_letter_is_hebrew(right)):
+                return match.group()
+            value = ", " if right else ","
+            changes[match.group(), value] += 1
+            return value
+
+        parts.append(_COMMA_SPACE.sub(replace, content) + line[len(content):])
+    return "".join(parts), changes
+
+
+def repair_hebrew_commas(doc: Document) -> None:
+    """Post-process routed text, keeping physical lines and block text in sync."""
+    for block in doc.blocks:
+        if block.source not in ("ocr", "text_layer"):
+            continue
+        block.text, changes = hebrew_comma_spacing(block.text)
+        for line in block.lines or []:
+            line.text, _ = hebrew_comma_spacing(line.text)
+        for row in block.cells or []:
+            for cell in row:
+                cell.text, edited = hebrew_comma_spacing(cell.text)
+                changes.update(edited)
+        block.repairs += record(HEBREW_COMMA_SPACING, changes)
 
 
 def symbol_font_bullet(text: str) -> tuple[str, Counter]:

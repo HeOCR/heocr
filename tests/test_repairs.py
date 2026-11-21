@@ -39,8 +39,31 @@ class RuleListTest(unittest.TestCase):
         self.assertEqual(repairs.symbol_font_bullet("סעיף")[0], "סעיף")  # no space after it
         self.assertEqual(repairs.symbol_font_bullet("")[0], "•")
 
+    def test_hebrew_comma_spacing_is_local_to_each_line(self) -> None:
+        raw = "(העציץ פרח)\t,שוב באביב ,\r\nהחלון נסגר ,אבל הדלת פתוחה"
+        repaired, changes = repairs.hebrew_comma_spacing(raw)
+        self.assertEqual(repaired, "(העציץ פרח), שוב באביב,\r\nהחלון נסגר, אבל הדלת פתוחה")
+        self.assertEqual(sum(changes.values()), 3)
+        self.assertEqual(repairs.hebrew_comma_spacing(repaired), (repaired, {}))
+
+    def test_hebrew_comma_spacing_preserves_numbers_and_latin_runs(self) -> None:
+        text = "מחיר 12 ,345 ו־8,900\nרשימה (map ,compass) פתוחה\nסוף Chapter IX ,\nMaps ,Compasses"
+        self.assertEqual(repairs.hebrew_comma_spacing(text), (text, {}))
+
 
 class SwitchTest(unittest.TestCase):
+    def test_hebrew_comma_spacing_in_kept_pdf_lines(self) -> None:
+        raw = "ננעל השער ,ונותר הפעמון"
+        body = make_pdf([PdfPage(lines=lines_block([raw]))])
+        off = heocr.extract(body, ocr=False, repairs=False)
+        on = heocr.extract(body, ocr=False)
+        self.assertEqual(on.pages[0].route, "text_layer")
+        self.assertEqual(pdf_lines(off), [raw])
+        self.assertEqual(pdf_lines(on), ["ננעל השער, ונותר הפעמון"])
+        self.assertEqual(on.blocks[0].text, on.blocks[0].lines[0].text)
+        self.assertEqual(on.blocks[0].repairs[0]["rule"], "hebrew_comma_spacing")
+        self.assertEqual(heocr.validate(on.to_dict()), [])
+
     def test_pdf_bullets_on_and_off(self) -> None:
         body = make_pdf([PdfPage(lines=lines_block(BULLETED))])
         on = heocr.extract(body)

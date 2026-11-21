@@ -55,6 +55,15 @@ class OcrRouteTest(unittest.TestCase):
         self.assertEqual([round(v, 2) for v in first.lines[0].bbox], [72.0, 48.0, 504.0, 62.4])
         self.assertEqual(doc.unread, [])
 
+    def test_hebrew_comma_spacing_after_ocr(self) -> None:
+        body = make_pdf([PdfPage(images=FULL_PAGE, image_gray=0xFF)])
+        with mock.patch.dict(os.environ, {"FAKE_LINE": "הזריחה החלה ,ועלה האור"}):
+            doc = heocr.extract(body, tesseract=FAKE, ocr_model="heb", ocr_psm=7, check_numbers=False)
+        self.assertEqual(doc.pages[0].route, "ocr")
+        self.assertEqual(doc.blocks[0].text, "הזריחה החלה, ועלה האור")
+        self.assertEqual(doc.blocks[0].lines[0].text, doc.blocks[0].text)
+        self.assertEqual(doc.blocks[0].repairs[0]["rule"], "hebrew_comma_spacing")
+
     def test_force_ocr_reads_a_text_layer_page_by_ocr(self) -> None:
         # A workaround for a text layer heocr reads badly: every PDF page goes to OCR, its layer ignored.
         pdf = make_pdf([PdfPage(lines=lines_block(["שורה ראשונה של מסמך", "שורה שנייה של מסמך"]))])
