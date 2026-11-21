@@ -19,6 +19,7 @@ from __future__ import annotations
 import re
 import statistics
 import unicodedata
+from collections import defaultdict
 from dataclasses import dataclass, field
 
 # A gap wider than this share of the loose box height (the font's ascent to descent, about
@@ -63,6 +64,7 @@ class Atom:
     index: int
     repaired: str | None = None  # the repair rule that changed this character, if any
     font: str = ""  # the font's name, recorded for private-use codes (font_private_use_by_ocr)
+    reflected_number: tuple[int, int] | None = None  # first stream index and length of this numeric object
 
     @property
     def cx(self) -> float:
@@ -447,11 +449,27 @@ def _cells_follow_page(texts: list[str], types: list[str]) -> bool:
     return 2 * latin < len(cells)
 
 
+def _unreflect_numbers(units: list[tuple[str, Atom | None]], texts: list[str]) -> None:
+    # Restore only complete tokens. Keep the actual boxes for geometry and coverage.
+    positions: dict[tuple[int, int], list[int]] = defaultdict(list)
+    for index, (_, atom) in enumerate(units):
+        if atom is not None and atom.reflected_number is not None:
+            positions[atom.reflected_number].append(index)
+    for (_, length), slots in positions.items():
+        first, last = slots[0], slots[-1]
+        if len(slots) == length == last - first + 1:
+            texts[first:last + 1] = reversed(texts[first:last + 1])
+
+
 def logical_text(component: list[Atom], page_rtl: bool = True, latin_lead: bool = False) -> tuple[str, str, list[str]]:
     """Inverse bidi for one visual line segment: (text, direction, flags). ``latin_lead``: the line
     continues a Latin reference from the line before it in its paragraph or cell."""
     units = _units(component)
     texts = _cell_gaps(units)
+    # Tesseract's invisible reflected number objects have logical text but RTL coordinates.
+    # Present those tokens in the usual LTR visual order before applying inverse bidi.
+    if any(atom.reflected_number is not None for atom in component):
+        _unreflect_numbers(units, texts)
     # A cell gap is a segment separator: it and its neighbours take the line's direction (UAX #9 L1).
     types = ["S" if u == "\t" else _unit_type(u) for u in texts]
     n = len(texts)
