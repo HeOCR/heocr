@@ -1342,6 +1342,14 @@ def _spread_halves(width: float, atoms: list[Atom], tables, rtl: bool):
 def _place_tables(doc: Document, first: int, tables: list[Block]) -> None:
     """Insert a page's table blocks among its line blocks, by their top edge."""
     for table in sorted(tables, key=lambda t: t.bbox[1]):
+        if "table_open_sides_inferred" in table.flags:
+            # Put a form table with its own column, even if the preceding column runs lower.
+            local = [(i, b.bbox) for i, b in enumerate(doc.blocks[first:], first)
+                     if b.bbox and _same_ocr_column(b.bbox, table.bbox)]
+            if local:
+                at = next((i for i, box in local if box[1] >= table.bbox[3]), local[-1][0] + 1)
+                doc.blocks.insert(at, table)
+                continue
         at = len(doc.blocks)
         for i in range(first, len(doc.blocks)):
             block = doc.blocks[i]
@@ -1980,8 +1988,15 @@ def _page_number_pass(numbers, image, result, dpi: int) -> tuple[int, int]:
     return found, replaced
 
 
+def _same_ocr_column(box, table) -> bool:
+    """A paragraph and a form table share most of their narrower horizontal span."""
+    overlap = min(box[2], table[2]) - max(box[0], table[0])
+    return overlap >= 0.65 * min(box[2] - box[0], table[2] - table[0])
+
+
 def _ocr_blocks(
-    doc: Document, index: int, engine, result, render_scale: float, *, offset=(0.0, 0.0), flags=(), min_confidence: float | None = None
+    doc: Document, index: int, engine, result, render_scale: float, *, offset=(0.0, 0.0), flags=(),
+    min_confidence: float | None = None, form_tables=(),
 ) -> int:
     """OCR lines into blocks, one per Tesseract paragraph, with boxes in page points. Returns characters.
 
@@ -1991,7 +2006,11 @@ def _ocr_blocks(
     dpi = round(render_scale * 72, 1)
     groups: list[list] = []
     for line in result.lines:
-        if groups and groups[-1][-1].paragraph == line.paragraph:
+        # With the grid masked, OCR may put the instructions above and below it in the same
+        # paragraph. Split at the bottom of that grid so its block can be inserted between them.
+        if (groups and groups[-1][-1].paragraph == line.paragraph
+                and not any(groups[-1][-1].bbox[1] * scale < table[3] <= line.bbox[1] * scale
+                            and _same_ocr_column([v * scale for v in line.bbox], table) for table in form_tables)):
             groups[-1].append(line)
         else:
             groups.append([line])
@@ -2126,7 +2145,7 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
         level = paper_level(source)
         turned = source.rotate(deskew, resample=_BICUBIC, fillcolor=level if source.mode == "L" else (level, level, level))
         turned_grids = tables_in(turned, scale)
-        if abs(deskew) >= DESKEW_TEXT_MIN_DEG or grids or turned_grids:
+        if turned_grids or (not grids and abs(deskew) >= DESKEW_TEXT_MIN_DEG):
             image, grids = turned, turned_grids
             flags = flags + ["deskewed"]
             signals["deskew_degrees"] = deskew
@@ -2166,7 +2185,9 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
     # An unruled table is read by Tesseract column by column; its cells are given back in rows.
     unruled = table_rows(result.lines, scale, doc._rtl) if OCR_TABLE_ROWS else []
     taken = {id(line) for table in unruled for line in table.lines}
-    read = _ocr_blocks(doc, index, engine, OcrResult([line for line in result.lines if id(line) not in taken]), scale)
+    form_tables = [t.bbox for t in grids if "table_open_sides_inferred" in t.flags]
+    read = _ocr_blocks(doc, index, engine, OcrResult([line for line in result.lines if id(line) not in taken]), scale,
+                       form_tables=form_tables)
     if _order_ocr_paragraphs(doc.blocks, first):
         flags = flags + ["reading_order_ocr_adjusted_unverified"]
     if unruled:
