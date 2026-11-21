@@ -2,6 +2,7 @@
 
 import contextlib
 from io import BytesIO, StringIO
+from importlib.util import find_spec
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -44,6 +45,12 @@ def config(mode="force"):
             "b" * 64,
         )
     return heocr.HandwritingConfig("/local/recognizer.safetensors", PIN, mode)
+
+
+def geometry_config():
+    return heocr.HandwritingConfig(
+        "/local/recognizer.safetensors", PIN, detector="geometry"
+    )
 
 
 def backend(tags=(HANDWRITTEN, HANDWRITTEN), records=None):
@@ -126,6 +133,56 @@ class HandwritingTest(unittest.TestCase):
                 with patch("heocr.handwriting._load", return_value=engine):
                     self.assert_ordinary_ocr(config("auto"), "handwriting_not_detected")
                 engine.recognize.assert_not_called()
+
+    def test_geometry_rejects_before_loading_kraken(self):
+        with (
+            patch("heocr.handwriting._detect_geometry", return_value=False) as detect,
+            patch("heocr.handwriting._load") as load,
+        ):
+            self.assert_ordinary_ocr(None)
+            detect.assert_not_called()
+            self.assert_ordinary_ocr(geometry_config(), "handwriting_not_detected")
+            detect.assert_called_once()
+            load.assert_not_called()
+
+    def test_geometry_accepts_untyped_segmenter_lines(self):
+        engine = backend(tags=(None, None))
+        with (
+            patch("heocr.handwriting._detect_geometry", return_value=True),
+            patch("heocr.handwriting._load", return_value=engine) as load,
+        ):
+            doc = heocr.extract(invented_scan(), handwriting=geometry_config())
+        load.assert_called_once()
+        engine.recognize.assert_called_once()
+        self.assertIn("handwriting_kraken", doc.pages[0].flags)
+        self.assertEqual(doc.options["handwriting"]["detector"], "geometry-v1")
+        self.assertEqual(heocr.validate(doc.to_dict()), [])
+
+    def test_geometry_unavailable_falls_back_without_loading_kraken(self):
+        with (
+            patch("heocr.handwriting._detect_geometry", side_effect=ImportError),
+            patch("heocr.handwriting._load") as load,
+        ):
+            self.assert_ordinary_ocr(
+                geometry_config(), "handwriting_detector_unavailable"
+            )
+            load.assert_not_called()
+
+    @unittest.skipUnless(find_spec("numpy") and find_spec("scipy"), "optional geometry")
+    def test_regular_invented_glyphs_take_ordinary_ocr(self):
+        from heocr.handwriting_geometry import handwriting_score, is_handwritten
+
+        image = Image.new("L", (900, 1200), 255)
+        draw = ImageDraw.Draw(image)
+        for y in range(200, 1000, 31):
+            for x in range(160, 755, 26):
+                draw.rectangle((x, y, x + 2, y + 10), fill=0)
+                draw.rectangle((x, y + 8, x + 7, y + 10), fill=0)
+        score = handwriting_score(image)
+        self.assertIsNotNone(score)
+        self.assertEqual(score, handwriting_score(image))
+        self.assertFalse(is_handwritten(image))
+        self.assertFalse(is_handwritten(Image.new("L", image.size, 255)))
 
     def assert_ordinary_ocr(self, handwriting, flag=None):
         engine = Mock()
@@ -248,6 +305,37 @@ class HandwritingTest(unittest.TestCase):
                 )
                 self.assertEqual(main(args + ["--no-ocr"]), 1)
         self.assertIn("handwriting needs OCR", stderr.getvalue())
+
+    def test_cli_geometry_accepts_scan_without_custom_segmenter(self):
+        stdout = StringIO()
+        with (
+            TemporaryDirectory() as directory,
+            patch("heocr.handwriting._detect_geometry", return_value=True) as detect,
+            patch("heocr.handwriting._load", return_value=backend(tags=(None, None))),
+            contextlib.redirect_stdout(stdout),
+        ):
+            path = Path(directory) / "scan.png"
+            path.write_bytes(invented_scan())
+            self.assertEqual(
+                main(
+                    [
+                        str(path),
+                        "-f",
+                        "json",
+                        "--handwriting",
+                        "invented.safetensors",
+                        "--handwriting-sha256",
+                        PIN,
+                        "--handwriting-detector",
+                        "geometry",
+                    ]
+                ),
+                0,
+            )
+        detect.assert_called_once()
+        output = json.loads(stdout.getvalue())
+        self.assertEqual(output["options"]["handwriting"]["detector"], "geometry-v1")
+        self.assertEqual(output["blocks"][0]["ocr"]["engine"], "kraken")
 
 
 if __name__ == "__main__":

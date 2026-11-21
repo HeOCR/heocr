@@ -38,8 +38,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--force-ocr", action="store_true", help="read every PDF page by OCR, ignoring its text layer (a workaround for a text layer heocr reads badly)")
     parser.add_argument("--handwriting", metavar="MODEL", help="opt into Kraken on scan pages with a local .safetensors recognizer")
     parser.add_argument("--handwriting-sha256", metavar="HEX", help="expected SHA-256 of the handwriting recognizer")
-    parser.add_argument("--handwriting-mode", choices=("auto", "force"), help="auto uses handwriting tags, force declares scan pages handwritten")
-    parser.add_argument("--handwriting-segmenter", metavar="MODEL", help="local .safetensors segmentation model for handwriting line tags")
+    parser.add_argument("--handwriting-mode", choices=("auto", "force"), help="auto gates scan pages, force declares them handwritten")
+    parser.add_argument("--handwriting-detector", choices=("tags", "geometry"), help="automatic handwriting gate (default: tags)")
+    parser.add_argument("--handwriting-segmenter", metavar="MODEL", help="local .safetensors segmentation model, required for the tags detector")
     parser.add_argument("--handwriting-segmenter-sha256", metavar="HEX", help="expected SHA-256 of the supplied segmenter")
     parser.add_argument(
         "--check-numbers",
@@ -101,9 +102,10 @@ def main(argv: list[str] | None = None) -> int:
             handwriting = HandwritingConfig(
                 args.handwriting, args.handwriting_sha256 or "", args.handwriting_mode or "auto",
                 args.handwriting_segmenter, args.handwriting_segmenter_sha256,
+                detector=args.handwriting_detector or "tags",
             )
         elif any((args.handwriting_sha256, args.handwriting_mode, args.handwriting_segmenter,
-                  args.handwriting_segmenter_sha256)):
+                  args.handwriting_segmenter_sha256, args.handwriting_detector)):
             raise ValueError("handwriting options require --handwriting MODEL")
         doc = extract(
             args.file,

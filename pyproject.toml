@@ -37,7 +37,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # Explicit heavyweight runtime for the experimental, off-by-default handwriting route.
-handwriting = ["kraken==7.2"]
+handwriting = ["kraken==7.2", "numpy>=1.26", "scipy>=1.11"]
 # Tests only: the record is checked against its JSON Schema (tests/__init__.py). Not needed at run time.
 test = ["jsonschema>=4.18"]
 
