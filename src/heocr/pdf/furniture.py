@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from difflib import SequenceMatcher
 
 from heocr.contract import Block, Document
 
@@ -129,6 +130,70 @@ def _sub_block(block: Block, lines, role: str) -> Block:
         lines=list(lines),
         flags=flags,
     )
+
+
+def mark_ocr_running_headers(doc: Document) -> None:
+    """Move a recurring centered scan header and its neighboring OCR fragments out of the body.
+
+    Require textual support on three nearby pages in the same margin position. Never split an
+    OCR block: doing so would detach its confidence and second readings from their source.
+    """
+    pages = {p.index: p for p in doc.pages if p.route == "ocr" and p.width > 0 and p.height > 0}
+    candidates: dict[int, list[Block]] = defaultdict(list)
+    for block in doc.blocks:
+        page = pages.get(block.page)
+        if page is None or block.source != "ocr" or block.role != "body" or not block.bbox or not block.lines:
+            continue
+        x0, y0, x1, y1 = block.bbox
+        if (0.32 * page.width <= x0 < x1 <= 0.68 * page.width and y1 <= 0.075 * page.height
+                and 0 < y1 - y0 <= 0.022 * page.height):
+            candidates[page.index].append(block)
+
+    anchors: dict[int, list[tuple[Block, str, float, float]]] = {}
+    for index, blocks in candidates.items():
+        page = pages[index]
+        anchors[index] = []
+        if len(blocks) > 16:  # Too many fragments to identify a single running title confidently.
+            continue
+        for block in blocks:
+            if any(ch.isdigit() for ch in block.text) or len(block.text.split()) < 2:
+                continue
+            text = "".join(ch for ch in block.text.casefold() if ch.isalpha())
+            x0, y0, x1, y1 = block.bbox
+            if 7 <= len(text) <= 60:
+                anchors[index].append((block, text, (x0 + x1) / (2 * page.width), (y0 + y1) / (2 * page.height)))
+
+    headers = []
+    for index, items in anchors.items():
+        supported = []
+        for block, text, x, y in items:
+            repeats = sum(
+                any(abs(x - xx) <= 0.10 and abs(y - yy) <= 0.025
+                    and SequenceMatcher(None, text, other, autojunk=False).ratio() >= 0.75
+                    for _, other, xx, yy in anchors.get(i, ()))
+                for i in range(index - 4, index + 5) if i != index
+            )
+            if repeats >= 2:
+                supported.append((repeats, len(text), block))
+        if not supported:
+            continue
+        anchor = max(supported, key=lambda item: item[:2])[2]
+        x0, y0, x1, y1 = anchor.bbox
+        height = y1 - y0
+        row = []
+        for block in candidates[index]:
+            left, top, right, bottom = block.bbox
+            overlap = min(bottom, y1) - max(top, y0)
+            if (overlap >= 0.5 * min(height, bottom - top)
+                    and max(x0 - right, left - x1) <= height):
+                block.role = "header"
+                block.flags.append("page_furniture")
+                row.append(block)
+        headers.extend(sorted(row, key=lambda b: b.bbox[0], reverse=doc._rtl))
+
+    if headers:
+        selected = {id(b) for b in headers}
+        doc.blocks[:] = _ordered([*headers, *(b for b in doc.blocks if id(b) not in selected)])
 
 
 def _ordered(blocks: list[Block]) -> list[Block]:
