@@ -8,6 +8,7 @@ from pathlib import Path
 import heocr
 from heocr import repairs
 from heocr.cli import main
+from heocr.contract import Block, Document, Line
 from tests.synth.docx import Docx, abstract_num, lvl, num, para
 from tests.synth.pdf import PdfPage, lines_block, make_pdf
 
@@ -16,6 +17,44 @@ BULLETED = [" סעיף ראשון", " סעיף שני", " סעיף של
 
 def pdf_lines(doc) -> list[str]:
     return [line.text for block in doc.blocks for line in (block.lines or [])]
+
+
+class OcrDateBracketTest(unittest.TestCase):
+    def test_date_shape_and_validation(self) -> None:
+        before, after = repairs.OCR_DATE_BRACKET_ORDER.example
+        self.assertEqual(repairs.ocr_date_bracket_order(before)[0], after)
+        self.assertEqual(repairs.ocr_date_bracket_order(after), (after, {}))
+        self.assertEqual(
+            repairs.ocr_date_bracket_order("נפתח 29)  בפברואר (2028,")[0],
+            "נפתח (29  בפברואר 2028),",
+        )
+        for text in (
+            "נפתח 29) בפברואר (2027",
+            "נפתח 6) בחודש (2028",
+            "נפתח 9) במרץ (2028.7",
+            "נפתח 9) במרץ\n(2028",
+            "נפתח [מחר] 9) במרץ (2028",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(repairs.ocr_date_bracket_order(text), (text, {}))
+
+    def test_preserves_a_balanced_wrapped_pair_and_pdf_text_layer(self) -> None:
+        box = [0, 0, 1, 1]
+        middle = "בשעה 9) במרץ (2028 ניפגש"
+        for source, rows in (
+            ("ocr", ["השער נפתח (אתמול", middle, "ונסכם כרגיל)"]),
+            ("ocr", [middle, "המשך שאינו מאוזן("]),
+            ("text_layer", [middle]),
+        ):
+            with self.subTest(source=source, rows=rows):
+                text = "\n".join(rows)
+                block = Block("paragraph", text, source=source, direction="rtl",
+                              lines=[Line(row, box) for row in rows])
+                doc = Document("", 0, "pdf", "invented", blocks=[block])
+                repairs.repair_ocr_date_brackets(doc)
+                self.assertEqual(block.text, text)
+                self.assertEqual(pdf_lines(doc), rows)
+                self.assertEqual(block.repairs, [])
 
 
 def bullet_docx() -> bytes:

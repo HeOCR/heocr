@@ -18,6 +18,7 @@ from __future__ import annotations
 import re
 from collections import Counter
 from dataclasses import dataclass
+from datetime import date
 from typing import TYPE_CHECKING
 
 from heocr.textflags import is_private_use
@@ -103,6 +104,17 @@ HEBREW_COMMA_SPACING = Rule(
     ),
 )
 
+OCR_DATE_BRACKET_ORDER = Rule(
+    rule_id="ocr_date_bracket_order",
+    reason="OCR can attach a Hebrew date's parentheses to the inner edges of its left-to-right day and year.",
+    example=("המופע נדחה ליום 9) במרץ (2028.", "המופע נדחה ליום (9 במרץ 2028)."),
+    formats=("ocr",),
+    evidence=(
+        "an RTL OCR line's only two bracket glyphs are inside a valid Gregorian day, Hebrew month and "
+        "four-digit year; moving them outside the date balances the OCR block"
+    ),
+)
+
 
 FONT_PRIVATE_USE_BY_OCR = Rule(
     rule_id="font_private_use_by_ocr",
@@ -171,7 +183,8 @@ def cp1255_letter(code: int) -> str | None:
 RULES: dict[str, Rule] = {
     rule.rule_id: rule
     for rule in (SYMBOL_FONT_BULLET, DIRECTION_MARKS, LATIN1_ETH_NUN, RTL_BRACKET_ORDER, LATIN_WRAP_BRACKETS,
-                 HEBREW_COMMA_SPACING, FONT_PRIVATE_USE_BY_OCR, REVERSED_DIGIT_GROUPS, CP1255_SHIFTED_FONT)
+                 HEBREW_COMMA_SPACING, OCR_DATE_BRACKET_ORDER, FONT_PRIVATE_USE_BY_OCR,
+                 REVERSED_DIGIT_GROUPS, CP1255_SHIFTED_FONT)
 }
 
 
@@ -227,6 +240,58 @@ def repair_hebrew_commas(doc: Document) -> None:
                 cell.text, edited = hebrew_comma_spacing(cell.text)
                 changes.update(edited)
         block.repairs += record(HEBREW_COMMA_SPACING, changes)
+
+
+_HEBREW_MONTHS = {
+    name: month for month, name in enumerate(
+        "ינואר פברואר מרץ אפריל מאי יוני יולי אוגוסט ספטמבר אוקטובר נובמבר דצמבר".split(), 1
+    )
+}
+_HEBREW_MONTHS["מרס"] = 3
+_OCR_DATE_INNER_BRACKETS = re.compile(
+    r"(?<!\S)([0-9]{1,2})\)([ \t]+)ב(" + "|".join(_HEBREW_MONTHS)
+    + r")([ \t]+)\(([1-9][0-9]{3})(?=$|[ \t,.;:!?])(?![.,:][0-9])"
+)
+
+
+def ocr_date_bracket_order(text: str) -> tuple[str, Counter]:
+    """Move the lone misplaced bracket pair to the outer edges of a physical date line."""
+    if [ch for ch in text if ch in "()[]{}"] != [")", "("]:
+        return text, Counter()
+    match = _OCR_DATE_INNER_BRACKETS.search(text)
+    if not match:
+        return text, Counter()
+    day, left_space, month, right_space, year = match.groups()
+    try:
+        date(int(year), _HEBREW_MONTHS[month], int(day))
+    except ValueError:
+        return text, Counter()
+    parenthetical = f"({day}{left_space}ב{month}{right_space}{year})"
+    repaired = text[:match.start()] + parenthetical + text[match.end():]
+    return repaired, Counter({("U+0029 U+0028", "U+0028 U+0029"): 1})
+
+
+def repair_ocr_date_brackets(doc: Document) -> None:
+    """Repair OCR date brackets only if the entire block is then balanced."""
+    for block in doc.blocks:
+        if block.source != "ocr" or block.direction != "rtl" or not block.lines:
+            continue
+        if ")" not in block.text or "(" not in block.text or bracket_order_valid(block.text):
+            continue
+        if block.text != "\n".join(line.text for line in block.lines):
+            continue
+        lines = []
+        changes: Counter = Counter()
+        for line in block.lines:
+            updated, edits = ocr_date_bracket_order(line.text)
+            lines.append(updated)
+            changes.update(edits)
+        text = "\n".join(lines)
+        if changes and bracket_order_valid(text):
+            for line, updated in zip(block.lines, lines):
+                line.text = updated
+            block.text = text
+            block.repairs += record(OCR_DATE_BRACKET_ORDER, changes)
 
 
 def symbol_font_bullet(text: str) -> tuple[str, Counter]:
