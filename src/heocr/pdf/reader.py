@@ -48,7 +48,10 @@ from heocr.pdf.columns import UNRESOLVED, Segment, arrange
 from heocr.pdf.ocrmargins import attach_margin_numbers
 from heocr.pdf.ocrrows import TableRows, table_rows
 from heocr.pdf.ocrlatin import reread_latin_runs
-from heocr.pdf.ocrtables import cell_crop, cell_has_faint_ink, cell_has_ink, cell_psm, faint_cell_image, image_rulings, tables_in
+from heocr.pdf.ocrtables import (
+    CELL_TEXT_PAGE_EDGE, cell_crop, cell_has_faint_ink, cell_has_ink, cell_psm, faint_cell_image,
+    image_rulings, isolated_cell_text, tables_in,
+)
 from heocr.pdf.perspective import rectify_grid
 from heocr.pdf.tables import find_tables, rulings, table_blocks
 from heocr.textflags import is_private_use, text_flags
@@ -2228,29 +2231,52 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
             deskew = 0.0
     # Ruled tables in the image are read cell by cell; the rest of the page once, without them (D3e).
     rectified = rectify_grid(image, scale) if not grids else None
-    if rectified is not None:
-        flags = flags + ["ocr_grid_rectified"]
-    page_image = _without(image, scale, [t.bbox for t in grids], polygon=rectified.mask if rectified else ()) if grids or rectified else image
-    # With its tables taken out, the rest of a page can be bare paper. Tesseract's global threshold then
-    # falls inside the paper's own texture, and it reads that texture as lines of symbols and single
-    # letters (a page with one small table gave 2,801 characters of noise). No ink, not even faint
-    # ink, means nothing to read there.
-    rest_blank = bool(grids or rectified) and not _rest_has_ink(page_image, scale)
-    if rest_blank:
-        flags = flags + ["ocr_rest_blank"]
+    rectified_read = None
+    page_failed = False
+    last_page = index + 1 >= min(doc.page_count or index + 1, doc._max_pages)
+    dpi = round(scale * 72)
+    probe = None
+    probed = rectified is not None and routes.pending(doc)
+    if probed:
+        # The unmasked reading can choose the model and serve as fallback.
+        try:
+            probe = engine.recognize(image, dpi=dpi)
+        except OcrUnavailable:
+            # The current engine can still read isolated cells after a full-page failure.
+            pass
     try:
-        result = OcrResult([]) if rest_blank else engine.recognize(page_image, dpi=round(scale * 72))
-        if routes.pending(doc) and routes.observe(doc, page_image, result, round(scale * 72), last_page=index + 1 >= min(doc.page_count or index + 1, doc._max_pages)):
-            # ocr_model="auto": the probe sampled this page and chose another model; the page is read again by it.
+        if probe is not None and routes.observe(doc, image, probe, dpi, last_page=last_page):
             engine = engine_for(doc)
-            result = engine.recognize(page_image, dpi=round(scale * 72))
+            probe = None
+        if rectified is not None:
+            numbers = number_engine_for(doc) if doc.options.get("check_numbers", "suspect") else None
+            rectified_read = _validated_rectified_tables(doc, index, engine, rectified, scale, numbers, image.size)
+            if rectified_read is None:
+                rectified = None
+                flags = flags + ["ocr_grid_cell_fallback"]
+            else:
+                flags = flags + ["ocr_grid_rectified"]
+
+        page_image = _without(image, scale, [t.bbox for t in grids], polygon=rectified.mask if rectified else ()) if grids or rectified else image
+        # Bare paper outside a table can produce noise when Tesseract thresholds its texture.
+        if (grids or rectified) and not _rest_has_ink(page_image, scale):
+            result = OcrResult([])
+            flags = flags + ["ocr_rest_blank"]
+        else:
+            result = probe if probe is not None and page_image is image else engine.recognize(page_image, dpi=dpi)
+        if not probed and routes.pending(doc) and routes.observe(doc, page_image, result, dpi, last_page=last_page):
+            engine = engine_for(doc)
+            result = engine.recognize(page_image, dpi=dpi)
     except OcrUnavailable as exc:
-        doc.pages.append(
-            Page(index, width, height, page_class, "none", signals,
-                 {"chars_total": text.chars_total, "chars_read": 0, "status": "unread"}, flags + ["ocr_failed"])
-        )
         doc.unread.append(Unread(scope="page", reason="ocr_failed", page=index, detail=str(exc)))
-        return
+        flags = flags + ["ocr_failed"]
+        if rectified_read is None:
+            doc.pages.append(Page(index, width, height, page_class, "none", signals,
+                                  {"chars_total": text.chars_total, "chars_read": 0, "status": "unread"}, flags))
+            return
+        # The isolated table is already read. Keep it even if OCR outside it failed.
+        result = OcrResult([])
+        page_failed = True
     first = len(doc.blocks)
     numbers = number_engine_for(doc) if doc.options.get("check_numbers", "suspect") else None
     number_words = _reread_number_words(numbers, page_image, result, round(scale * 72)) if numbers is not None and numbers is not engine else None
@@ -2282,15 +2308,10 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
         read += in_rows
         flags = flags + ["unruled_tables"]
     if grids or rectified:
-        before_tables = len(doc.unread)
-        table_image, table_grids = (rectified.image, [rectified.grid]) if rectified else (image, grids)
-        t_blocks, in_cells = _ocr_tables(doc, index, engine, table_image, scale, table_grids, None if numbers is engine else numbers)
-        if rectified:
-            for block in t_blocks:
-                block.bbox = rectified.source_box(block.bbox, scale)
-            for entry in doc.unread[before_tables:]:
-                if entry.bbox is not None:
-                    entry.bbox = rectified.source_box(entry.bbox, scale)
+        if rectified_read is not None:
+            t_blocks, in_cells = rectified_read
+        else:
+            t_blocks, in_cells = _ocr_tables(doc, index, engine, image, scale, grids, None if numbers is engine else numbers)
         _place_tables(doc, first, t_blocks)
         read += in_cells
         flags = flags + ["ocr_tables"]
@@ -2318,7 +2339,7 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
               "ink_outside_ocr_share": outside_share,
               **({"number_words_reread": number_words[0], "number_words_replaced": number_words[1]} if number_words else {}),
               **({"page_number_tokens": page_numbers[0], "page_number_words_replaced": page_numbers[1]} if page_numbers else {}),
-              "status": "ocr" if found and not short else "partial" if found else "unread"}, flags)
+              "status": "ocr" if found and not (short or page_failed) else "partial" if found else "unread"}, flags)
     )
 
 
@@ -2374,11 +2395,36 @@ def _without(image, scale: float, boxes, *, polygon=()) -> object:
     return out
 
 
-def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids, numbers=None, offset=(0.0, 0.0)) -> tuple[list[Block], int]:
+def _validated_rectified_tables(doc: Document, index: int, engine, rectified, scale: float, numbers, page_size) -> tuple[list[Block], int] | None:
+    """Stage isolated reads before committing a projective mask to the page."""
+    before = len(doc.unread)
+    factor = min(1, CELL_TEXT_PAGE_EDGE / max(page_size))
+    blocks, chars = _ocr_tables(doc, index, engine, rectified.image, scale, [rectified.grid],
+                                None if numbers is engine else numbers, text_scale=factor)
+    unread = doc.unread[before:]
+    rows = [row for block in blocks for row in block.cells]
+    read_rows = [row for row in rows if any(cell.text.strip() for cell in row)]
+    # An inked row may yield only ruling marks such as "|". Require a letter or digit in each read row.
+    if (not read_rows
+            or not all(any(ch.isalnum() for cell in row for ch in cell.text) for row in read_rows)
+            or any("ocr_failed" in cell.flags for row in rows for cell in row)
+            or any(entry.reason == "table_row_ink_unread" for entry in unread)):
+        del doc.unread[before:]
+        return None
+    for block in blocks:
+        block.bbox = rectified.source_box(block.bbox, scale)
+    for entry in unread:
+        if entry.bbox is not None:
+            entry.bbox = rectified.source_box(entry.bbox, scale)
+    return blocks, chars
+
+
+def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids, numbers=None, offset=(0.0, 0.0), *, text_scale=None) -> tuple[list[Block], int]:
     """Table blocks for ruled tables found in a page image, each inked cell OCR'd as its own region.
 
     With ``numbers`` (the number model), a cell whose reading holds digits is read a second time.
     ``offset`` (points) places an image that is a crop of the page (an image region, T6).
+    ``text_scale`` enables tight, padded text crops inside rectified cells.
     """
     ox, oy = offset
     dpi = round(scale * 72)
@@ -2407,6 +2453,8 @@ def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids, n
                     # Ink too light for the ink test: read with its contrast stretched, and flagged so.
                     crop, faint = faint_cell_image(crop), True
                 inked += 1
+                if text_scale is not None:
+                    crop = isolated_cell_text(crop, text_scale)
                 psm = cell_psm(crop)
                 psms[psm] += 1
                 try:
