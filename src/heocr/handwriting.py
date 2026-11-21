@@ -13,7 +13,7 @@ from statistics import mean
 from typing import Literal
 
 from heocr.contract import Block, Document, Line, Page, Unread, time_up
-from heocr.ocr.regions import has_ink, short_for_ink
+from heocr.ocr.regions import MAX_RENDER_PIXELS, has_ink, short_for_ink
 from heocr.ocr.tesseract import OcrLine, OcrResult
 
 KRAKEN_VERSION = "7.2"
@@ -148,6 +148,11 @@ class HandwritingReader:
     load_failed: bool = False
 
     def read(self, doc, image):
+        wide = image.width > image.height
+        if wide and image.width**2 > MAX_RENDER_PIXELS:
+            return "handwriting_input_too_wide", []
+        if time_up(doc):
+            return "handwriting_time_limit", []
         if self.engine is None and not self.load_failed:
             try:
                 self.engine = _load(self.config)
@@ -159,7 +164,16 @@ class HandwritingReader:
         if time_up(doc):
             return "handwriting_time_limit", []
         try:
-            segmentation = self.engine.segment(image)
+            # The bundled segmenter scales to a fixed height. Padding wide inputs
+            # limits that resize's width without moving any original pixels.
+            view = image
+            if wide:
+                from PIL import ImageOps
+
+                view = ImageOps.expand(
+                    image, (0, 0, 0, image.width - image.height), fill="white"
+                )
+            segmentation = self.engine.segment(view)
             lines = segmentation.lines
             if not lines:
                 return "handwriting_no_lines", []
@@ -171,7 +185,7 @@ class HandwritingReader:
             if len(set(expected)) != len(expected):
                 return "handwriting_incomplete", []
             reads = {}
-            for record in self.engine.recognize(image, segmentation):
+            for record in self.engine.recognize(view, segmentation):
                 text = record.prediction
                 if (
                     record.id in reads

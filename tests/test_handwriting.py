@@ -13,6 +13,7 @@ from PIL import Image, ImageDraw
 
 import heocr
 from heocr.cli import main
+from heocr.handwriting import HandwritingReader
 from heocr.ocr.tesseract import OcrLine, OcrResult
 from tests.synth.pdf import PdfPage, lines_block, make_pdf
 
@@ -71,9 +72,10 @@ def backend(tags=(HANDWRITTEN, HANDWRITTEN), records=None):
 
 
 class HandwritingTest(unittest.TestCase):
-    def test_opt_in_auto_image_maps_knit_lines_in_segmentation_order(self):
+    def test_opt_in_auto_image_maps_lines_in_segmentation_order(self):
+        engine = backend()
         with (
-            patch("heocr.handwriting._load", return_value=backend()) as load,
+            patch("heocr.handwriting._load", return_value=engine) as load,
             patch(
                 "heocr.pdf.reader.engine_for",
                 side_effect=AssertionError("ordinary OCR must not run"),
@@ -81,6 +83,9 @@ class HandwritingTest(unittest.TestCase):
         ):
             doc = heocr.extract(invented_scan(), handwriting=config("auto"))
         load.assert_called_once()
+        view = engine.segment.call_args.args[0]
+        self.assertEqual(view.size, (400, 400))
+        self.assertEqual(view.getpixel((200, 399)), 255)
         (page,) = doc.pages
         self.assertEqual((page.route, page.page_class), ("ocr", "T5"))
         self.assertIn("handwriting_kraken", page.flags)
@@ -194,6 +199,16 @@ class HandwritingTest(unittest.TestCase):
         self.assertEqual([block.page for block in doc.blocks], [0, 0, 1, 1])
         self.assertEqual(engine.recognize.call_count, 2)
         self.assertEqual(heocr.validate(doc.to_dict()), [])
+
+    def test_wide_input_exceeding_padding_budget_skips_backend(self):
+        image = Image.new("L", (7000, 50), 255)
+        doc = heocr.Document("", 0, "png", "invented")
+        with patch("heocr.handwriting._load") as load:
+            self.assertEqual(
+                HandwritingReader(config()).read(doc, image),
+                ("handwriting_input_too_wide", []),
+            )
+        load.assert_not_called()
 
     def test_text_layer_stays_eligible_for_its_original_route(self):
         data = make_pdf([PdfPage(lines=lines_block(["טקסט מקורי בקובץ"]))])

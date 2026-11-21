@@ -139,7 +139,7 @@ Automatic mode uses a separately supplied segmentation model. Pass `--handwritin
 
 In Python, pass `handwriting=heocr.HandwritingConfig(model, sha256, mode="force")` to `heocr.extract`. To use automatic mode, provide `segmenter` and `segmenter_sha256` to the config. Either form requires OCR to be enabled.
 
-Successful lines are emitted in Kraken's reading order as `source: ocr` and `ocr.engine: kraken`, with page-point boxes and unverified confidence. Kraken and both model digests appear in the record. The `handwriting_*` flags record the route or its fallback. If the backend is unavailable, the segmentation is empty, or any segmented line lacks a complete reading, ordinary OCR reads the page. Ink outside recognized lines can mark a successful reading partial.
+Successful lines are emitted in Kraken's reading order as `source: ocr` and `ocr.engine: kraken`, with page-point boxes and unverified confidence. Kraken and both model digests appear in the record. Wide images receive white padding below the original pixels to bound the segmenter's internal width. Boxes are clipped to the original image. The `handwriting_*` flags record the route or its fallback. Backend failure, an empty or incomplete reading, and padding beyond the pixel budget fall back to ordinary OCR. Ink outside recognized lines can mark a successful reading partial.
 
 ## Reading the record
 
