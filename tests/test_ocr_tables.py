@@ -434,6 +434,49 @@ class OcrTableTest(unittest.TestCase):
         observe.assert_called_once()
         self.assertEqual(self.calls("3"), 1)
 
+    def test_a_failed_auto_model_probe_keeps_readable_rectified_cells(self) -> None:
+        from heocr.ocr.tesseract import OcrUnavailable, Tesseract
+
+        image = capture_obliquely(scan(LEVELS, line_width=8))
+        recognize = Tesseract.recognize
+        page_calls = []
+
+        def fail_full_page(engine, crop, dpi, psm=None):
+            if psm is None:
+                page_calls.append(crop.size)
+                raise OcrUnavailable("invented full-page probe failure")
+            return recognize(engine, crop, dpi=dpi, psm=psm)
+
+        with mock.patch.dict("heocr.ocr.routes.ROUTES", {"modern": None, "old": "fixture-old"}), \
+             mock.patch.object(Tesseract, "recognize", new=fail_full_page), \
+             mock.patch("heocr.pdf.reader._rest_has_ink", return_value=False):
+            doc = heocr.extract(scan_png(image), tesseract=FAKE, ocr_model="auto", check_numbers=False)
+        self.assertEqual(page_calls, [image.size])
+        (table,) = doc.blocks
+        self.assertEqual(table.kind, "table")
+        self.assertEqual([[c.text for c in row] for row in table.cells],
+                         [[TEXTS[level] for level in reversed(row)] for row in LEVELS])
+        self.assertEqual(table.ocr["model_route"]["reason"], "before_decision")
+        self.assertIn("ocr_grid_rectified", doc.pages[0].flags)
+        self.assertEqual(doc.pages[0].route, "ocr")
+        self.assertNotIn("ocr_failed", [entry.reason for entry in doc.unread])
+        self.assertEqual(self.calls("6|7"), 9)
+        self.assertEqual(heocr.validate(doc.to_dict()), [])
+
+    def test_a_ruling_only_rectified_row_leaves_the_page_unmasked(self) -> None:
+        image = capture_obliquely(scan(LEVELS, line_width=8))
+        cells = Path(os.environ["FAKE_CELLS"])
+        cells.write_text(json.dumps({**TEXTS, 70: "|", 80: "||", 90: "|"}), encoding="utf-8")
+
+        with mock.patch("heocr.pdf.reader._without", side_effect=AssertionError("ruling-only row masked the page")):
+            doc = heocr.extract(scan_png(image), tesseract=FAKE, check_numbers=False)
+        self.assertIn("ocr_grid_cell_fallback", doc.pages[0].flags)
+        self.assertFalse(any(block.kind == "table" for block in doc.blocks))
+        self.assertTrue(doc.text.strip())
+        self.assertEqual(self.calls("6|7"), 9)
+        self.assertEqual(self.calls("3"), 1)
+        self.assertEqual(heocr.validate(doc.to_dict()), [])
+
     def test_a_read_rectified_grid_survives_an_ocr_failure_outside_it(self) -> None:
         from PIL import ImageDraw
 

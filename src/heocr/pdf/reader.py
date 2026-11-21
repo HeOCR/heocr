@@ -2235,15 +2235,19 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
     page_failed = False
     last_page = index + 1 >= min(doc.page_count or index + 1, doc._max_pages)
     dpi = round(scale * 72)
-    try:
-        probe = None
-        probed = rectified is not None and routes.pending(doc)
-        if probed:
-            # Choose the model before testing the cell reads. The unmasked reading can serve as fallback.
+    probe = None
+    probed = rectified is not None and routes.pending(doc)
+    if probed:
+        # The unmasked reading can choose the model and serve as fallback.
+        try:
             probe = engine.recognize(image, dpi=dpi)
-            if routes.observe(doc, image, probe, dpi, last_page=last_page):
-                engine = engine_for(doc)
-                probe = None
+        except OcrUnavailable:
+            # The current engine can still read isolated cells after a full-page failure.
+            pass
+    try:
+        if probe is not None and routes.observe(doc, image, probe, dpi, last_page=last_page):
+            engine = engine_for(doc)
+            probe = None
         if rectified is not None:
             numbers = number_engine_for(doc) if doc.options.get("check_numbers", "suspect") else None
             rectified_read = _validated_rectified_tables(doc, index, engine, rectified, scale, numbers, image.size)
@@ -2398,9 +2402,12 @@ def _validated_rectified_tables(doc: Document, index: int, engine, rectified, sc
     blocks, chars = _ocr_tables(doc, index, engine, rectified.image, scale, [rectified.grid],
                                 None if numbers is engine else numbers, text_scale=factor)
     unread = doc.unread[before:]
-    cells = [cell for block in blocks for row in block.cells for cell in row]
-    if (not any(ch.isalnum() for cell in cells for ch in cell.text)
-            or any("ocr_failed" in cell.flags for cell in cells)
+    rows = [row for block in blocks for row in block.cells]
+    read_rows = [row for row in rows if any(cell.text.strip() for cell in row)]
+    # An inked row may yield only ruling marks such as "|". Require a letter or digit in each read row.
+    if (not read_rows
+            or not all(any(ch.isalnum() for cell in row for ch in cell.text) for row in read_rows)
+            or any("ocr_failed" in cell.flags for row in rows for cell in row)
             or any(entry.reason == "table_row_ink_unread" for entry in unread)):
         del doc.unread[before:]
         return None
