@@ -97,7 +97,9 @@ HEBREW_COMMA_SPACING = Rule(
     formats=("pdf", "ocr"),
     evidence=(
         "horizontal whitespace before a comma attached to the next token or at line end, "
-        "with Hebrew as the nearest letter on at least one side; a comma between digits stays as read"
+        "with Hebrew as the nearest letter on at least one side; or horizontal whitespace on both "
+        "sides, with a Hebrew letter or closing bracket before it and a Hebrew letter after it. "
+        "A comma between digits stays as read"
     ),
 )
 
@@ -182,7 +184,7 @@ def record(rule: Rule, changes: Counter) -> list[dict]:
 
 
 _LINE_ENDS = "\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029"
-_COMMA_SPACE = re.compile(r"[^\S\r\n]+,(?=\S|$)")
+_COMMA_SPACE = re.compile(r"[^\S\r\n]+,(?=\S|$)|(?<=[א-ת)\]])[ \t]+,(?=[ \t]+[א-ת])")
 
 
 def _nearest_letter_is_hebrew(chars) -> bool:
@@ -204,7 +206,7 @@ def hebrew_comma_spacing(text: str) -> tuple[str, Counter]:
                 return match.group()
             if not (_nearest_letter_is_hebrew(reversed(left)) or _nearest_letter_is_hebrew(right)):
                 return match.group()
-            value = ", " if right else ","
+            value = ", " if right and not right[0].isspace() else ","
             changes[match.group(), value] += 1
             return value
 

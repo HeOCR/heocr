@@ -57,7 +57,7 @@ class OcrRouteTest(unittest.TestCase):
 
     def test_hebrew_comma_spacing_after_ocr(self) -> None:
         body = make_pdf([PdfPage(images=FULL_PAGE, image_gray=0xFF)])
-        with mock.patch.dict(os.environ, {"FAKE_LINE": "הזריחה החלה ,ועלה האור"}):
+        with mock.patch.dict(os.environ, {"FAKE_LINE": "הזריחה החלה , ועלה האור"}):
             doc = heocr.extract(body, tesseract=FAKE, ocr_model="heb", ocr_psm=7, check_numbers=False)
         self.assertEqual(doc.pages[0].route, "ocr")
         self.assertEqual(doc.blocks[0].text, "הזריחה החלה, ועלה האור")

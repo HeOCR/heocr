@@ -47,13 +47,19 @@ class RuleListTest(unittest.TestCase):
         self.assertEqual(repairs.hebrew_comma_spacing(repaired), (repaired, {}))
 
     def test_hebrew_comma_spacing_preserves_numbers_and_latin_runs(self) -> None:
-        text = "מחיר 12 ,345 ו־8,900\nרשימה (map ,compass) פתוחה\nסוף Chapter IX ,\nMaps ,Compasses"
+        text = "מחיר 12 ,345 ו־8,900\nעוד 67 , 890\nרשימה (map , compass) פתוחה\nסוף Chapter IX ,\nMaps ,Compasses"
         self.assertEqual(repairs.hebrew_comma_spacing(text), (text, {}))
+
+    def test_hebrew_comma_spacing_keeps_the_space_after_a_comma(self) -> None:
+        raw = "נעצר (לרגע) ,  והמשיך\nנגמר\n ,ואז התחיל"
+        repaired, changes = repairs.hebrew_comma_spacing(raw)
+        self.assertEqual(repaired, "נעצר (לרגע),  והמשיך\nנגמר\n, ואז התחיל")
+        self.assertEqual(changes[" ,", ","], 1)
 
 
 class SwitchTest(unittest.TestCase):
     def test_hebrew_comma_spacing_in_kept_pdf_lines(self) -> None:
-        raw = "ננעל השער ,ונותר הפעמון"
+        raw = "ננעל השער , ונותר הפעמון"
         body = make_pdf([PdfPage(lines=lines_block([raw]))])
         off = heocr.extract(body, ocr=False, repairs=False)
         on = heocr.extract(body, ocr=False)
