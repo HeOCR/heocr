@@ -166,6 +166,10 @@ def extract(
         doc.flags.append("not_read")
         return doc
     reader(body, doc)
+    if repairs:
+        from heocr.repairs import repair_hebrew_commas
+
+        repair_hebrew_commas(doc)
     from heocr.ocr import call_failures
 
     failed = call_failures(doc)
