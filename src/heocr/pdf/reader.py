@@ -50,6 +50,7 @@ from heocr.pdf.ocrforms import needs_form_probe, preserve_form_cell_lines
 from heocr.pdf.ocrmargins import attach_margin_numbers
 from heocr.pdf.ocrorder import order_across_disjoint_gaps
 from heocr.pdf.ocrrows import TableRows, table_rows
+from heocr.pdf.ocrfragments import recover_narrow_lines, suppress_contained_fragments
 from heocr.pdf.ocrpixel import recover_pixel_lines
 from heocr.pdf.ocrsparse import recover_scan_lines
 from heocr.pdf.ocrlatin import reread_latin_runs
@@ -2354,6 +2355,7 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
     short, outside_share = short_for_ink(gray, result)
     recovered_lines = 0
     pixel_gap_lines = 0
+    fragments_removed = 0
     if page is not None and page_class == "T5" and doc._rtl and not (unruled or grids or rectified) and not time_up(doc):
         supplemented = recover_scan_lines(engine, gray, result, scale, outside_share)
         if supplemented is not result:
@@ -2361,13 +2363,19 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
             result = supplemented
             short, outside_share = short_for_ink(gray, result)
             flags = flags + ["ocr_same_column_lines_recovered"]
-        supplemented = recover_pixel_lines(engine, gray, result, scale, outside_share,
-                                           stop=lambda: time_up(doc), short=short)
-        if supplemented is not result:
-            pixel_gap_lines = len(supplemented.lines) - len(result.lines)
-            result = supplemented
+        before_pixels = result
+        stop = lambda: time_up(doc)
+        recovered = recover_pixel_lines(engine, gray, result, scale, outside_share, stop=stop, short=short)
+        cleaned = suppress_contained_fragments(engine, gray, recovered, scale, stop=stop)
+        result = recover_narrow_lines(engine, gray, cleaned, scale, outside_share, stop=stop)
+        fragments_removed = len(recovered.lines) - len(cleaned.lines)
+        pixel_gap_lines = len(recovered.lines) - len(before_pixels.lines) + len(result.lines) - len(cleaned.lines)
+        if result is not before_pixels:
             short, outside_share = short_for_ink(gray, result)
+        if pixel_gap_lines:
             flags = flags + ["ocr_pixel_lines_recovered"]
+        if fragments_removed:
+            flags = flags + ["ocr_contained_fragments_removed"]
     photo_gap_lines = 0
     if (page is None and page_class == "T5" and signals.get("image_format") == "jpeg" and doc._rtl
             and not (unruled or grids or rectified) and not time_up(doc)):
@@ -2436,6 +2444,7 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
               **({"ocr_same_column_lines_recovered": recovered_lines} if recovered_lines else {}),
               **({"ocr_photo_gap_lines_recovered": photo_gap_lines} if photo_gap_lines else {}),
               **({"ocr_pixel_lines_recovered": pixel_gap_lines} if pixel_gap_lines else {}),
+              **({"ocr_contained_fragments_removed": fragments_removed} if fragments_removed else {}),
               **({"number_words_reread": number_words[0], "number_words_replaced": number_words[1]} if number_words else {}),
               **({"page_number_tokens": page_numbers[0], "page_number_words_replaced": page_numbers[1]} if page_numbers else {}),
               "status": "ocr" if found and not (short or page_failed) else "partial" if found else "unread"}, flags)
