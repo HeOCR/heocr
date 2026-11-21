@@ -46,6 +46,7 @@ _OPENING = frozenset("([{")
 _CLOSING = frozenset(".,;:!?)]}")
 _BRACKETS = frozenset("()[]{}<>")
 _PUNCT_HUG = _OPENING | _CLOSING
+_HEBREW_LETTER = re.compile(r"[א-ת]")
 
 
 @dataclass
@@ -227,6 +228,36 @@ def _side_gap(component: list[Atom], index: int, step: int) -> float | None:
     return None
 
 
+def _word_gap(ink: list[Atom]) -> float:
+    """Infer word gaps on Hebrew lines with uniform tracking and repeated wider spaces.
+
+    Some producers draw a justified line as individually positioned letters. Added tracking can make
+    every letter gap look like a word break. Condensed tracking can make even the word boxes overlap.
+    Use the two bands of gaps only when both are visible in the geometry of the line.
+    """
+    if len(ink) < 16 or any(_unit_type(atom.text) in ("L", "EN") for atom in ink):
+        return WORD_GAP_EM
+    gaps = [
+        (right.x0 - left.x1) / max(left.height, right.height)
+        for left, right in zip(ink, ink[1:])
+        if _HEBREW_LETTER.match(left.text) and _HEBREW_LETTER.match(right.text)
+        and max(left.height, right.height) > 0
+    ]
+    if len(gaps) < 15:
+        return WORD_GAP_EM
+    tracking = statistics.median(gaps)
+    tolerance = 0.02
+    if abs(tracking) < 0.07 or sum(abs(gap - tracking) <= tolerance for gap in gaps) < 0.75 * len(gaps):
+        return WORD_GAP_EM
+    wider = [gap for gap in gaps if gap - tracking > 2 * tolerance]
+    if len(wider) < 3:
+        return WORD_GAP_EM
+    typical_space = statistics.median(wider)
+    if sum(abs(gap - typical_space) <= tolerance for gap in wider) < 0.75 * len(wider):
+        return WORD_GAP_EM
+    return (tracking + typical_space) / 2
+
+
 def _units(component: list[Atom]) -> list[tuple[str, Atom | None]]:
     """Visual sequence of character units, with word breaks made explicit as spaces.
 
@@ -239,6 +270,7 @@ def _units(component: list[Atom]) -> list[tuple[str, Atom | None]]:
     previous: Atom | None = None
     previous_index = -1
     ink = [a for a in component if not a.is_space]
+    word_gap = _word_gap(ink)
     for index, atom in enumerate(component):
         if atom.is_space:
             # A space glyph drawn over a letter (a geresh placed on it, say) is not a visual gap.
@@ -249,7 +281,7 @@ def _units(component: list[Atom]) -> list[tuple[str, Atom | None]]:
             continue
         if previous is not None and units and units[-1][0] != " ":
             gap = atom.x0 - previous.x1
-            if gap > WORD_GAP_EM * max(atom.height, previous.height):
+            if gap > word_gap * max(atom.height, previous.height):
                 tight = gap <= min(atom.height, previous.height) * TIGHT_JOIN
                 # No space between hugging punctuation and its word when tight: the punctuation
                 # (right of the gap, or left of it) hugs this side when it sits clearly closer to it
