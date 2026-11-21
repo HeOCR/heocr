@@ -71,6 +71,19 @@ class RegressChecksTest(unittest.TestCase):
         self.assertEqual(sample(gold, ["table"], [actual], tables=[table])["findings"],
                          [{"check": "table_cells_or_spans", "subject": "table"}])
 
+    def test_table_rowspan_padding_does_not_shift_the_other_cells(self):
+        gold = [{"id": "table"}, block("c0", "Garden"), block("c1", "North"), block("c2", "South")]
+        table = {"id": "table", "rows": 2, "cells": [
+            {"r": 0, "c": 0, "rowspan": 2, "colspan": 2, "text": "Garden", "paragraphs": ["c0"]},
+            {"r": 0, "c": 2, "rowspan": 1, "colspan": 1, "text": "North", "paragraphs": ["c1"]},
+            {"r": 1, "c": 2, "rowspan": 1, "colspan": 1, "text": "South", "paragraphs": ["c2"]},
+        ]}
+        actual = Block("table", page=0, cells=[
+            [Cell("Garden", colspan=2, rowspan=2), Cell("North")],
+            [Cell("", colspan=2, flags=["merged_above"]), Cell("South")],
+        ])
+        self.assertEqual(sample(gold, ["table"], [actual], tables=[table])["findings"], [])
+
     def test_p10_checks_reading_route_and_baseline_deltas(self):
         pages = [Page(0, 100, 100, "T1", "text_layer")]
         kept = sample([], [], [], chain="p10", variant="ocr_heb", pages=pages)
