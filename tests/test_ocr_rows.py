@@ -158,30 +158,6 @@ class OcrRowsReaderTest(unittest.TestCase):
         self.assertEqual(doc.text, "סיכום תשלומים לשנה\n" + "\n".join(" | ".join(row) for row in ROWS) + "\n")
         self.assertEqual(heocr.validate(doc.to_dict()), [])
 
-    def test_switched_off_the_page_keeps_tesseracts_order(self) -> None:
-        with mock.patch("heocr.pdf.reader.OCR_TABLE_ROWS", False):
-            doc = self.extract()
-        self.assertNotIn("table", [b.kind for b in doc.blocks])
-        self.assertNotIn("unruled_tables", doc.pages[0].flags)
-        # Column by column: every cell of the first column comes before any of the second.
-        self.assertLess(doc.text.index(ROWS[-1][0]), doc.text.index(ROWS[0][1]))
-
-    def test_a_late_paragraph_in_the_same_column_is_put_above_the_following_text(self) -> None:
-        self.write_paragraphs([
-            (1500, 590, "שורת פתיחה"), (1500, 700, "המשך הטקסט"), (1510, 430, "כותרת מקומית"),
-            (300, 390, "טור נוסף"), (300, 460, "המשך הטור"),
-        ])
-        doc = self.extract()
-        self.assertEqual([b.text for b in doc.blocks], ["כותרת מקומית", "שורת פתיחה", "המשך הטקסט", "טור נוסף", "המשך הטור"])
-        self.assertIn("reading_order_ocr_adjusted_unverified", doc.pages[0].flags)
-        self.assertEqual(heocr.validate(doc.to_dict()), [])
-
-    def test_overlapping_paragraph_boxes_keep_engine_order(self) -> None:
-        self.write_paragraphs([(1500, 590, "קטע ראשון"), (1510, 580, "קטע חופף")])
-        doc = self.extract()
-        self.assertEqual([b.text for b in doc.blocks], ["קטע ראשון", "קטע חופף"])
-        self.assertNotIn("reading_order_ocr_adjusted_unverified", doc.pages[0].flags)
-
     def test_a_full_width_rule_keeps_upper_columns_ahead_of_the_lower_section(self) -> None:
         from PIL import Image, ImageDraw
         from tests.synth.pdf import PdfPage, make_pdf
@@ -208,6 +184,30 @@ class OcrRowsReaderTest(unittest.TestCase):
                                  [paragraphs[i][2] + " מתוך מסמך מודפס לדוגמה" for i in expected])
                 self.assertEqual("reading_order_ocr_bands_unverified" in doc.pages[0].flags, right_edge == 560)
                 self.assertEqual(heocr.validate(doc.to_dict()), [])
+
+    def test_switched_off_the_page_keeps_tesseracts_order(self) -> None:
+        with mock.patch("heocr.pdf.reader.OCR_TABLE_ROWS", False):
+            doc = self.extract()
+        self.assertNotIn("table", [b.kind for b in doc.blocks])
+        self.assertNotIn("unruled_tables", doc.pages[0].flags)
+        # Column by column: every cell of the first column comes before any of the second.
+        self.assertLess(doc.text.index(ROWS[-1][0]), doc.text.index(ROWS[0][1]))
+
+    def test_a_late_paragraph_in_the_same_column_is_put_above_the_following_text(self) -> None:
+        self.write_paragraphs([
+            (1500, 590, "שורת פתיחה"), (1500, 700, "המשך הטקסט"), (1510, 430, "כותרת מקומית"),
+            (300, 390, "טור נוסף"), (300, 460, "המשך הטור"),
+        ])
+        doc = self.extract()
+        self.assertEqual([b.text for b in doc.blocks], ["כותרת מקומית", "שורת פתיחה", "המשך הטקסט", "טור נוסף", "המשך הטור"])
+        self.assertIn("reading_order_ocr_adjusted_unverified", doc.pages[0].flags)
+        self.assertEqual(heocr.validate(doc.to_dict()), [])
+
+    def test_overlapping_paragraph_boxes_keep_engine_order(self) -> None:
+        self.write_paragraphs([(1500, 590, "קטע ראשון"), (1510, 580, "קטע חופף")])
+        doc = self.extract()
+        self.assertEqual([b.text for b in doc.blocks], ["קטע ראשון", "קטע חופף"])
+        self.assertNotIn("reading_order_ocr_adjusted_unverified", doc.pages[0].flags)
 
     def write_paragraphs(self, paragraphs) -> None:
         rows = [self.tsv.read_text(encoding="utf-8").splitlines()[0]]
