@@ -31,6 +31,18 @@ def encoded(image, fmt: str, **kwargs) -> bytes:
     return out.getvalue()
 
 
+def glyph_page():
+    from PIL import Image, ImageDraw
+
+    image = Image.new("L", (800, 1000), 240)
+    draw = ImageDraw.Draw(image)
+    for y in range(200, 701, 100):
+        for x in range(160, 641, 40):
+            draw.rectangle((x, y, x + 3, y + 17), fill=15)
+            draw.rectangle((x, y + 14, x + 10, y + 17), fill=15)
+    return image
+
+
 class ImageInputTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
@@ -59,6 +71,59 @@ class ImageInputTest(unittest.TestCase):
         self.assertEqual(doc.format, "jpeg")
         self.assertIn("dpi_assumed", doc.pages[0].flags)
         self.assertEqual(doc.pages[0].signals["dpi"], 300.0)
+
+    def test_camera_jpeg_uses_glyph_scale_only_for_recognition(self) -> None:
+        from PIL import Image
+
+        from heocr.ocr.tesseract import Tesseract
+
+        image = glyph_page()
+        exif = Image.Exif()
+        exif[272] = "Invented camera"
+        log = Path(self.tmp.name) / "argv.jsonl"
+        actual = Tesseract._recognize_call
+        inputs = []
+
+        def observe(engine, source, base, dpi, psm):
+            with Image.open(source) as raster:
+                inputs.append(raster.info["dpi"][0])
+            return actual(engine, source, base, dpi, psm)
+
+        with mock.patch.dict(os.environ, {"FAKE_LOG": str(log)}), mock.patch.object(
+            Tesseract, "_recognize_call", observe
+        ):
+            doc = heocr.extract(encoded(image, "JPEG", dpi=(72, 72), exif=exif), tesseract=FAKE, check_numbers=False)
+        page, = doc.pages
+        self.assertEqual((page.width, page.height), image.size)
+        self.assertEqual(page.signals["dpi"], 72)
+        self.assertEqual(page.signals["render_dpi"], 72)
+        self.assertEqual(page.signals["tesseract_dpi_requested"], 180)
+        calls = [argv for line in log.read_text().splitlines() if "--dpi" in (argv := json.loads(line))]
+        self.assertTrue(calls)
+        self.assertEqual({argv[argv.index("--dpi") + 1] for argv in calls}, {"180"})
+        self.assertTrue(all(abs(dpi - 72) < .1 for dpi in inputs))
+        self.assertEqual(heocr.validate(doc.to_dict()), [])
+
+    def test_camera_hint_falls_back_without_eligible_metadata_or_glyphs(self) -> None:
+        from PIL import Image
+
+        exif = Image.Exif()
+        exif[271] = "Invented maker"
+        glyphs = glyph_page()
+        cases = (
+            (glyphs, "JPEG", 72, None),
+            (glyphs, "JPEG", 150, exif),
+            (page_image(), "JPEG", 72, exif),
+            (glyphs, "PNG", 72, exif),
+        )
+        for image, fmt, dpi, tags in cases:
+            with self.subTest(fmt=fmt, dpi=dpi, camera=tags is not None):
+                attrs = {"exif": tags} if tags is not None else {}
+                doc = heocr.extract(encoded(image, fmt, dpi=(dpi, dpi), **attrs), tesseract=FAKE, check_numbers=False)
+                page, = doc.pages
+                self.assertEqual(page.route, "ocr")
+                self.assertEqual(page.signals["render_dpi"], dpi)
+                self.assertNotIn("tesseract_dpi_requested", page.signals)
 
     def test_every_tiff_frame_is_a_page_and_a_blank_one_is_empty(self) -> None:
         frames = [page_image(), page_image(ink=False), page_image()]

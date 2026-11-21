@@ -8,6 +8,7 @@ PDF page: ruled tables cell by cell (D3e), ink accounting, the number model for 
 - **Orientation:** EXIF orientation is applied before reading, as a viewer shows the image.
 - **Resolution:** the file's own DPI when it gives one; otherwise 300 is assumed and the page is
   flagged ``dpi_assumed`` (Tesseract's results depend on it). Boxes are in points at that DPI.
+  Camera JPEGs marked 72 DPI can use a glyph-height hint for Hebrew OCR without changing page scale.
 - **Size:** a frame over ``MAX_RENDER_PIXELS`` is scaled down to it before OCR and flagged
   ``image_downscaled``; a hostile size cannot allocate unbounded memory, and Pillow's own
   decompression-bomb limit stays on.
@@ -100,4 +101,13 @@ def read_image(body: bytes, doc: Document) -> None:
         if not has_ink(frame):
             doc.pages.append(Page(index, round(width, 2), round(height, 2), "empty", "none", signals, {"chars_total": 0, "chars_read": 0, "status": "nothing_to_read"}, flags))
             continue
+        if doc._ocr_settings is not None and doc._rtl and image.format == "JPEG" and dpi == 72:
+            exif = image.getexif()
+            if exif.get(271) or exif.get(272):  # Camera Make or Model.
+                from heocr.ocr.photo_dpi import estimate_photo_dpi
+
+                hint = estimate_photo_dpi(frame)
+                if hint is not None:
+                    # A standard JPEG is a single-page root input.
+                    doc._ocr_settings["recognition_dpi"] = hint
         _ocr_page(doc, index, None, round(width, 2), round(height, 2), "T5", signals, PageText(), flags, rendered=(frame, scale))

@@ -29,6 +29,10 @@ Each page has:
 - `coverage`: what was read (`chars_total`, `chars_read`, `chars_ocr`, `status`, image region counts, number checks);
 - `flags`.
 
+On a camera JPEG, `signals.tesseract_dpi_requested` records the glyph-height hint
+when HeOCR supplies one to the primary OCR engine. `signals.render_dpi` still
+describes the raster-to-page scale, and `signals.dpi` records the image DPI.
+
 ## Blocks
 
 Each block has an `id` (`b0`, `b1`, …), a `kind`, a `role`, a `source`, a `tool`, `repairs` and `flags`, and depending on what it is:

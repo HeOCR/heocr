@@ -2263,6 +2263,8 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
     if scale * 72 < RENDER_DPI and rendered is None:
         flags = flags + ["render_dpi_reduced"]
     signals = {**signals, "render_dpi": round(scale * 72, 1)}
+    if doc._ocr_settings is not None and "recognition_dpi" in doc._ocr_settings:
+        signals["tesseract_dpi_requested"] = doc._ocr_settings["recognition_dpi"]
     # A skewed scan is turned straight first: ruling detection looks for straight runs, and at a
     # degree of skew a ruling leaves its pixel row before it is long enough to count (set C's heavily
     # skewed table scans had no table found at all). Every box this page records is turned back.

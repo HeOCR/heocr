@@ -50,6 +50,7 @@ def engine_for(doc: "Document") -> Tesseract | None:
             doc._ocr_engine = Tesseract.find(
                 settings["cmd"], lang=settings["lang"], psm=settings["psm"], model=model
             )
+            doc._ocr_engine.recognition_dpi = settings.get("recognition_dpi")
             doc.components.update(doc._ocr_engine.provenance())
         except OcrUnavailable as exc:
             doc._ocr_error = str(exc)
@@ -77,6 +78,7 @@ def engine_for_model(doc: "Document", model: str | None) -> Tesseract | None:
         return doc._ocr_engines[model]
     try:
         engine = Tesseract.find(settings["cmd"], lang=settings["lang"], psm=settings["psm"], model=model)
+        engine.recognition_dpi = settings.get("recognition_dpi")
         doc.components.update(engine.provenance())
     except OcrUnavailable as exc:
         doc._ocr_error = doc._ocr_error or str(exc)

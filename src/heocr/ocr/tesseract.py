@@ -143,6 +143,7 @@ class Tesseract:
     released: object = None  # the heocr.models.ReleasedModel in use, if any
     route: dict | None = None  # ocr_model="auto": how this engine was chosen (heocr.ocr.routes)
     failures: int = 0  # recognize() calls that failed or timed out (heocr.ocr.call_failures)
+    recognition_dpi: int | None = None  # an optional hint, separate from the raster's scale
 
     @classmethod
     def find(
@@ -250,7 +251,7 @@ class Tesseract:
                 "--psm",
                 str(self.psm if psm is None else psm),
                 "--dpi",
-                str(dpi),
+                str(self.recognition_dpi if self.recognition_dpi is not None else dpi),
                 "tsv",
             ],
             self.timeout,
