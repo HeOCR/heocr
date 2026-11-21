@@ -64,6 +64,26 @@ class OcrRouteTest(unittest.TestCase):
         self.assertEqual(doc.blocks[0].lines[0].text, doc.blocks[0].text)
         self.assertEqual(doc.blocks[0].repairs[0]["rule"], "hebrew_comma_spacing")
 
+    def test_restore_date_parentheses_after_ocr(self) -> None:
+        raw = "השעון ייחנך ביום 11) בינואר (2027."
+        expected = "השעון ייחנך ביום (11 בינואר 2027)."
+        body = make_pdf([PdfPage(images=FULL_PAGE, image_gray=0xFF)])
+        options = dict(tesseract=FAKE, ocr_model="heb", ocr_psm=7, check_numbers=False)
+        with mock.patch.dict(os.environ, {"FAKE_LINE": raw}):
+            off = heocr.extract(body, repairs=False, **options)
+            on = heocr.extract(body, **options)
+        before, = off.blocks
+        after, = on.blocks
+        self.assertEqual(on.pages[0].route, "ocr")
+        self.assertEqual(before.text, raw)
+        self.assertEqual(after.text, expected)
+        self.assertEqual(after.lines[0].text, expected)
+        self.assertEqual(after.lines[0].bbox, before.lines[0].bbox)
+        self.assertEqual(after.repairs, [{
+            "rule": "ocr_date_bracket_order", "from": "U+0029 U+0028", "to": "U+0028 U+0029", "count": 1,
+        }])
+        self.assertEqual(heocr.validate(on.to_dict()), [])
+
     def test_force_ocr_reads_a_text_layer_page_by_ocr(self) -> None:
         # A workaround for a text layer heocr reads badly: every PDF page goes to OCR, its layer ignored.
         pdf = make_pdf([PdfPage(lines=lines_block(["שורה ראשונה של מסמך", "שורה שנייה של מסמך"]))])
