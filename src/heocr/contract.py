@@ -249,6 +249,7 @@ class Document:
     _ocr_error: str | None = field(default=None, repr=False, compare=False)
     _ocr_engines: dict = field(default_factory=dict, repr=False, compare=False)  # ocr_model="auto": model -> engine
     _route: Any = field(default=None, repr=False, compare=False)  # ocr_model="auto": the probe's state, then its decision
+    _handwriting: Any = field(default=None, repr=False, compare=False)  # optional Kraken reader and local pins
     _convert_settings: dict[str, Any] | None = field(default=None, repr=False, compare=False)  # LibreOffice: cmd, timeout
     _max_pages: int = field(default=MAX_PAGES, repr=False, compare=False)  # pages read at most
     _time_limit: float | None = field(default=None, repr=False, compare=False)  # seconds for the whole document

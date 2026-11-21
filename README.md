@@ -40,6 +40,8 @@ heocr report.pdf --no-ocr             # never run OCR; pages that need it are re
 heocr report.pdf --force-ocr          # read every page by OCR, ignoring its text layer
 ```
 
+Image-only pages can also use the [experimental opt-in Kraken handwriting route](docs/guide.md#experimental-handwriting-ocr) with local pinned weights.
+
 The CLI prints each `unread` entry on stderr (`-q` silences them). It exits with 1 only when the file cannot be opened or an option is invalid. A document read only in part, or not at all, exits with 0, and its `unread` entries say why.
 
 ## Formats and routes

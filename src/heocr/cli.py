@@ -9,6 +9,7 @@ from pathlib import Path
 from heocr import __version__
 from heocr.api import extract
 from heocr.contract import MAX_PAGES
+from heocr.handwriting import HandwritingConfig
 
 _FORMATS = ("text", "markdown", "json", "docx")
 _BY_SUFFIX = {".md": "markdown", ".markdown": "markdown", ".json": "json", ".txt": "text", ".docx": "docx"}
@@ -35,6 +36,11 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--no-ocr", action="store_true", help="do not run OCR; pages that need it are reported unread")
     parser.add_argument("--force-ocr", action="store_true", help="read every PDF page by OCR, ignoring its text layer (a workaround for a text layer heocr reads badly)")
+    parser.add_argument("--handwriting", metavar="MODEL", help="opt into Kraken on scan pages with a local .safetensors recognizer")
+    parser.add_argument("--handwriting-sha256", metavar="HEX", help="expected SHA-256 of the handwriting recognizer")
+    parser.add_argument("--handwriting-mode", choices=("auto", "force"), help="auto uses handwriting tags, force declares scan pages handwritten")
+    parser.add_argument("--handwriting-segmenter", metavar="MODEL", help="local .safetensors segmentation model for handwriting line tags")
+    parser.add_argument("--handwriting-segmenter-sha256", metavar="HEX", help="expected SHA-256 of the supplied segmenter")
     parser.add_argument(
         "--check-numbers",
         choices=("suspect", "tables", "all", "off"),
@@ -90,6 +96,15 @@ def main(argv: list[str] | None = None) -> int:
     if fmt == "docx" and not args.output and sys.stdout.isatty():
         parser.error("a Word file is not shown on a terminal: give -o FILE.docx, or redirect the output")
     try:
+        handwriting = None
+        if args.handwriting is not None:
+            handwriting = HandwritingConfig(
+                args.handwriting, args.handwriting_sha256 or "", args.handwriting_mode or "auto",
+                args.handwriting_segmenter, args.handwriting_segmenter_sha256,
+            )
+        elif any((args.handwriting_sha256, args.handwriting_mode, args.handwriting_segmenter,
+                  args.handwriting_segmenter_sha256)):
+            raise ValueError("handwriting options require --handwriting MODEL")
         doc = extract(
             args.file,
             repairs=not args.no_repairs,
@@ -99,6 +114,7 @@ def main(argv: list[str] | None = None) -> int:
             tesseract=args.tesseract,
             ocr_model=args.ocr_model,
             force_ocr=args.force_ocr,
+            handwriting=handwriting,
             check_numbers=False if args.check_numbers == "off" else args.check_numbers,
             convert=not args.no_convert,
             soffice=args.soffice,
