@@ -3,19 +3,23 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from itertools import groupby
+from itertools import accumulate, groupby
 from math import ceil, floor
 import re
 from statistics import mean, median
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageOps
 
+from heocr.ocr.regions import paper_level
 from heocr.ocr.tesseract import OcrResult, OcrUnavailable
 from heocr.pdf.ocrsparse import LINE_PSM, _reading_slot
 from heocr.pdf.ocrtables import _runs
 from heocr.pdf.perspective import _outlines
 
 MIN_UNCOVERED_INK = 0.72
+SHADED_MIN_UNCOVERED_INK = 0.20
+SHADE_PAPER_DELTA = 50
+SHADE_MAX_SPREAD = 32
 MAX_BANDS = 12
 THUMBNAIL = 1300
 BODY_MARGIN = 0.085
@@ -123,10 +127,26 @@ def _read(engine, gray, box, dpi, paper, border):
     return replace(line, bbox=page_box(line.bbox), words=words)
 
 
-def recover_pixel_lines(engine, gray, result, scale, outside_share, stop=lambda: False):
+def _shaded(gray, box, paper):
+    """Check the tight OCR box, since padding can cross the edge of a filled band."""
+    x0, y0, x1, y1 = box
+    if x1 - x0 < 3 or y1 <= y0:
+        return False
+    cuts = [x0 + (x1 - x0) * i // 3 for i in range(4)]
+    tones = []
+    for left, right in zip(cuts, cuts[1:]):
+        histogram = gray.crop((left, y0, right, y1)).histogram()
+        target = ceil(.8 * (right - left) * (y1 - y0))
+        tones.append(next(value for value, count in enumerate(accumulate(histogram)) if count >= target))
+    return max(tones) <= paper - SHADE_PAPER_DELTA and max(tones) - min(tones) <= SHADE_MAX_SPREAD
+
+
+def recover_pixel_lines(engine, gray, result, scale, outside_share, stop=lambda: False, *, short=True):
     """Add new lines without re-reading or replacing the native text."""
     native = result.lines
-    if engine.psm != 3 or outside_share < MIN_UNCOVERED_INK or len(native) < 2:
+    shaded_only = outside_share < MIN_UNCOVERED_INK
+    eligible = outside_share >= SHADED_MIN_UNCOVERED_INK if shaded_only else short
+    if engine.psm != 3 or not eligible or len(native) < 2 or stop():
         return result
     typical = median(line.bbox[3] - line.bbox[1] for line in native)
     if not .005 * gray.height <= typical <= .06 * gray.height:
@@ -150,8 +170,11 @@ def recover_pixel_lines(engine, gray, result, scale, outside_share, stop=lambda:
     accepted = []
     dpi = round(scale * 72)
     paper = 255
+    page_paper = None
     for _, box, (index, paragraph) in sorted(proposals)[:MAX_BANDS]:
-        if stop() or any(_intersects(box, line.bbox) for line in accepted):
+        if stop():
+            break
+        if any(_intersects(box, line.bbox) for line in accepted):
             continue
         try:
             a, b, c, d = box
@@ -166,8 +189,13 @@ def recover_pixel_lines(engine, gray, result, scale, outside_share, stop=lambda:
             offset = lambda xyxy: [v + (a, b)[i % 2] for i, v in enumerate(xyxy)]
             line = replace(first, paragraph=paragraph, bbox=offset(first.bbox),
                            words=[replace(w, bbox=offset(w.bbox)) for w in first.words])
-            insertions.setdefault(index, []).append(line)
             accepted.append(line)
+            if shaded_only:
+                if page_paper is None:
+                    page_paper = paper_level(gray)
+                if not _shaded(gray, line.bbox, page_paper):
+                    continue
+            insertions.setdefault(index, []).append(line)
     if not insertions:
         return result
     lines = []

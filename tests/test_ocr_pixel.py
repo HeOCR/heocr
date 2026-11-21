@@ -58,23 +58,55 @@ class PixelLineTest(unittest.TestCase):
     def test_shaded_line_is_inserted_and_native_lines_are_identical(self):
         self.shaded_band()
         engine = type("Reader", (), {"psm": 3, "recognize": staticmethod(self.reading)})()
-        result = recover_pixel_lines(engine, self.gray, self.original, 300 / 72, .95)
-        self.assertEqual(len(result.lines), 3)
-        self.assertIs(result.lines[0], self.native[0])
-        self.assertIs(result.lines[2], self.native[1])
-        self.assertEqual(result.lines[1].text, self.text)
-        self.assertTrue(248 < result.lines[1].bbox[1] < result.lines[1].bbox[3] < 300)
+        for short, share in ((True, .95), (True, .58), (False, .35)):
+            with self.subTest(short=short, share=share):
+                result = recover_pixel_lines(engine, self.gray, self.original, 300 / 72, share, short=short)
+                self.assertEqual(len(result.lines), 3)
+                self.assertIs(result.lines[0], self.native[0])
+                self.assertIs(result.lines[2], self.native[1])
+                self.assertEqual(result.lines[1].text, self.text)
+                self.assertTrue(248 < result.lines[1].bbox[1] < result.lines[1].bbox[3] < 300)
+
+    def test_moderate_unread_ink_requires_shading_in_the_crop_read_box(self):
+        draw = ImageDraw.Draw(self.gray)
+        draw.rectangle((224, 273, 557, 287), fill=108)
+        paint(draw, 262)
+        engine = type("Reader", (), {"psm": 3})()
+        with patch.object(engine, "recognize", create=True, side_effect=self.reading) as recognize:
+            self.assertIs(recover_pixel_lines(engine, self.gray, self.original, 300 / 72, .35, short=False),
+                          self.original)
+        self.assertEqual(recognize.call_count, 2)
+
+    def test_shaded_pass_obeys_uncovered_ink_floor_and_deadline(self):
+        self.shaded_band()
+        engine = type("Reader", (), {"psm": 3})()
+        with patch.object(engine, "recognize", create=True) as recognize:
+            self.assertIs(recover_pixel_lines(engine, self.gray, self.original, 300 / 72, .19, short=False),
+                          self.original)
+            self.assertIs(recover_pixel_lines(engine, self.gray, self.original, 300 / 72, .35,
+                                              short=False, stop=lambda: True), self.original)
+        recognize.assert_not_called()
+
+    def test_shaded_band_with_standalone_numbers_does_not_add_a_line(self):
+        self.shaded_band()
+        self.text = "814 927 560"
+        engine = type("Reader", (), {"psm": 3, "recognize": staticmethod(self.reading)})()
+        self.assertIs(recover_pixel_lines(engine, self.gray, self.original, 300 / 72, .35, short=False),
+                      self.original)
 
     def test_edges_rules_and_rotated_stamp_do_not_propose_lines(self):
         draw = ImageDraw.Draw(self.gray)
         paint(draw, 22)
         paint(draw, 753)
+        draw.rectangle((220, 252, 557, 308), fill=108)
         paint(draw, 255, slant=2)
         draw.line((225, 289, 550, 289), fill=0, width=3)
         draw.line((565, 100, 565, 730), fill=0, width=4)
         engine = type("Reader", (), {"psm": 3})()
         with patch.object(engine, "recognize", create=True) as recognize:
-            self.assertIs(recover_pixel_lines(engine, self.gray, self.original, 300 / 72, .95), self.original)
+            for short, share in ((True, .95), (False, .35)):
+                self.assertIs(recover_pixel_lines(engine, self.gray, self.original, 300 / 72, share, short=short),
+                              self.original)
         recognize.assert_not_called()
 
     def test_nonempty_confident_agreement_is_required(self):
@@ -104,7 +136,7 @@ class PixelLineTest(unittest.TestCase):
 
             with (patch.dict(os.environ, {"FAKE_TESSDATA": temp}),
                   patch.object(Tesseract, "recognize", recognize),
-                  patch("heocr.pdf.reader.short_for_ink", return_value=(True, .95))):
+                  patch("heocr.pdf.reader.short_for_ink", return_value=(False, .35))):
                 os.environ.pop("TESSDATA_PREFIX", None)
                 options = {"tesseract": FAKE, "ocr_model": "heb", "check_numbers": False}
                 scan = heocr.extract(pdf, **options)
