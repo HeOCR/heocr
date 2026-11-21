@@ -146,6 +146,28 @@ class PdfRouteTest(unittest.TestCase):
         self.assertIn("text_layer_ignored_broken_mapping", page.flags)
         self.assertIn("unresolved", doc.to_dict()["font_maps"][0])
 
+    def test_type3_letters_mapped_to_spaces_fall_back_to_page_ocr(self) -> None:
+        lines = lines_block(["השומר פתח חלון בחדר הירוק", "האור חזר לחצר אחרי הגשם"])
+        damaged = make_pdf([PdfPage(lines=lines, remap={"ח": " "})])
+        without_ocr = heocr.extract(damaged, ocr=False)
+        page = without_ocr.pages[0]
+        self.assertEqual((page.page_class, page.route), ("T3", "none"))
+        self.assertIn("text_layer_whitespace_draws_ink", page.flags)
+        self.assertEqual(page.coverage["status"], "unread")
+        self.assertEqual([item.reason for item in without_ocr.unread], ["ocr_route_unavailable"])
+
+        with_ocr = heocr.extract(damaged, tesseract=FAKE)
+        self.assertEqual(with_ocr.pages[0].route, "ocr")
+        self.assertIn("text_layer_ignored_broken_mapping", with_ocr.pages[0].flags)
+        self.assertTrue(with_ocr.blocks)
+        self.assertTrue(all(block.source == "ocr" for block in with_ocr.blocks))
+        self.assertEqual(heocr.validate(with_ocr.to_dict()), [])
+
+        clean = heocr.extract(make_pdf([PdfPage(lines=lines)]), ocr=False)
+        self.assertEqual(clean.pages[0].route, "text_layer")
+        self.assertTrue(clean.pages[0].coverage["selection_safe"])
+        self.assertEqual([line.text for block in clean.blocks for line in block.lines], [line.text for line in lines])
+
     def test_repairs_off_learns_nothing(self) -> None:
         lines = ["שלום שלום שלום", "שלום שלום"]
         doc = heocr.extract(make_pdf([PdfPage(lines=lines_block(lines), remap={"ם": CODE}, font_name="SynthDavid")]), tesseract=FAKE, repairs=False)
