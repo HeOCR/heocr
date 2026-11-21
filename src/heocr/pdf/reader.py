@@ -57,6 +57,7 @@ RTL_DOCUMENT_SHARE = 0.25
 SYMBOL_FONT = re.compile(r"wingdings|webdings|symbol|dingbats", re.I)
 # Characters whose baseline angle has a sine above this are rotated text.
 ROTATED_SIN = 0.1
+OCR_LAYER_NUMBER = re.compile(r"\d+(?:[.,:/]\d+)*%?")
 
 
 @dataclass
@@ -89,6 +90,23 @@ def _font_name(raw, textpage, index: int) -> str:
     return buffer.value.decode("utf-8", "replace")
 
 
+def _mark_reflected_ocr_numbers(raw, objects) -> None:
+    """Mark numeric objects whose GlyphLessFont text already runs in logical order."""
+    for obj, atoms in objects:
+        if len(atoms) < 2 or not OCR_LAYER_NUMBER.fullmatch("".join(atom.text for atom in atoms)):
+            continue
+        matrix = raw.FS_MATRIX()
+        if not raw.FPDFPageObj_GetMatrix(obj, ctypes.byref(matrix)):
+            continue
+        if not (matrix.a < 0 < matrix.d and matrix.b == matrix.c == 0):
+            continue
+        if not all(a.index + 1 == b.index and a.cx > b.cx for a, b in pairwise(atoms)):
+            continue
+        marker = (atoms[0].index, len(atoms))
+        for atom in atoms:
+            atom.reflected_number = marker
+
+
 def page_text(page, eth_fonts: frozenset[str] = frozenset(), font_maps: dict | None = None, all_fonts: bool = False, shifted: dict | None = None) -> PageText:
     """Characters with loose boxes, in page coordinates with the origin at the top left.
 
@@ -102,6 +120,7 @@ def page_text(page, eth_fonts: frozenset[str] = frozenset(), font_maps: dict | N
 
     out = PageText()
     marks: list[Atom] = []
+    glyphless_objects = {}
     textpage = page.get_textpage()
     frame = frame_of(page)
     try:
@@ -145,6 +164,7 @@ def page_text(page, eth_fonts: frozenset[str] = frozenset(), font_maps: dict | N
                 if not ch.isspace():
                     out.outside += 1
                 continue
+            name = ""
             if not ch.isspace() and not unicodedata.combining(ch):
                 out.chars_total += 1
                 name = _font_name(raw, textpage, index)
@@ -182,6 +202,12 @@ def page_text(page, eth_fonts: frozenset[str] = frozenset(), font_maps: dict | N
                 ch, repaired = "נ", repairs.LATIN1_ETH_NUN.rule_id
             atom = Atom(ch, *box, size or 1.0, index, repaired, font)
             (marks if unicodedata.combining(ch) else out.atoms).append(atom)
+            if mode == 3 and name.rsplit("+", 1)[-1] == "GlyphLessFont":
+                key = ctypes.cast(obj, ctypes.c_void_p).value
+                if key not in glyphless_objects:
+                    glyphless_objects[key] = (obj, [])
+                glyphless_objects[key][1].append(atom)
+        _mark_reflected_ocr_numbers(raw, glyphless_objects.values())
     finally:
         textpage.close()
     _attach_marks(out.atoms, marks)

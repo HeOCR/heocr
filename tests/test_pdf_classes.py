@@ -95,6 +95,30 @@ class PageClassTest(unittest.TestCase):
         doc, _ = self.assertClass(page, "T1", "text_layer_is_ocr")
         self.assertEqual(doc.blocks[0].lines[0].text, HEBREW[0])
 
+    def test_ocr_layer_numbers_keep_logical_order_with_either_glyph_direction(self) -> None:
+        rows = [
+            ("הזמנה מספר", "18/7306", "הגיעה לחנות"),
+            ("הטופס נשלח בתאריך", "17.8.2046", "לתיבה הירוקה"),
+            ("ההנחה היא", "24.8%", "מסכום הקנייה"),
+        ]
+        expected = [f"{prefix} {number} {suffix}" for prefix, number, suffix in rows]
+        for reflected in (False, True):
+            with self.subTest(reflected=reflected):
+                lines = []
+                for row, (prefix, number, suffix) in enumerate(rows):
+                    y = 780 - 18 * row
+                    # At 12 pt the fixture font advances 6 pt per glyph and 3 pt per space.
+                    number_right = 545 - 6 * len(prefix) + 3 * prefix.count(" ") - 3
+                    suffix_right = number_right - 6 * len(number) - 3
+                    lines.extend([TextLine(prefix, 545, y), TextLine(number, number_right, y, reflected=reflected),
+                                  TextLine(suffix, suffix_right, y)])
+                page = PdfPage(lines=lines, invisible=True, images=FULL_PAGE, font_name="GlyphLessFont")
+                doc = heocr.extract(make_pdf([page]), ocr=False, repairs=False)
+                self.assertIn("text_layer_is_ocr", doc.pages[0].flags)
+                self.assertEqual(doc.pages[0].route, "text_layer")
+                self.assertEqual([line.text for block in doc.blocks for line in block.lines], expected)
+                self.assertEqual(doc.pages[0].coverage["chars_read"], doc.pages[0].coverage["chars_total"])
+
     def test_t5_image_only(self) -> None:
         doc, record = self.assertClass(PdfPage(images=FULL_PAGE), "T5")
         self.assertEqual(record.signals["image_coverage"], 1.0)

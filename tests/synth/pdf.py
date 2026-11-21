@@ -109,6 +109,7 @@ class TextLine:
     size: float = 12.0
     rtl: bool = True
     vertical: bool = False  # turned 90 degrees clockwise (text space x runs down the page), glyphs in visual order
+    reflected: bool = False  # one logical-order run drawn right to left with a negative x scale
 
 
 @dataclass
@@ -169,6 +170,11 @@ def make_pdf(pages: list[PdfPage]) -> bytes:
             raise ValueError("one Type3 font holds at most 254 glyphs")
         content: list[str] = []
         for line in page.lines:
+            if line.reflected:
+                glyphs = "".join(f"{codes[ch]:02X}" for ch in line.text)
+                mode = 3 if page.invisible else 0
+                content.append(f"BT {mode} Tr /F1 {line.size:g} Tf -1 0 0 1 {line.x:g} {line.y:g} Tm <{glyphs}> Tj ET")
+                continue
             order = layout(line.text, line.rtl)
             width = sum(_advance(line.text[i], page.mark_slots) for i in order) * line.size / 1000
             x = line.x - width if line.rtl else line.x
