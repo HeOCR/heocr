@@ -158,6 +158,33 @@ class OcrRowsReaderTest(unittest.TestCase):
         self.assertEqual(doc.text, "סיכום תשלומים לשנה\n" + "\n".join(" | ".join(row) for row in ROWS) + "\n")
         self.assertEqual(heocr.validate(doc.to_dict()), [])
 
+    def test_a_full_width_rule_keeps_upper_columns_ahead_of_the_lower_section(self) -> None:
+        from PIL import Image, ImageDraw
+        from tests.synth.pdf import PdfPage, make_pdf
+
+        rows = [self.tsv.read_text(encoding="utf-8").splitlines()[0]]
+        paragraphs = [
+            (330, 140, "טור ימני"), (330, 485, "מודעה ימנית"),
+            (55, 145, "טור שמאלי"), (55, 485, "מודעה שמאלית"),
+        ]
+        for b, (x, y, text) in enumerate(paragraphs, 1):
+            for l in range(1, 4):
+                for n, word in enumerate((text + " מתוך מסמך מודפס לדוגמה").split(), 1):
+                    dims = "\t".join(str(round(v * 300 / 72)) for v in (x + 210 - 35 * n, y + 18 * l, 28, 10))
+                    rows.append(f"5\t1\t{b}\t1\t{l}\t{n}\t{dims}\t90.0\t{word}")
+        self.tsv.write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+        for right_edge, expected in ((560, (0, 2, 1, 3)), (280, (0, 1, 2, 3))):
+            with self.subTest(right_edge=right_edge):
+                raster = Image.new("L", (595, 842), 255)
+                ImageDraw.Draw(raster).line((35, 390, right_edge, 390), fill=0, width=3)
+                pdf = make_pdf([PdfPage(rasters=[(0, 0, 595, 842, raster)])])
+                doc = heocr.extract(pdf, tesseract=self.FAKE, ocr_model="heb", check_numbers=False)
+                self.assertEqual([b.lines[0].text for b in doc.blocks],
+                                 [paragraphs[i][2] + " מתוך מסמך מודפס לדוגמה" for i in expected])
+                self.assertEqual("reading_order_ocr_bands_unverified" in doc.pages[0].flags, right_edge == 560)
+                self.assertEqual(heocr.validate(doc.to_dict()), [])
+
     def test_switched_off_the_page_keeps_tesseracts_order(self) -> None:
         with mock.patch("heocr.pdf.reader.OCR_TABLE_ROWS", False):
             doc = self.extract()
