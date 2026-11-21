@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import copy
 import ctypes
-from collections import Counter
+from collections import Counter, defaultdict
 import math
 import re
 import unicodedata
@@ -2360,25 +2360,25 @@ def _flag_cells_out_of_column(doc: Document, index: int, grid, rows: list[list[C
     """In a column of numbers (``NUMBER_COLUMN_SHARE`` of its read body cells hold a digit), a body cell
     read with no digit at all is a misreading: heb can read an amount as letters and marks. It is flagged
     ``table_cell_not_a_number`` with its own unread entry, whatever the other cells' readings. The first
-    row (a header) is not checked."""
+    row (a header) is not checked. Compare by the grid's physical column: a cell spanning
+    several columns has no single column type, and can shift the other cells' list positions."""
     ox, oy = offset
-    boxes = [sorted(row, key=lambda cell: -cell["col"] if doc._rtl else cell["col"]) for row in grid.rows]
-    width = max((len(r) for r in rows), default=0)
-    for col in range(width):
-        body = [r[col] for r in rows[1:] if col < len(r) and r[col].text.strip()]
-        if len(body) < NUMBER_COLUMN_MIN_CELLS or sum(any(ch.isdigit() for ch in c.text) for c in body) < NUMBER_COLUMN_SHARE * len(body):
+    columns: dict[int, list[tuple[int, int, Cell, list[float]]]] = defaultdict(list)
+    for r, (row, grid_row) in enumerate(zip(rows[1:], grid.rows[1:]), 1):
+        ordered = sorted(grid_row, key=lambda cell: -cell["col"] if doc._rtl else cell["col"])
+        for c, (cell, geometry) in enumerate(zip(row, ordered)):
+            if cell.colspan == 1 and cell.text.strip():
+                columns[geometry["col"]].append((r, c, cell, geometry["box"] or grid.bbox))
+    for body in columns.values():
+        if len(body) < NUMBER_COLUMN_MIN_CELLS or sum(any(ch.isdigit() for ch in cell.text) for _, _, cell, _ in body) < NUMBER_COLUMN_SHARE * len(body):
             continue
-        for r, row in enumerate(rows[1:], 1):
-            if col >= len(row):
-                continue
-            cell = row[col]
-            if not cell.text.strip() or any(ch.isdigit() for ch in cell.text) or "table_cell_garbled" in (cell.flags or []):
+        for r, c, cell, box in body:
+            if any(ch.isdigit() for ch in cell.text) or "table_cell_garbled" in (cell.flags or []):
                 continue
             cell.flags = list(cell.flags or []) + ["table_cell_not_a_number"]
-            box = boxes[r][col]["box"] if col < len(boxes[r]) and boxes[r][col].get("box") else grid.bbox
             doc.unread.append(Unread(scope="block", reason="table_cell_not_a_number", page=index,
                                      bbox=[box[0] + ox, box[1] + oy, box[2] + ox, box[3] + oy],
-                                     detail=f"row {r}, column {col}: no digit in a column of numbers"))
+                                     detail=f"row {r}, column {c}: no digit in a column of numbers"))
 
 
 def _number_like_cell(text: str) -> bool:
