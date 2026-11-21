@@ -235,7 +235,7 @@ def _word_gap(ink: list[Atom]) -> float:
     every letter gap look like a word break. Condensed tracking can make even the word boxes overlap.
     Use the two bands of gaps only when both are visible in the geometry of the line.
     """
-    if len(ink) < 16 or any(_unit_type(atom.text) in ("L", "EN") for atom in ink):
+    if len(ink) < 10 or any(_unit_type(atom.text) in ("L", "EN") for atom in ink):
         return WORD_GAP_EM
     gaps = [
         (right.x0 - left.x1) / max(left.height, right.height)
@@ -243,14 +243,15 @@ def _word_gap(ink: list[Atom]) -> float:
         if _HEBREW_LETTER.match(left.text) and _HEBREW_LETTER.match(right.text)
         and max(left.height, right.height) > 0
     ]
-    if len(gaps) < 15:
+    if len(gaps) < 9:
         return WORD_GAP_EM
     tracking = statistics.median(gaps)
     tolerance = 0.02
     if abs(tracking) < 0.07 or sum(abs(gap - tracking) <= tolerance for gap in gaps) < 0.75 * len(gaps):
         return WORD_GAP_EM
     wider = [gap for gap in gaps if gap - tracking > 2 * tolerance]
-    if len(wider) < 3:
+    # Three short words can supply two repeated word gaps.
+    if len(wider) < 2:
         return WORD_GAP_EM
     typical_space = statistics.median(wider)
     if sum(abs(gap - typical_space) <= tolerance for gap in wider) < 0.75 * len(wider):
