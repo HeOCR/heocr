@@ -92,6 +92,15 @@ class NumbersApartInRtlTest(unittest.TestCase):
         # Hebrew around the numbers keeps the rule for Hebrew text: "סעיף 3(4)(ב)".
         self.assertEqual(text(visual("(", HUG, "ב", HUG, ")", HUG, "(", HUG, "4", HUG, ")", HUG, "3", WORD_SPACE, "ףיעס")), "סעיף 3)4()ב(")
 
+    def test_square_bracket_sublevel_keeps_its_place_inside_a_latin_reference(self) -> None:
+        for left, right in (("[", "]"), ("]", "["), ("]", "]")):
+            with self.subTest(left=left, right=right):
+                atoms = visual("Map", WORD_SPACE, "47", HUG, left, HUG, "6", HUG, right, WORD_SPACE, "יפל")
+                self.assertEqual(text(atoms), "לפי Map 47[6]")
+
+        self.assertEqual(repairs.mirror_brackets("לפי Map 47[6] ]ב["), "לפי Map 47[6] [ב]")
+        self.assertEqual(repairs.mirror_brackets("לפי Map 47[6)"), "לפי Map 47]6(")
+
     def test_a_latin_parenthetical_whose_brackets_map_the_same_is_one_pair(self) -> None:
         # dev: a producer gave both brackets of a Latin parenthetical as "(" (and of others both as ")"). The
         # brackets hugging the Latin run are its pair; the right one opens it.

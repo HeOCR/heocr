@@ -306,6 +306,7 @@ def _latin_around(types: list[str], texts: list[str], i: int, j: int, lead: bool
 
 
 SUB_LEVEL_UNITS = 3  # a sub-level in brackets after a number ("76(1)", "77(2)(a)", "(iv)") holds at most this many glyphs
+_SUB_LEVEL_PAIRS = {"(": ("(", ")"), ")": ("(", ")"), "[": ("[", "]"), "]": ("[", "]")}
 
 
 def _latin_brackets(texts: list[str], types: list[str], resolved: list[str], lead: bool) -> None:
@@ -316,8 +317,8 @@ def _latin_brackets(texts: list[str], types: list[str], resolved: list[str], lea
     "(Annual Report(". Within a stretch of non-Hebrew units that holds a Latin letter or § (or, with
     ``lead``, continues the previous line's):
 
-    - a sub-level attached to a number or letter (``SUB_LEVEL_UNITS`` glyphs at most, between two
-      brackets) is part of the Latin run, read "(" then ")" left to right as it is shown;
+    - a sub-level attached to a number or letter (``SUB_LEVEL_UNITS`` glyphs at most, between round or
+      square brackets) is part of the Latin run, read left to right as it is shown;
     - the brackets hugging the run on both sides, when the layer gives the same character for
       both, are a pair: the right one opens it, as an RTL paragraph shows it.
     """
@@ -334,12 +335,13 @@ def _latin_brackets(texts: list[str], types: list[str], resolved: list[str], lea
             attached: set[int] = set()
             k = i + 1
             while k < j:
-                if texts[k] in "()" and texts[k] and (types[k - 1] in ("L", "EN") or (k - 1) in attached):
+                pair = _SUB_LEVEL_PAIRS.get(texts[k])
+                if pair and (types[k - 1] in ("L", "EN") or (k - 1) in attached):
                     m = k + 1
                     while m < j and m - k - 1 < SUB_LEVEL_UNITS and types[m] in ("L", "EN"):
                         m += 1
-                    if k + 1 < m < j and texts[m] in "()" and texts[m]:
-                        texts[k], texts[m] = "(", ")"
+                    if k + 1 < m < j and texts[m] in pair:
+                        texts[k], texts[m] = pair
                         for x in range(k, m + 1):
                             resolved[x] = "L"
                         attached.update((k, m))
