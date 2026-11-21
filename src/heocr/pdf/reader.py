@@ -46,6 +46,7 @@ from heocr.pdf.frame import frame_of
 from heocr.pdf.lines import Atom, PageLines, build_lines, line_is_rtl, paragraphs
 from heocr.pdf.columns import UNRESOLVED, Segment, arrange
 from heocr.pdf.ocrlines import recover_photo_lines
+from heocr.pdf.ocrforms import needs_form_probe, preserve_form_cell_lines
 from heocr.pdf.ocrmargins import attach_margin_numbers
 from heocr.pdf.ocrorder import order_across_disjoint_gaps
 from heocr.pdf.ocrrows import TableRows, table_rows
@@ -2399,7 +2400,16 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
         if rectified_read is not None:
             t_blocks, in_cells = rectified_read
         else:
-            t_blocks, in_cells = _ocr_tables(doc, index, engine, image, scale, grids, None if numbers is engine else numbers)
+            form_probe = ()
+            if (page is not None and page_class == "T5" and doc._rtl and not time_up(doc)
+                    and any(needs_form_probe(image, grid, scale) for grid in grids)):
+                try:
+                    form_probe = engine.recognize(image, dpi=dpi).lines
+                except OcrUnavailable:
+                    pass
+            t_blocks, in_cells = _ocr_tables(doc, index, engine, image, scale, grids,
+                                            None if numbers is engine else numbers,
+                                            **({"form_probe": form_probe} if form_probe else {}))
         _place_tables(doc, first, t_blocks)
         read += in_cells
         flags = flags + ["ocr_tables"]
@@ -2509,7 +2519,7 @@ def _validated_rectified_tables(doc: Document, index: int, engine, rectified, sc
     return blocks, chars
 
 
-def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids, numbers=None, offset=(0.0, 0.0), *, text_scale=None) -> tuple[list[Block], int]:
+def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids, numbers=None, offset=(0.0, 0.0), *, text_scale=None, form_probe=()) -> tuple[list[Block], int]:
     """Table blocks for ruled tables found in a page image, each inked cell OCR'd as its own region.
 
     With ``numbers`` (the number model), a cell whose reading holds digits is read a second time.
@@ -2525,6 +2535,7 @@ def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids, n
         lines_all = []
         unread_cells = 0
         psms: Counter = Counter()
+        preserved = 0
         checks = {"numbers": 0, "agreed": 0, "disagreed": 0, "read_by_number_model": 0}
         for row in grid.rows:
             ordered = sorted(row, key=lambda cell: -cell["col"] if doc._rtl else cell["col"])
@@ -2547,6 +2558,7 @@ def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids, n
                     crop = isolated_cell_text(crop, text_scale)
                 psm = cell_psm(crop)
                 psms[psm] += 1
+                result = None
                 try:
                     result = engine.recognize(crop, dpi=dpi, psm=psm)
                     text = "\n".join(line.text for line in result.lines if line.text.strip())
@@ -2600,6 +2612,18 @@ def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids, n
                     doc.unread.append(Unread(scope="block", reason="table_cell_garbled", page=index,
                                              bbox=[x0 + ox, y0 + oy, x1 + ox, y1 + oy],
                                              detail=f"row {len(rows)}, column {len(out_row)}: OCR read letters and marks no cell holds"))
+                if form_probe and text_scale is None and result is not None and readings is None:
+                    augmented = preserve_form_cell_lines(engine, image, cell["box"], scale, result,
+                                                         form_probe, lambda: time_up(doc))
+                    if augmented is not result:
+                        native_ids = {id(line) for line in result.lines}
+                        additions = [line for line in augmented.lines if id(line) not in native_ids]
+                        preserved += len(additions)
+                        lines_all.extend(additions)
+                        if not text.strip():
+                            empty -= 1
+                            cell_flags.remove("ocr_empty_with_ink")
+                        text = "\n".join(line.text for line in augmented.lines if line.text.strip())
                 read += sum(1 for ch in text if not ch.isspace())
                 out_row.append(Cell(text, colspan=cell["colspan"], rowspan=cell["rowspan"], flags=cell_flags, readings=readings))
             unread_cells += empty
@@ -2612,6 +2636,8 @@ def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids, n
         flags = ["ruled_table", "ocr_unverified", *grid.flags]
         if unread_cells:
             flags.append("table_cells_ink_unread")
+        if preserved:
+            flags.append("table_native_lines_preserved")
         if checks["disagreed"]:
             flags.append("number_disagreement")
         if checks["read_by_number_model"]:
@@ -2625,7 +2651,8 @@ def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids, n
                 source="ocr",
                 tool=engine.version,
                 direction="rtl" if doc._rtl else "ltr",
-                ocr={**block_ocr(engine, lines_all), "psm": "per_cell", "cells_psm7": psms[7], "cells_psm6": psms[6], "dpi": round(scale * 72, 1)},
+                ocr={**block_ocr(engine, lines_all), "psm": "per_cell", "cells_psm7": psms[7], "cells_psm6": psms[6], "dpi": round(scale * 72, 1),
+                     **({"native_lines_preserved": preserved} if preserved else {})},
                 checks=checks if checks["numbers"] or checks["read_by_number_model"] else None,
                 flags=flags + (["render_dpi_reduced"] if scale * 72 < RENDER_DPI else []),
             )
