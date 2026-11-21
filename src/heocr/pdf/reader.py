@@ -45,6 +45,7 @@ from heocr.pdf.classify import FIGURE_IMAGE, PAGE_IMAGE, classify, object_stats,
 from heocr.pdf.frame import frame_of
 from heocr.pdf.lines import Atom, PageLines, build_lines, line_is_rtl, paragraphs
 from heocr.pdf.columns import UNRESOLVED, Segment, arrange
+from heocr.pdf.ocrlines import recover_photo_lines
 from heocr.pdf.ocrmargins import attach_margin_numbers
 from heocr.pdf.ocrorder import order_across_disjoint_gaps
 from heocr.pdf.ocrrows import TableRows, table_rows
@@ -2345,6 +2346,15 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
             result = supplemented
             short, outside_share = short_for_ink(gray, result)
             flags = flags + ["ocr_same_column_lines_recovered"]
+    photo_gap_lines = 0
+    if (page is None and page_class == "T5" and signals.get("image_format") == "jpeg" and doc._rtl
+            and not (unruled or grids or rectified) and not time_up(doc)):
+        supplemented = recover_photo_lines(engine, gray, result, dpi)
+        if supplemented is not result:
+            photo_gap_lines = len(supplemented.lines) - len(result.lines)
+            result = supplemented
+            short, outside_share = short_for_ink(gray, result)
+            flags = flags + ["ocr_photo_gap_lines_recovered"]
     form_tables = [t.bbox for t in grids if "table_open_sides_inferred" in t.flags]
     margin_page = image.size if doc._rtl and not unruled and not (grids or rectified) else None
     record_lines = page is not None and page_class == "T5" and margin_page is not None
@@ -2393,6 +2403,7 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
              {"chars_total": text.chars_total, "chars_read": 0, "chars_ocr": read,
               "ink_outside_ocr_share": outside_share,
               **({"ocr_same_column_lines_recovered": recovered_lines} if recovered_lines else {}),
+              **({"ocr_photo_gap_lines_recovered": photo_gap_lines} if photo_gap_lines else {}),
               **({"number_words_reread": number_words[0], "number_words_replaced": number_words[1]} if number_words else {}),
               **({"page_number_tokens": page_numbers[0], "page_number_words_replaced": page_numbers[1]} if page_numbers else {}),
               "status": "ocr" if found and not (short or page_failed) else "partial" if found else "unread"}, flags)
