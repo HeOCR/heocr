@@ -40,21 +40,27 @@ class ModelRouteTest(unittest.TestCase):
         return [c for c in calls if c and not c[0].startswith("--")][0]
 
     def test_model_by_path_runs_from_a_private_tessdata(self) -> None:
-        model = Path(self.tmp.name) / "custom_x.traineddata"
-        model.write_bytes(b"a custom model")
-        doc = heocr.extract(SCAN, tesseract=FAKE, ocr_model=str(model))
-        call = self.recognition_call()
-        self.assertEqual(call[call.index("-l") + 1], "custom_x")
-        private = Path(call[call.index("--tessdata-dir") + 1])
-        self.assertNotEqual(private, self.tessdata)
-        self.assertTrue((private / "custom_x.traineddata").is_file())
-        self.assertTrue((private / "configs" / "tsv").is_file())
-        self.assertEqual(doc.components["tesseract:custom_x.traineddata"], "sha256:" + hashlib.sha256(b"a custom model").hexdigest())
-        self.assertEqual(doc.blocks[0].ocr["lang"], "custom_x")
-        payload = doc.to_json()
-        self.assertNotIn(str(private), payload)
-        self.assertNotIn(self.tmp.name, payload)
-        self.assertEqual(doc.to_dict()["options"]["ocr"]["model"], "custom_x.traineddata")
+        body = b"a custom model"
+        digest = hashlib.sha256(body).hexdigest()
+        for name in ("custom_x", "custom-model", "print_v3-snapshot-12"):
+            with self.subTest(name=name):
+                self.log.unlink(missing_ok=True)
+                model = Path(self.tmp.name) / f"{name}.traineddata"
+                model.write_bytes(body)
+                doc = heocr.extract(SCAN, tesseract=FAKE, ocr_model=str(model))
+                self.assertEqual(doc.unread, [])
+                call = self.recognition_call()
+                self.assertEqual(call[call.index("-l") + 1], name)
+                private = Path(call[call.index("--tessdata-dir") + 1])
+                self.assertNotEqual(private, self.tessdata)
+                self.assertEqual((private / model.name).read_bytes(), body)
+                self.assertTrue((private / "configs" / "tsv").is_file())
+                self.assertEqual(doc.components[f"tesseract:{model.name}"], f"sha256:{digest}")
+                self.assertEqual(doc.blocks[0].ocr["lang"], name)
+                payload = doc.to_json()
+                self.assertNotIn(str(private), payload)
+                self.assertNotIn(self.tmp.name, payload)
+                self.assertEqual(doc.to_dict()["options"]["ocr"]["model"], model.name)
 
     def test_released_name_must_be_downloaded_first(self) -> None:
         doc = heocr.extract(SCAN, tesseract=FAKE, ocr_model="heocr_r8b")

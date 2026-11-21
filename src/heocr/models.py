@@ -132,8 +132,8 @@ def resolve(spec: str) -> tuple[Path, str, ReleasedModel | None]:
             raise ModelError(f"model {spec} is not downloaded; run: heocr --download-model {spec}")
     else:
         raise ModelError(f"unknown model {spec!r}; known: {', '.join(sorted(MODELS))}, or a path to a .traineddata file")
-    if not name.replace("_", "").isalnum():
-        raise ModelError(f"model name {name!r} must be letters, digits and underscores")
+    if not name.replace("_", "").replace("-", "").isalnum():
+        raise ModelError(f"model name {name!r} must use letters, digits, underscores or hyphens")
     released = MODELS.get(name)
     if released is not None and sha256_of(path) != released.sha256:
         raise ModelError(f"{name}.traineddata is not the released file (sha256 differs from {released.sha256[:12]}…)")
