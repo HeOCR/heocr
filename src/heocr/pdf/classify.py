@@ -115,17 +115,20 @@ def _type3_space_candidate(raw, obj, box) -> bool:
 
 def _paints_ink(raw, page, obj) -> bool:
     """Test the object in isolation so ink from neighboring letters cannot count."""
-    from pypdfium2 import PdfBitmap
-
-    handle = raw.FPDFTextObj_GetRenderedBitmap(page.pdf, page, obj, 2.0)
-    if not handle:
+    bitmap = raw.FPDFTextObj_GetRenderedBitmap(page.pdf, page, obj, 2.0)
+    if not bitmap:
         return False
-    bitmap = PdfBitmap.from_raw(handle)
     try:
-        image = bitmap.to_pil()
-        return image.mode == "RGBA" and image.getchannel("A").getbbox() is not None
+        if raw.FPDFBitmap_GetFormat(bitmap) != raw.FPDFBitmap_BGRA:
+            return False
+        stride = raw.FPDFBitmap_GetStride(bitmap)
+        row_bytes = raw.FPDFBitmap_GetWidth(bitmap) * 4
+        size = stride * raw.FPDFBitmap_GetHeight(bitmap)
+        pixels = ctypes.string_at(raw.FPDFBitmap_GetBuffer(bitmap), size)
+        # The fourth byte of each BGRA pixel is alpha. Skip any row padding.
+        return any(any(pixels[row + 3 : row + row_bytes : 4]) for row in range(0, size, stride))
     finally:
-        bitmap.close()
+        raw.FPDFBitmap_Destroy(bitmap)
 
 
 def object_stats(page, max_objects: int = 20000) -> ObjectStats:
