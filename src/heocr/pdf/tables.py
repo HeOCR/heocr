@@ -214,8 +214,8 @@ def _covered(rules: list[Rule], pos: float, lo: float, hi: float) -> bool:
     return covered >= need
 
 
-def find_tables(horizontal: list[Rule], vertical: list[Rule]) -> list[Table]:
-    """Tables formed by intersecting rulings."""
+def find_tables(horizontal: list[Rule], vertical: list[Rule], *, require_closed: bool = False) -> list[Table]:
+    """Tables formed by intersecting rulings, optionally requiring a supported perimeter."""
     lines = [("h", r) for r in horizontal] + [("v", r) for r in vertical]
     parent = list(range(len(lines)))
 
@@ -240,18 +240,25 @@ def find_tables(horizontal: list[Rule], vertical: list[Rule]) -> list[Table]:
         vs = [lines[i][1] for i in members if lines[i][0] == "v"]
         if len(hs) < 2 or len(vs) < 2:
             continue
-        table = _grid(hs, vs)
+        table = _grid(hs, vs, require_closed=require_closed)
         if table is not None:
             tables.append(table)
     return tables
 
 
-def _grid(hs: list[Rule], vs: list[Rule]) -> Table | None:
+def _grid(hs: list[Rule], vs: list[Rule], *, require_closed: bool) -> Table | None:
     ys = _positions([r.pos for r in hs])
     xs = _positions([r.pos for r in vs])
     if len(ys) < 2 or len(xs) < 2:
         return None
     hs, vs = _assign(hs, ys), _assign(vs, xs)
+    if require_closed:
+        # A short outer stroke can attach to a real grid and create an extra band.
+        # Count joined segments on each outer edge once, using the same support as cell edges.
+        outer_h, outer_v = _merge(hs), _merge(vs)
+        if not (all(_covered(outer_h, y, xs[0], xs[-1]) for y in (ys[0], ys[-1]))
+                and all(_covered(outer_v, x, ys[0], ys[-1]) for x in (xs[0], xs[-1]))):
+            return None
     rows, cols = len(ys) - 1, len(xs) - 1
     parent = {(r, c): (r, c) for r in range(rows) for c in range(cols)}
 

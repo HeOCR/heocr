@@ -236,6 +236,25 @@ class OcrTableTest(unittest.TestCase):
         self.assertEqual(self.calls("3"), 1)
         self.assertEqual(self.calls("6|7"), 0)
 
+    def test_a_short_outer_rule_does_not_add_a_column_or_mask_the_page(self) -> None:
+        from PIL import ImageDraw
+
+        from heocr.pdf.reader import _without
+
+        image = scan(LEVELS)
+        draw = ImageDraw.Draw(image)
+        left = XS[0] - 14
+        for y in YS[-2:]:
+            draw.line((px(left), px(y), px(XS[0]), px(y)), width=3, fill=0)
+        draw.line((px(left), px(YS[-2]), px(left), px(YS[-1])), width=3, fill=0)
+
+        with mock.patch("heocr.pdf.reader._without", wraps=_without) as mask_page:
+            doc = heocr.extract(scanned_pdf(image), tesseract=FAKE)
+        mask_page.assert_not_called()
+        self.assertFalse(any(block.kind == "table" for block in doc.blocks))
+        self.assertEqual(self.calls("3"), 1)
+        self.assertEqual(self.calls("6|7"), 0)
+
     def test_ink_outside_the_table_that_ocr_missed_is_partial(self) -> None:
         image = scan(LEVELS)
         from PIL import ImageDraw
@@ -726,6 +745,22 @@ class ImageRulingsTest(unittest.TestCase):
         ImageDraw.Draw(image).line((px(XS[0]), px(YS[-1]), px(XS[0]), px(YS[-1] + 70)), width=3, fill=0)
         (table,) = tables_in(image, DPI / 72)
         self.assertEqual([len(row) for row in table.rows], [3, 3, 3])
+
+    def test_a_supported_narrow_column_keeps_its_cells(self) -> None:
+        from PIL import Image, ImageDraw
+
+        from heocr.pdf.ocrtables import tables_in
+
+        image = Image.new("L", (330, 180), 255)
+        draw = ImageDraw.Draw(image)
+        for y in (20, 85, 150):
+            draw.line((20, y, 300, y), fill=0)
+        for x in (20, 34, 167, 300):
+            draw.line((x, 20, x, 150), fill=0)
+
+        (table,) = tables_in(image, 1)
+        self.assertEqual([len(row) for row in table.rows], [3, 3])
+        self.assertEqual(table.xs, [20, 34, 167, 300])
 
     def test_long_strokes_crossing_in_a_tiny_area_do_not_make_a_table(self) -> None:
         from PIL import Image, ImageDraw
