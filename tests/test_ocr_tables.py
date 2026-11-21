@@ -90,6 +90,43 @@ class OcrTableTest(unittest.TestCase):
         kinds = [b.kind for b in doc.blocks]
         self.assertEqual(kinds[-1], "table")
 
+    def test_open_form_sides_still_give_three_rtl_cells(self) -> None:
+        from PIL import Image, ImageDraw
+
+        image = Image.new("L", (px(595), px(842)), 255)
+        draw = ImageDraw.Draw(image)
+        draw.line((px(100), px(390), px(460), px(390)), fill=0, width=3)
+        for x in (220, 340):
+            draw.line((px(x), px(302), px(x), px(389)), fill=0, width=3)
+        draw.rectangle((px(128), px(318), px(195), px(334)), fill=40)
+        draw.rectangle((px(370), px(318), px(425), px(334)), fill=60)
+        # Unsupported divider ends do not make a table.
+        pdf = scanned_pdf(image)
+        doc = heocr.extract(pdf, tesseract=FAKE, check_numbers=False)
+        self.assertFalse([b for b in doc.blocks if b.kind == "table"])
+
+        draw.line((px(232), px(300), px(326), px(300)), fill=0, width=3)
+        draw.rectangle((px(503), px(415), px(555), px(428)), fill=80)
+        tsv = Path(self.tmp.name) / "form.tsv"
+        rows = ["level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext"]
+        for block, line, x, y, width, text in [
+            (1, 1, 500, 415, 58, "טור שכן"),
+            (2, 1, 110, 271, 210, "לפני הטופס"),
+            (2, 2, 110, 415, 210, "אחרי הטופס"),
+        ]:
+            dims = "\t".join(str(round(v * 300 / 72)) for v in (x, y, width, 12))
+            rows.append(f"5\t1\t{block}\t1\t{line}\t1\t{dims}\t90.0\t{text}")
+        tsv.write_text("\n".join(rows) + "\n", encoding="utf-8")
+        # A page turn that loses all grids cannot replace the useful original geometry.
+        with mock.patch("heocr.pdf.reader.skew_angle", return_value=8.0), mock.patch.dict(os.environ, {"FAKE_TSV": str(tsv)}):
+            doc = heocr.extract(scanned_pdf(image), tesseract=FAKE, check_numbers=False)
+        (table,) = [b for b in doc.blocks if b.kind == "table"]
+        self.assertIn("table_open_sides_inferred", table.flags)
+        self.assertEqual([[c.text for c in row] for row in table.cells], [["שם", "", "סכום"]])
+        self.assertEqual([b.text if b.kind == "text" else "table" for b in doc.blocks],
+                         ["טור שכן", "לפני הטופס", "table", "אחרי הטופס"])
+        self.assertEqual(heocr.validate(doc.to_dict()), [])
+
     def textured(self, image):
         """The scan on grey, slightly mottled paper (levels 230-246), as a real scan's paper is."""
         import random

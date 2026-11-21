@@ -38,6 +38,7 @@ CELL_PSM = 6  # a cell of several lines is a uniform block of text
 LINE_PSM = 7  # a cell of one line
 LINE_GAP_PX = 3  # white pixel rows that separate two lines of a cell
 MIN_CELL_PT = 6.0  # a cell narrower or shorter than this is not OCR'd (a doubled border's sliver)
+OPEN_END_PT = 4.0  # raster breaks can leave a divider just short of its horizontal rule
 
 
 def _runs(data: bytes, width: int, height: int, min_len: int) -> list[tuple[int, int, int]]:
@@ -100,16 +101,61 @@ except ImportError:  # pragma: no cover
     _TRANSPOSE = _Image.TRANSPOSE
 
 
+def _open_sided_rows(horizontal: list[Rule], vertical: list[Rule], tables: list[Table], min_extent: float) -> None:
+    """Add a single ruled band with two internal dividers and open outer sides.
+
+    The lower rule gives the outside edges. The dividers must end at that rule, start together,
+    and meet a visible upper rule fragment. The inferred cell widths must be comparable.
+    """
+    for lower in horizontal:
+        dividers = sorted(
+            (v for v in vertical if lower.start + MIN_CELL_PT < v.pos < lower.end - MIN_CELL_PT
+             and abs(v.end - lower.pos) <= OPEN_END_PT and lower.pos - v.start >= min_extent),
+            key=lambda v: v.pos,
+        )
+        if len(dividers) != 2:
+            continue
+        left, right = dividers
+        middle_width = right.pos - left.pos
+        if middle_width < MIN_CELL_PT or abs(left.start - right.start) > OPEN_END_PT:
+            continue
+        outside_widths = (left.pos - lower.start, lower.end - right.pos)
+        if not all(0.5 * middle_width <= width <= 2 * middle_width for width in outside_widths):
+            continue
+        start = (left.start + right.start) / 2
+        upper = [h for h in horizontal if abs(h.pos - start) <= OPEN_END_PT
+                 and min(h.end, right.pos) - max(h.start, left.pos) >= 0.5 * middle_width]
+        if not upper:
+            continue
+        top = min(upper, key=lambda h: abs(h.pos - start)).pos
+        if lower.pos - top < min_extent or any(
+            top + OPEN_END_PT < h.pos < lower.pos - OPEN_END_PT and h.start <= left.pos and h.end >= right.pos
+            for h in horizontal
+        ):
+            continue
+        box = [lower.start, top, lower.end, lower.pos]
+        if any(min(box[2], t.bbox[2]) > max(box[0], t.bbox[0])
+               and min(box[3], t.bbox[3]) > max(box[1], t.bbox[1]) for t in tables):
+            continue
+        xs = [lower.start, left.pos, right.pos, lower.end]
+        row = [{"box": [a, top, b, lower.pos], "col": c, "colspan": 1, "rowspan": 1, "placeholder": False}
+               for c, (a, b) in enumerate(zip(xs, xs[1:]))]
+        tables.append(Table(box, [row], ["table_open_sides_inferred"], xs))
+
+
 def tables_in(image, scale: float) -> list[Table]:
     """Ruled tables in a rendered image, with space for a ruling in both directions."""
     # Long strokes can extend beyond their intersections, for example around text or at
     # a photo edge. Their enclosed patch must itself be large enough to support the rulings.
     # A run covers one more pixel than the distance between its first and last pixel centres.
     min_extent = (_min_rule_pixels(scale) - 1) / scale
-    return [
-        table for table in find_tables(*image_rulings(image, scale))
+    horizontal, vertical = image_rulings(image, scale)
+    tables = [
+        table for table in find_tables(horizontal, vertical)
         if table.rows and min(table.bbox[2] - table.bbox[0], table.bbox[3] - table.bbox[1]) >= min_extent
     ]
+    _open_sided_rows(horizontal, vertical, tables, min_extent)
+    return tables
 
 
 def cell_crop(image, box, scale: float):
