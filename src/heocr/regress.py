@@ -261,6 +261,10 @@ def _grid(block):
         column = 0
         cells = []
         for cell in row:
+            # PDF rows can carry explicit padding for slots occupied by a rowspan.
+            # The occupied slots below already account for those cells.
+            if "merged_above" in cell.flags:
+                continue
             while (r, column) in occupied:
                 column += 1
             cells.append((column, cell.rowspan, cell.colspan, _fold(cell.text)))
