@@ -18,6 +18,7 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 ### Fixed
 
 - **Recover missed text bands on scanned PDFs.** HeOCR proposes line boxes from unread pixels and adds corroborated, non-overlapping reads within an existing text track.
+- **Recover text on shaded bands in partially read scans.** A crop-confirmed line can be added when its background is consistently darker than the paper and it fits an existing text track.
 - **Preserve corroborated cell text on scanned forms.** On grids with tall cells, a native page reading can recover cell text omitted by isolated cell OCR when a crop confirms the same words.
 - **A number beside a Latin parenthetical keeps its place in RTL text-layer lines.** In a line like "משנת 2018 (Assigning responsibilities), ..." the year and the parenthetical were read as one left-to-right run, so the year came out after the Latin text, with a bracket on each side ("Assigning responsibilities) 2018)"). Where the document's brackets were mirrored, both brackets then opened the same way. The brackets now take the paragraph's direction when the number stands outside them, as the page shows it, and the pair is read "(" then ")" whatever characters the layer gives it (LibreOffice writes both as ")"). A number inside the brackets ("(Annual Report 2020)") stays in the Latin run.
 - The document's bracket mirroring (`rtl_bracket_order`) never changes a block twice.

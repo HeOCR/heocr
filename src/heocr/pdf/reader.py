@@ -2361,14 +2361,13 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
             result = supplemented
             short, outside_share = short_for_ink(gray, result)
             flags = flags + ["ocr_same_column_lines_recovered"]
-        if short and not time_up(doc):
-            supplemented = recover_pixel_lines(engine, gray, result, scale, outside_share,
-                                               stop=lambda: time_up(doc))
-            if supplemented is not result:
-                pixel_gap_lines = len(supplemented.lines) - len(result.lines)
-                result = supplemented
-                short, outside_share = short_for_ink(gray, result)
-                flags = flags + ["ocr_pixel_lines_recovered"]
+        supplemented = recover_pixel_lines(engine, gray, result, scale, outside_share,
+                                           stop=lambda: time_up(doc), short=short)
+        if supplemented is not result:
+            pixel_gap_lines = len(supplemented.lines) - len(result.lines)
+            result = supplemented
+            short, outside_share = short_for_ink(gray, result)
+            flags = flags + ["ocr_pixel_lines_recovered"]
     photo_gap_lines = 0
     if (page is None and page_class == "T5" and signals.get("image_format") == "jpeg" and doc._rtl
             and not (unruled or grids or rectified) and not time_up(doc)):
