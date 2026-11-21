@@ -246,12 +246,12 @@ def latin_sub_levels(text: str, lead: bool = False) -> set[int]:
             continue
         if not re.search(r"[A-Za-z§]", body):
             continue
-        opened: list[int] = []
+        opened: dict[str, list[int]] = {"(": [], "[": []}
         for i, ch in enumerate(body):
-            if ch == "(":
-                opened.append(i)
-            elif ch == ")" and opened:
-                keep.update((at + opened.pop(), at + i))
+            if ch in opened:
+                opened[ch].append(i)
+            elif ch in ")]" and (matches := opened[ch.translate(_MIRROR)]):
+                keep.update((at + matches.pop(), at + i))
     return keep
 
 
