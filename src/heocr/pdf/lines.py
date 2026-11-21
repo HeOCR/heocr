@@ -414,8 +414,12 @@ def _number_beside_latin_pair(texts: list[str], types: list[str], resolved: list
     resolved[p] = resolved[q] = "R"
     # The neutrals between a bracket and the number take the paragraph's direction too.
     for k in outside:
-        if types[k] == "N":
-            resolved[k] = "R"
+        if types[k] != "N":
+            continue
+        # A hyphen between adjacent digits stays in its numeric run.
+        if texts[k] == "-" and i < k < j - 1 and types[k - 1] == types[k + 1] == "EN":
+            continue
+        resolved[k] = "R"
 
 
 def _cell_gaps(units: list[tuple[str, Atom | None]]) -> list[str]:

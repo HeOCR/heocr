@@ -260,6 +260,17 @@ class NumberBesideLatinPairTest(unittest.TestCase):
     def test_a_year_after_the_parenthetical(self) -> None:
         self.assertEqual(text(self.line(")", ")", year_inside_line=True)), "משנת (Assigning responsibilities) 2018,")
 
+    def test_a_range_keeps_its_endpoints_beside_a_latin_parenthetical(self) -> None:
+        note = (")", HUG, "Desk B", HUG, "(")
+        self.assertEqual(
+            text(visual("34-79", WORD_SPACE, *note, WORD_SPACE, "ספוטב")),
+            "בטופס (Desk B) 34-79",
+        )
+        self.assertEqual(
+            text(visual(*note, WORD_SPACE, "34-79", WORD_SPACE, "ספוטב")),
+            "בטופס 34-79 (Desk B)",
+        )
+
     def test_a_number_inside_the_brackets_stays_in_the_latin_run(self) -> None:
         self.assertEqual(text(visual("(", HUG, "Annual", WORD_SPACE, "Report", WORD_SPACE, "2020", HUG, "(", WORD_SPACE, "חוד")), "דוח (Annual Report 2020)")
 
