@@ -407,8 +407,54 @@ class OcrTableTest(unittest.TestCase):
         (table,) = [block for block in doc.blocks if block.kind == "table"]
         self.assertEqual([[c.text for c in row] for row in table.cells],
                          [["שם", "תפקיד", "סכום"], ["ספק א", "מנהל", "100"], ["ספק ב", "עובד", "200"]])
+        self.assertEqual(self.calls("6|7"), 9)
         for value, expected in zip(table.bbox, [115, 356, 641, 579]):
             self.assertAlmostEqual(value, expected, delta=4)
+        self.assertEqual(heocr.validate(doc.to_dict()), [])
+
+    def test_an_unread_rectified_row_leaves_the_page_unmasked(self) -> None:
+        image = capture_obliquely(scan([LEVELS[0], [137, 137, 137], LEVELS[2]], line_width=8))
+        with mock.patch("heocr.pdf.reader._without", side_effect=AssertionError("unvalidated grid masked the page")):
+            doc = heocr.extract(scan_png(image), tesseract=FAKE)
+        self.assertIn("ocr_grid_cell_fallback", doc.pages[0].flags)
+        self.assertNotIn("ocr_grid_rectified", doc.pages[0].flags)
+        self.assertFalse(any(block.kind == "table" for block in doc.blocks))
+        self.assertFalse(any(entry.reason == "table_row_ink_unread" for entry in doc.unread))
+        self.assertTrue(doc.text.strip())
+        self.assertEqual(self.calls("6|7"), 9)
+        self.assertEqual(self.calls("3"), 1)
+        self.assertEqual(heocr.validate(doc.to_dict()), [])
+
+    def test_a_rejected_rectified_grid_reuses_the_unmasked_model_probe(self) -> None:
+        image = capture_obliquely(scan([LEVELS[0], [137, 137, 137], LEVELS[2]], line_width=8))
+        with mock.patch("heocr.pdf.reader.routes.pending", return_value=True), \
+             mock.patch("heocr.pdf.reader.routes.observe", return_value=False) as observe:
+            doc = heocr.extract(scan_png(image), tesseract=FAKE)
+        self.assertIn("ocr_grid_cell_fallback", doc.pages[0].flags)
+        observe.assert_called_once()
+        self.assertEqual(self.calls("3"), 1)
+
+    def test_a_read_rectified_grid_survives_an_ocr_failure_outside_it(self) -> None:
+        from PIL import ImageDraw
+
+        from heocr.ocr.tesseract import OcrUnavailable, Tesseract
+
+        image = capture_obliquely(scan(LEVELS, line_width=8))
+        ImageDraw.Draw(image).rectangle((400, 150, 480, 172), fill=0)
+        recognize = Tesseract.recognize
+
+        def fail_page(engine, crop, dpi, psm=None):
+            if psm is None:
+                raise OcrUnavailable("invented outside-page failure")
+            return recognize(engine, crop, dpi=dpi, psm=psm)
+
+        with mock.patch.object(Tesseract, "recognize", new=fail_page):
+            doc = heocr.extract(scan_png(image), tesseract=FAKE, check_numbers=False)
+        (table,) = doc.blocks
+        self.assertEqual(table.kind, "table")
+        self.assertEqual(doc.pages[0].coverage["status"], "partial")
+        self.assertIn("ocr_grid_rectified", doc.pages[0].flags)
+        self.assertIn("ocr_failed", [entry.reason for entry in doc.unread])
         self.assertEqual(heocr.validate(doc.to_dict()), [])
 
     def test_a_perspective_frame_keeps_the_unmasked_page_route(self) -> None:
@@ -717,6 +763,19 @@ class OcrTableTest(unittest.TestCase):
 
 
 class ImageRulingsTest(unittest.TestCase):
+    def test_isolated_cell_crop_keeps_faint_marks_and_adds_paper_margin(self) -> None:
+        from PIL import Image, ImageDraw
+
+        from heocr.pdf.ocrtables import isolated_cell_text
+
+        cell = Image.new("L", (180, 72), 230)
+        draw = ImageDraw.Draw(cell)
+        draw.rectangle((62, 22, 89, 41), fill=40)
+        draw.rectangle((91, 38, 97, 41), fill=175)
+        crop = isolated_cell_text(cell, 0.5)
+        self.assertEqual(crop.size, (34, 26))
+        self.assertEqual(crop.getpixel((0, 0)), 230)
+
     def test_a_single_long_rule_beyond_a_complete_grid_keeps_the_table(self) -> None:
         from PIL import ImageDraw
 

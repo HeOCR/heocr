@@ -39,6 +39,8 @@ LINE_PSM = 7  # a cell of one line
 LINE_GAP_PX = 3  # white pixel rows that separate two lines of a cell
 MIN_CELL_PT = 6.0  # a cell narrower or shorter than this is not OCR'd (a doubled border's sliver)
 OPEN_END_PT = 4.0  # raster breaks can leave a divider just short of its horizontal rule
+CELL_TEXT_PAGE_EDGE = 1700  # working raster edge used for the isolated line reads
+CELL_TEXT_BORDER_PX = 8
 
 
 def _runs(data: bytes, width: int, height: int, min_len: int) -> list[tuple[int, int, int]]:
@@ -234,3 +236,20 @@ def cell_lines(crop) -> int:
 
 def cell_psm(crop) -> int:
     return LINE_PSM if cell_lines(crop) <= 1 else CELL_PSM
+
+
+def isolated_cell_text(crop, factor: float):
+    """Remove excess space inside a cell and give its text a clean margin at OCR scale."""
+    from PIL import Image, ImageOps
+
+    gray = crop.convert("L")
+    level = paper_level(gray)
+    cut = max(INK_LEVEL, level - FAINT_INK_DELTA)
+    box = gray.point(lambda v: 255 if v < cut else 0).getbbox()
+    if box is not None:
+        crop = crop.crop(box)
+    if factor < 1:
+        size = (max(1, round(crop.width * factor)), max(1, round(crop.height * factor)))
+        crop = crop.resize(size, Image.Resampling.LANCZOS)
+    fill = level if crop.mode == "L" else (level,) * 3
+    return ImageOps.expand(crop, CELL_TEXT_BORDER_PX, fill=fill)
