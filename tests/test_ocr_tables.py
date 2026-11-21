@@ -4,6 +4,7 @@ The fake engine "reads" a cell by its grey level ($FAKE_CELLS), so each cell's a
 and a cell that holds ink but cannot be read can be made on purpose.
 """
 
+import io
 import json
 import os
 import shutil
@@ -45,6 +46,20 @@ def scan(cells, *, line_width: int = 3):
 
 def scanned_pdf(image) -> bytes:
     return make_pdf([PdfPage(rasters=[(0, 0, 595, 842, image)])])
+
+
+def capture_obliquely(image):
+    from PIL import Image
+
+    return image.transform((image.width + 260, image.height), Image.Transform.PERSPECTIVE,
+                           (1, 0.00015 * image.width / 2, -100, -0.04, 1, -25, 0.00008, 0.00015),
+                           Image.Resampling.BICUBIC, fillcolor=255)
+
+
+def scan_png(image):
+    body = io.BytesIO()
+    image.save(body, format="PNG", dpi=(DPI, DPI))
+    return body.getvalue()
 
 
 LEVELS = [[40, 50, 60], [70, 80, 90], [100, 110, 120]]
@@ -371,6 +386,29 @@ class OcrTableTest(unittest.TestCase):
         self.assertLess(abs(table.bbox[0] - XS[0]), 15)
         self.assertLess(abs(table.bbox[3] - YS[-1]), 15)
         self.assertEqual(heocr.validate(doc.to_dict()), [])
+
+    def test_a_perspective_grid_keeps_cells_and_source_coordinates(self) -> None:
+        image = capture_obliquely(scan(LEVELS, line_width=8))
+        doc = heocr.extract(scan_png(image), tesseract=FAKE)
+        self.assertIn("ocr_grid_rectified", doc.pages[0].flags)
+        (table,) = [block for block in doc.blocks if block.kind == "table"]
+        self.assertEqual([[c.text for c in row] for row in table.cells],
+                         [["שם", "תפקיד", "סכום"], ["ספק א", "מנהל", "100"], ["ספק ב", "עובד", "200"]])
+        for value, expected in zip(table.bbox, [115, 356, 641, 579]):
+            self.assertAlmostEqual(value, expected, delta=4)
+        self.assertEqual(heocr.validate(doc.to_dict()), [])
+
+    def test_a_perspective_frame_keeps_the_unmasked_page_route(self) -> None:
+        from PIL import Image, ImageDraw
+
+        image = Image.new("L", scan(LEVELS).size, 255)
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((px(XS[0]), px(YS[0]), px(XS[-1]), px(YS[-1])), outline=0, width=8)
+        draw.rectangle((px(XS[0] + 30), px(YS[0] + 30), px(XS[0] + 100), px(YS[0] + 60)), fill=70)
+        doc = heocr.extract(scan_png(capture_obliquely(image)), tesseract=FAKE)
+        self.assertNotIn("ocr_grid_rectified", doc.pages[0].flags)
+        self.assertFalse(any(block.kind == "table" for block in doc.blocks))
+        self.assertEqual(self.calls("3"), 1)
 
     def test_a_skew_at_the_edge_of_the_search_is_not_trusted(self) -> None:
         from PIL import Image

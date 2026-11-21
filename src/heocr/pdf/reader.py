@@ -48,6 +48,7 @@ from heocr.pdf.columns import UNRESOLVED, Segment, arrange
 from heocr.pdf.ocrmargins import attach_margin_numbers
 from heocr.pdf.ocrrows import TableRows, table_rows
 from heocr.pdf.ocrtables import cell_crop, cell_has_faint_ink, cell_has_ink, cell_psm, faint_cell_image, image_rulings, tables_in
+from heocr.pdf.perspective import rectify_grid
 from heocr.pdf.tables import find_tables, rulings, table_blocks
 from heocr.textflags import is_private_use, text_flags
 
@@ -2222,12 +2223,15 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
         else:
             deskew = 0.0
     # Ruled tables in the image are read cell by cell; the rest of the page once, without them (D3e).
-    page_image = _without(image, scale, [t.bbox for t in grids]) if grids else image
+    rectified = rectify_grid(image, scale) if not grids else None
+    if rectified is not None:
+        flags = flags + ["ocr_grid_rectified"]
+    page_image = _without(image, scale, [t.bbox for t in grids], polygon=rectified.mask if rectified else ()) if grids or rectified else image
     # With its tables taken out, the rest of a page can be bare paper. Tesseract's global threshold then
     # falls inside the paper's own texture, and it reads that texture as lines of symbols and single
     # letters (a page with one small table gave 2,801 characters of noise). No ink, not even faint
     # ink, means nothing to read there.
-    rest_blank = bool(grids) and not _rest_has_ink(page_image, scale)
+    rest_blank = bool(grids or rectified) and not _rest_has_ink(page_image, scale)
     if rest_blank:
         flags = flags + ["ocr_rest_blank"]
     try:
@@ -2261,15 +2265,23 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
                        form_tables=form_tables, margin_page=margin_page)
     if _order_ocr_paragraphs(doc.blocks, first):
         flags = flags + ["reading_order_ocr_adjusted_unverified"]
-    if not unruled and not grids and _order_ocr_bands(doc.blocks, first, image, scale):
+    if not unruled and not (grids or rectified) and _order_ocr_bands(doc.blocks, first, image, scale):
         flags = flags + ["reading_order_ocr_bands_unverified"]
     if unruled:
         row_blocks, in_rows = _ocr_row_tables(doc, index, engine, unruled, scale)
         _place_tables(doc, first, row_blocks)
         read += in_rows
         flags = flags + ["unruled_tables"]
-    if grids:
-        t_blocks, in_cells = _ocr_tables(doc, index, engine, image, scale, grids, None if numbers is engine else numbers)
+    if grids or rectified:
+        before_tables = len(doc.unread)
+        table_image, table_grids = (rectified.image, [rectified.grid]) if rectified else (image, grids)
+        t_blocks, in_cells = _ocr_tables(doc, index, engine, table_image, scale, table_grids, None if numbers is engine else numbers)
+        if rectified:
+            for block in t_blocks:
+                block.bbox = rectified.source_box(block.bbox, scale)
+            for entry in doc.unread[before_tables:]:
+                if entry.bbox is not None:
+                    entry.bbox = rectified.source_box(entry.bbox, scale)
         _place_tables(doc, first, t_blocks)
         read += in_cells
         flags = flags + ["ocr_tables"]
@@ -2335,7 +2347,7 @@ def _ocr_row_tables(doc: Document, index: int, engine, tables: list[TableRows], 
     return blocks, read
 
 
-def _without(image, scale: float, boxes) -> object:
+def _without(image, scale: float, boxes, *, polygon=()) -> object:
     """A copy of the page image with the given boxes (points) painted in the paper's own grey
     (``paper_level``: not white, which a global threshold would split the page on)."""
     from PIL import ImageDraw
@@ -2348,6 +2360,8 @@ def _without(image, scale: float, boxes) -> object:
     draw = ImageDraw.Draw(out)
     for x0, y0, x1, y1 in boxes:
         draw.rectangle([(x0 - 2) * scale, (y0 - 2) * scale, (x1 + 2) * scale, (y1 + 2) * scale], fill=fill)
+    if polygon:
+        draw.polygon(polygon, fill=fill)
     return out
 
 
