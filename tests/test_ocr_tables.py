@@ -597,6 +597,25 @@ class OcrTableTest(unittest.TestCase):
 
 
 class ImageRulingsTest(unittest.TestCase):
+    def test_long_strokes_crossing_in_a_tiny_area_do_not_make_a_table(self) -> None:
+        from PIL import Image, ImageDraw
+
+        from heocr.pdf.ocrtables import tables_in
+
+        image = Image.new("L", (300, 200), 255)
+        draw = ImageDraw.Draw(image)
+        # A crosshatch: every stroke is long, but only a 20 × 20 pt patch is enclosed.
+        for k in (20, 30, 40):
+            draw.line((0, k, 60, k), fill=0)
+            draw.line((k, 0, k, 60), fill=0)
+        for y in (100, 130, 160):
+            draw.line((100, y, 200, y), fill=0)
+        for x in (100, 150, 200):
+            draw.line((x, 100, x, 160), fill=0)
+
+        (table,) = tables_in(image, 1)
+        self.assertEqual(table.bbox, [100, 100, 200, 160])
+
     def test_underlines_and_text_strokes_are_not_rulings(self) -> None:
         from PIL import Image, ImageDraw
 
