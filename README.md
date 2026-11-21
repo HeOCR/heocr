@@ -40,6 +40,8 @@ heocr report.pdf --no-ocr             # never run OCR; pages that need it are re
 heocr report.pdf --force-ocr          # read every page by OCR, ignoring its text layer
 ```
 
+Image-only pages can also use the [experimental opt-in Kraken handwriting route](docs/guide.md#experimental-handwriting-ocr) with local pinned weights.
+
 The CLI prints each `unread` entry on stderr (`-q` silences them). It exits with 1 only when the file cannot be opened or an option is invalid. A document read only in part, or not at all, exits with 0, and its `unread` entries say why.
 
 ## Formats and routes
@@ -92,7 +94,7 @@ Not a sample of real-world documents: one printer, three phones, our typesetting
 
 Modern pointed print in open fonts, not old pointed books.
 
-**Handwriting (not supported yet).** On 225 held-out handwritten lines by 10 writers, from ivrit.ai's [Hebrew handwriting OCR benchmark](https://huggingface.co/datasets/ivrit-ai/hebrew-handwriting-ocr-benchmark) (test split), every reader gets most characters wrong: heocr 83.1% character error [79.3, 88.0], stock Tesseract 75.4% [71.0, 80.4]. No HeOCR model is trained on handwriting.
+**Historical handwriting baseline.** On 225 held-out handwritten lines by 10 writers, from ivrit.ai's [Hebrew handwriting OCR benchmark](https://huggingface.co/datasets/ivrit-ai/hebrew-handwriting-ocr-benchmark) (test split), every reader gets most characters wrong: heocr 83.1% character error [79.3, 88.0], stock Tesseract 75.4% [71.0, 80.4]. No HeOCR model is trained on handwriting.
 
 ## Pointed text (niqqud)
 

@@ -11,6 +11,7 @@ from pathlib import Path
 from heocr import contract
 from heocr.contract import MAX_PAGES, Document, Unread
 from heocr.convert import CONVERSIONS, CONVERT_TIMEOUT
+from heocr.handwriting import HandwritingConfig, HandwritingReader
 from heocr.identify import identify
 from heocr.ocr.tesseract import DEFAULT_LANG, DEFAULT_PSM, check_settings
 
@@ -51,6 +52,7 @@ def extract(
     tesseract: str | Sequence[str] | None = None,
     ocr_model: str | None = DEFAULT_MODEL,
     force_ocr: bool = False,
+    handwriting: HandwritingConfig | None = None,
     check_numbers: str | bool = "suspect",
     convert: bool = True,
     soffice: str | Sequence[str] | None = None,
@@ -81,6 +83,9 @@ def extract(
     Without Tesseract, or with ``ocr=False``, those pages are recorded as unread.
     ``force_ocr`` reads every PDF page by OCR, its text layer ignored (flag ``ocr_forced``): a workaround
     for a text layer heocr reads badly. It needs ``ocr``.
+    ``handwriting`` opts image-only pages into the experimental Kraken route. Provide a local,
+    SHA-256-pinned recognition model. Auto mode requires a segmenter with handwriting line tags.
+    Use force mode for input known to be handwritten. Tesseract remains the fallback.
 
     ``check_numbers`` reads text-layer lines a second time, by OCR of their own image
     (``heocr.pdf.numbers``). ``"suspect"`` (the default) reads only lines with a reversed-looking
@@ -133,6 +138,8 @@ def extract(
 
     if force_ocr and not ocr:
         raise ValueError("force_ocr needs OCR: it cannot be combined with ocr=False (--no-ocr)")
+    if handwriting is not None and (not ocr or not isinstance(handwriting, HandwritingConfig)):
+        raise ValueError("handwriting needs OCR and a HandwritingConfig")
     kind = identify(body)
     doc = Document(
         sha256=hashlib.sha256(body).hexdigest(),
@@ -149,6 +156,9 @@ def extract(
     )
     if force_ocr:
         doc.options["force_ocr"] = True
+    if handwriting is not None:
+        doc._handwriting = HandwritingReader(handwriting)
+        doc.options["handwriting"] = handwriting.provenance()
     doc._max_pages = max_pages
     doc.options["max_pages"] = max_pages
     if time_limit is not None:

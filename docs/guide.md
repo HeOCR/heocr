@@ -124,6 +124,23 @@ heocr --help                         # every option
 
 The CLI prints each `unread` entry on standard error, and `-q` silences them. It exits with 1 only when the file cannot be opened or an option is invalid. A document read only in part, or not at all, exits with 0, and its `unread` entries say why.
 
+## Experimental handwriting OCR
+
+Install the optional Kraken 7.2 runtime with `pip install '.[handwriting]'` from the repository. Use local, authorized model weights and their SHA-256 pins. HeOCR reads them offline. The optional runtime and its dependencies have their own licence terms.
+
+For a scan already known to be handwritten, use the bundled, checksum-verified Kraken segmenter with a local recognizer:
+
+```sh
+heocr manuscript.pdf -f json --handwriting recognizer.safetensors \
+  --handwriting-sha256 "$RECOGNIZER_SHA256" --handwriting-mode force
+```
+
+Automatic mode uses a separately supplied segmentation model. Pass `--handwriting-segmenter MODEL.safetensors` and `--handwriting-segmenter-sha256 HEX`. Every segmented text line must carry the `handwriting` or `handwritten` type tag for the page to enter the Kraken route. The generic bundled 7.2 segmenter is for force mode. Mixed and untyped pages take ordinary OCR. This prototype routes whole image-only pages and image frames.
+
+In Python, pass `handwriting=heocr.HandwritingConfig(model, sha256, mode="force")` to `heocr.extract`. To use automatic mode, provide `segmenter` and `segmenter_sha256` to the config. Either form requires OCR to be enabled.
+
+Successful lines are emitted in Kraken's reading order as `source: ocr` and `ocr.engine: kraken`, with page-point boxes and unverified confidence. Kraken and both model digests appear in the record. Wide images receive white padding below the original pixels to bound the segmenter's internal width. Boxes are clipped to the original image. The `handwriting_*` flags record the route or its fallback. Backend failure, an empty or incomplete reading, and padding beyond the pixel budget fall back to ordinary OCR. Ink outside recognized lines can mark a successful reading partial.
+
 ## Reading the record
 
 A block of `notice.pdf`, from `heocr notice.pdf -f json`:
