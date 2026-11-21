@@ -53,9 +53,10 @@ def fixture(slope=0.024):
 class Probe:
     psm = 3
 
-    def __init__(self, native, *, disagree=False):
+    def __init__(self, native, *, disagree=False, narrow_word=False):
         self.native = native
         self.disagree = disagree
+        self.narrow_word = narrow_word
         self.calls = 0
 
     def recognize(self, image, dpi, psm=None):
@@ -64,7 +65,7 @@ class Probe:
         if psm != 7:
             return OcrResult([])
         index = self.calls // 2
-        text = RECOVERED[index]
+        text = "גן נפתח מחדש" if self.narrow_word and index == 0 else RECOVERED[index]
         if self.disagree and self.calls % 2:
             text = "כיתוב אחר לגמרי"
         self.calls += 1
@@ -73,6 +74,8 @@ class Probe:
             OcrWord(word, [30 + n * 50, y - 5, 65 + n * 50, y + 5], 91)
             for n, word in enumerate(text.split())
         ]
+        if self.narrow_word and index == 0:
+            words[0].bbox[2] = 36
         return OcrResult(
             [OcrLine(text, [30, y - 5, 165, y + 5], [91] * len(words), words=words)]
         )
@@ -142,3 +145,56 @@ class PhotoGapTest(unittest.TestCase):
                         bool(added),
                     )
                     self.assertEqual(heocr.validate(doc.to_dict()), [])
+
+    def test_jpeg_drops_a_narrow_word_already_emitted_in_a_native_fragment(self):
+        image, native = fixture()
+        encoded = BytesIO()
+        image.save(encoded, format="JPEG", dpi=(72, 72))
+        data = encoded.getvalue()
+        with Image.open(BytesIO(data)) as decoded:
+            initial = recover_photo_lines(
+                Probe(native, narrow_word=True), decoded.convert("L"), native, 72
+            )
+        first = initial.lines[2]
+        word = first.words[0]
+        native.lines.append(
+            OcrLine(word.text, word.bbox, [word.confidence], ("late", "1"), [word])
+        )
+
+        with TemporaryDirectory() as tmp:
+            (Path(tmp) / "heb.traineddata").write_bytes(b"invented OCR model")
+            with patch.dict(os.environ, {"FAKE_TESSDATA": tmp}):
+                os.environ.pop("TESSDATA_PREFIX", None)
+
+                def extract():
+                    probe = Probe(native, narrow_word=True)
+
+                    def recognize(engine, raster, dpi=300, psm=None):
+                        return probe.recognize(raster, dpi, psm)
+
+                    with (
+                        patch.object(Tesseract, "recognize", recognize),
+                        patch("heocr.pdf.reader.skew_angle", return_value=0),
+                    ):
+                        return heocr.extract(
+                            data, tesseract=FAKE, ocr_model="heb", check_numbers=False
+                        )
+
+                with patch(
+                    "heocr.pdf.reader.recover_photo_lines",
+                    side_effect=lambda engine, image, result, dpi: result,
+                ):
+                    baseline = extract()
+                doc = extract()
+
+        self.assertEqual(baseline.text.split().count("גן"), 1)
+        self.assertEqual(doc.text.split().count("גן"), 1)
+        self.assertIn(
+            "נפתח מחדש", [line.text for block in doc.blocks for line in block.lines]
+        )
+        self.assertEqual(doc.pages[0].coverage["ocr_photo_gap_lines_recovered"], 3)
+        baseline_words = sum(block.ocr["words"] for block in baseline.blocks)
+        self.assertEqual(
+            sum(block.ocr["words"] for block in doc.blocks), baseline_words + 8
+        )
+        self.assertEqual(heocr.validate(doc.to_dict()), [])

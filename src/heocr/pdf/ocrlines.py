@@ -10,7 +10,7 @@ from statistics import mean, median
 
 from heocr.ocr.regions import INK_LEVEL, paper_level
 from heocr.ocr.tesseract import OcrLine, OcrResult, OcrUnavailable
-from heocr.pdf.ocrsparse import _overlaps_line
+from heocr.pdf.ocrsparse import _overlap, _overlaps_line
 
 
 @dataclass
@@ -197,6 +197,40 @@ def _read_strip(engine, strip, height, dpi, paragraph, page_width):
     return restored
 
 
+def _same_word_box(box, other):
+    overlap = _overlap(box, other, 0) * _overlap(box, other, 1)
+    smaller = min(
+        (box[2] - box[0]) * (box[3] - box[1]),
+        (other[2] - other[0]) * (other[3] - other[1]),
+    )
+    return overlap > 0 and overlap >= 0.5 * smaller
+
+
+def _without_read_words(line, occupied_words) -> OcrLine | None:
+    """Keep novel words and regenerate the row from their original reading order."""
+    words = [
+        word
+        for word in line.words
+        if not any(_same_word_box(word.bbox, box) for box in occupied_words)
+    ]
+    if not words:
+        return None
+    if words == line.words:
+        return line
+    return replace(
+        line,
+        text=" ".join(word.text for word in words),
+        bbox=[
+            min(w.bbox[0] for w in words),
+            min(w.bbox[1] for w in words),
+            max(w.bbox[2] for w in words),
+            max(w.bbox[3] for w in words),
+        ],
+        confidences=[word.confidence for word in words],
+        words=words,
+    )
+
+
 def recover_photo_lines(engine, image, result: OcrResult, dpi) -> OcrResult:
     """Retry at most two large, on-track gaps and retain every native line."""
     if engine.psm != 3 or len(result.lines) < 4:
@@ -211,6 +245,7 @@ def recover_photo_lines(engine, image, result: OcrResult, dpi) -> OcrResult:
     height = median(heights)
     restored = []
     occupied = list(result.lines)
+    occupied_words = [word.bbox for line in occupied for word in line.words]
     added = 0
     attempts = 0
     for upper, lower in pairwise(result.lines):
@@ -222,15 +257,21 @@ def recover_photo_lines(engine, image, result: OcrResult, dpi) -> OcrResult:
             continue
         attempts += 1
         found = _read_strip(engine, strip, height, dpi, lower.paragraph, image.width)
+        novel = []
+        for line in found:
+            remainder = _without_read_words(line, occupied_words)
+            if remainder is not None:
+                novel.append(remainder)
         if all(
             0 <= line.bbox[0] < line.bbox[2] <= image.width
             and 0 <= line.bbox[1] < line.bbox[3] <= image.height
             and not any(_overlaps_line(line.bbox, other.bbox) for other in occupied)
-            for line in found
+            for line in novel
         ):
-            restored.extend(found)
-            occupied.extend(found)
-            added += len(found)
+            restored.extend(novel)
+            occupied.extend(novel)
+            occupied_words.extend(word.bbox for line in novel for word in line.words)
+            added += len(novel)
     if not added:
         return result
     return OcrResult([*restored, result.lines[-1]])
