@@ -2260,7 +2260,7 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
     unruled = table_rows(result.lines, scale, doc._rtl) if OCR_TABLE_ROWS else []
     taken = {id(line) for table in unruled for line in table.lines}
     form_tables = [t.bbox for t in grids if "table_open_sides_inferred" in t.flags]
-    margin_page = image.size if doc._rtl and not unruled and not grids else None
+    margin_page = image.size if doc._rtl and not unruled and not (grids or rectified) else None
     read = _ocr_blocks(doc, index, engine, OcrResult([line for line in result.lines if id(line) not in taken]), scale,
                        form_tables=form_tables, margin_page=margin_page)
     if _order_ocr_paragraphs(doc.blocks, first):
