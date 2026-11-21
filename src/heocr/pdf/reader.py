@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 import ctypes
+from bisect import bisect_right
 from collections import Counter, defaultdict
 from itertools import pairwise
 import math
@@ -2079,6 +2080,42 @@ def _order_ocr_paragraphs(blocks: list[Block], first: int) -> bool:
     return changed
 
 
+def _order_ocr_bands(blocks: list[Block], first: int, image, scale: float) -> bool:
+    """Finish a set of columns before a clearly separated lower part of a scan.
+
+    A separator must be a long printed rule through a gap between the OCR blocks, below
+    substantial side-by-side prose. Retain engine order within either side of the rule.
+    """
+    body = blocks[first:]
+    if len(body) < 4 or all(a.bbox[1] <= b.bbox[1] for a, b in pairwise(body)):
+        return False
+    width, height = (v / scale for v in image.size)
+    horizontal, _ = image_rulings(image, scale)
+    cuts = []
+    for rule in horizontal:
+        if rule.end - rule.start < 0.70 * width or not 0.18 * height <= rule.pos <= 0.82 * height:
+            continue
+        above = [b for b in body if b.bbox[3] <= rule.pos]
+        below = [b for b in body if b.bbox[1] >= rule.pos]
+        # A block that straddles the rule makes its reading relation ambiguous.
+        if len(above) < 2 or len(below) < 2 or len(above) + len(below) != len(body):
+            continue
+        middle = (rule.start + rule.end) / 2
+        left = [b.bbox for b in above if len(b.lines) >= 3 and b.bbox[2] <= middle]
+        right = [b.bbox for b in above if len(b.lines) >= 3 and b.bbox[0] >= middle]
+        if any(min(a[3], b[3]) - max(a[1], b[1]) >= 0.5 * min(a[3] - a[1], b[3] - b[1])
+               for a in left for b in right):
+            cuts.append(rule.pos)
+    if not cuts:
+        return False
+    cuts.sort()
+    ordered = sorted(body, key=lambda b: bisect_right(cuts, b.bbox[1]))
+    if ordered == body:
+        return False
+    blocks[first:] = ordered
+    return True
+
+
 # Ink in the rest of a page, once its tables are taken out, is looked for tile by tile: a short faint line
 # holds far less ink than a share of a whole page, and was dropped. Bare grainy paper has no tile with a
 # pixel REST_FAINT_DELTA levels under the paper; a faint line's tile has hundreds.
@@ -2169,6 +2206,8 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
     read = _ocr_blocks(doc, index, engine, OcrResult([line for line in result.lines if id(line) not in taken]), scale)
     if _order_ocr_paragraphs(doc.blocks, first):
         flags = flags + ["reading_order_ocr_adjusted_unverified"]
+    if not unruled and not grids and _order_ocr_bands(doc.blocks, first, image, scale):
+        flags = flags + ["reading_order_ocr_bands_unverified"]
     if unruled:
         row_blocks, in_rows = _ocr_row_tables(doc, index, engine, unruled, scale)
         _place_tables(doc, first, row_blocks)
