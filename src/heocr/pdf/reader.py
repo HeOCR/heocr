@@ -19,8 +19,8 @@ from dataclasses import dataclass, field
 
 from heocr import repairs
 from heocr.contract import Block, Cell, Document, Line, Page, Unread, page_limit, pages_left_unread, time_up
-from heocr.ocr import OcrUnavailable, block_ocr, call_failures, engine_for, number_engine_for, routes, unavailable_reason
-from heocr.ocr.tesseract import OcrResult
+from heocr.ocr import OcrUnavailable, block_ocr, call_failures, engine_for, latin_reviewer_for, number_engine_for, routes, unavailable_reason
+from heocr.ocr.tesseract import OcrResult, OcrWord
 from heocr.ocr.regions import (  # noqa: F401  (re-exported for callers of the PDF route)
     INK_LEVEL,
     MAX_RENDER_PIXELS,
@@ -47,6 +47,7 @@ from heocr.pdf.lines import Atom, PageLines, build_lines, line_is_rtl, paragraph
 from heocr.pdf.columns import UNRESOLVED, Segment, arrange
 from heocr.pdf.ocrmargins import attach_margin_numbers
 from heocr.pdf.ocrrows import TableRows, table_rows
+from heocr.pdf.ocrlatin import reread_latin_runs
 from heocr.pdf.ocrtables import cell_crop, cell_has_faint_ink, cell_has_ink, cell_psm, faint_cell_image, image_rulings, tables_in
 from heocr.pdf.perspective import rectify_grid
 from heocr.pdf.tables import find_tables, rulings, table_blocks
@@ -1921,7 +1922,7 @@ def _labels_agreed(lines, pending: dict, model: str) -> int:
     return replaced
 
 
-def _page_number_pass(numbers, image, result, dpi: int) -> tuple[int, int]:
+def _page_number_pass(numbers, image, result, dpi: int) -> tuple[tuple[int, int], tuple[OcrResult, tuple[int, int]]]:
     """The whole page read once more by the number model (``--psm 3`` at ``PAGE_NUMBER_DPI``), for the
     numbers no crop restored: heb cuts a label at a line's start to its last level ("1." of "2.3.1.")
     and reads a short line's digits apart, where a crop of heb's box holds only what heb saw. Its
@@ -1933,15 +1934,15 @@ def _page_number_pass(numbers, image, result, dpi: int) -> tuple[int, int]:
     digits only when it is surer than heb's words. A
     deeper label at a line's start replaces heb's label when it ends with heb's levels, at any
     confidence, and only through the sequence guard (``_label_sequence``). Each replacement is logged
-    with ``page_pass: true``. Returns (tokens over heb's pieces, words replaced)."""
+    with ``page_pass: true``. Returns the number counts, plus the English reading and its raster size."""
     from PIL import Image
 
     factor = PAGE_NUMBER_DPI / dpi
     small = image if factor >= 1 else image.resize((max(1, round(image.size[0] * factor)), max(1, round(image.size[1] * factor))), Image.LANCZOS)
     factor = small.size[0] / image.size[0]
-    tokens = [w for l in numbers.recognize(small, dpi=round(dpi * factor), psm=3).lines for w in l.words if any(ch.isdigit() for ch in w.text)]
-    for t in tokens:  # into the page image's pixels
-        t.bbox = [v / factor for v in t.bbox]
+    english = numbers.recognize(small, dpi=round(dpi * factor), psm=3)
+    tokens = [OcrWord(w.text, [v / factor for v in w.bbox], w.confidence)
+              for line in english.lines for w in line.words if any(ch.isdigit() for ch in w.text)]
 
     def overlap(w, t) -> float:
         across = min(w.bbox[2], t.bbox[2]) - max(w.bbox[0], t.bbox[0])
@@ -2015,7 +2016,7 @@ def _page_number_pass(numbers, image, result, dpi: int) -> tuple[int, int]:
         for line in result.lines:
             for entry in line.number_readings[first[id(line)]:]:
                 entry["page_pass"] = True
-    return found, replaced
+    return (found, replaced), (english, small.size)
 
 
 def _same_ocr_column(box, table) -> bool:
@@ -2058,6 +2059,7 @@ def _ocr_blocks(
         text = "\n".join(line.text for line in lines)
         read += sum(1 for ch in text if not ch.isspace())
         replaced = sum(line.numbers_replaced for line in group)
+        latin = sum(line.latin_runs_reread for line in group)
         doc.blocks.append(
             Block(
                 kind="text",
@@ -2068,10 +2070,12 @@ def _ocr_blocks(
                 tool=engine.version,
                 direction="rtl",
                 lines=lines,
-                ocr={**block_ocr(engine, group), "dpi": dpi, **({"number_words_replaced": replaced} if replaced else {})},
+                ocr={**block_ocr(engine, group), "dpi": dpi, **({"number_words_replaced": replaced} if replaced else {}),
+                     **({"latin_runs_reread": latin} if latin else {})},
                 checks={"number_readings": [r for line in group for r in line.number_readings]} if replaced or any(line.number_readings for line in group) else None,
                 flags=["ocr_unverified", *flags] + (["render_dpi_reduced"] if dpi < RENDER_DPI else [])
                 + (["numbers_from_second_reading"] if replaced else [])
+                + (["latin_from_second_reading"] if latin else [])
                 + (["reading_order_ocr_margin_numbers_unverified"] if any(id(line) in attached for line in group) else [])
                 + text_flags(text),
             )
@@ -2251,14 +2255,19 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
     numbers = number_engine_for(doc) if doc.options.get("check_numbers", "suspect") else None
     number_words = _reread_number_words(numbers, page_image, result, round(scale * 72)) if numbers is not None and numbers is not engine else None
     page_numbers = None
+    english_page = None
     if number_words is not None and PAGE_NUMBER_PASS:
         try:
-            page_numbers = _page_number_pass(numbers, page_image, result, round(scale * 72))
+            page_numbers, english_page = _page_number_pass(numbers, page_image, result, round(scale * 72))
         except OcrUnavailable:
             page_numbers = None
     # An unruled table is read by Tesseract column by column; its cells are given back in rows.
     unruled = table_rows(result.lines, scale, doc._rtl) if OCR_TABLE_ROWS else []
     taken = {id(line) for table in unruled for line in table.lines}
+    if english_page is not None and numbers.lang == "eng":
+        english, english_size = english_page
+        body = (line for line in result.lines if id(line) not in taken)
+        reread_latin_runs(page_image, round(scale * 72), body, english, english_size, lambda: latin_reviewer_for(doc))
     form_tables = [t.bbox for t in grids if "table_open_sides_inferred" in t.flags]
     margin_page = image.size if doc._rtl and not unruled and not (grids or rectified) else None
     read = _ocr_blocks(doc, index, engine, OcrResult([line for line in result.lines if id(line) not in taken]), scale,

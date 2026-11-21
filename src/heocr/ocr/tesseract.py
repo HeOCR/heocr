@@ -59,6 +59,7 @@ class OcrLine:
     words: list[OcrWord] = field(default_factory=list)  # in Tesseract's order; ``text`` is them joined
     numbers_replaced: int = 0  # words replaced by a second reading of numbers (pdf.reader)
     number_readings: list[dict] = field(default_factory=list)  # each replacement, both readings (pdf.reader)
+    latin_runs_reread: int = 0  # English runs confirmed against a mixed Hebrew/English crop
 
 
 @dataclass

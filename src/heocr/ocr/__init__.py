@@ -113,6 +113,23 @@ def number_engine_for(doc: "Document") -> Tesseract | None:
     return doc._number_engine or main
 
 
+def latin_reviewer_for(doc: "Document") -> Tesseract | None:
+    """Find a stock mixed-language reviewer once, when the English pass proposes Latin text."""
+    lang = "heb+eng"
+    key = ("stock_language", lang)
+    if key not in doc._ocr_engines:
+        try:
+            engine = Tesseract.find(doc._ocr_settings["cmd"], lang=lang, psm=7)
+        except OcrUnavailable:
+            engine = None
+        if engine is not None:
+            doc.components["tesseract:latin_review_lang"] = lang
+            for language, sha in engine.models.items():
+                doc.components[f"tesseract:latin_review:{language}.traineddata"] = f"sha256:{sha}"
+        doc._ocr_engines[key] = engine
+    return doc._ocr_engines[key]
+
+
 def unavailable_reason(doc: "Document") -> str:
     if doc._ocr_settings is None:
         return "ocr turned off"
