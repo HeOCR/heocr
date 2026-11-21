@@ -45,6 +45,7 @@ from heocr.pdf.classify import FIGURE_IMAGE, PAGE_IMAGE, classify, object_stats,
 from heocr.pdf.frame import frame_of
 from heocr.pdf.lines import Atom, PageLines, build_lines, line_is_rtl, paragraphs
 from heocr.pdf.columns import UNRESOLVED, Segment, arrange
+from heocr.pdf.ocrmargins import attach_margin_numbers
 from heocr.pdf.ocrrows import TableRows, table_rows
 from heocr.pdf.ocrtables import cell_crop, cell_has_faint_ink, cell_has_ink, cell_psm, faint_cell_image, image_rulings, tables_in
 from heocr.pdf.tables import find_tables, rulings, table_blocks
@@ -2024,7 +2025,7 @@ def _same_ocr_column(box, table) -> bool:
 
 def _ocr_blocks(
     doc: Document, index: int, engine, result, render_scale: float, *, offset=(0.0, 0.0), flags=(),
-    min_confidence: float | None = None, form_tables=(),
+    min_confidence: float | None = None, form_tables=(), margin_page: tuple[int, int] | None = None,
 ) -> int:
     """OCR lines into blocks, one per Tesseract paragraph, with boxes in page points. Returns characters.
 
@@ -2045,6 +2046,9 @@ def _ocr_blocks(
     read = 0
     if min_confidence is not None:
         groups = [g for g in groups if (block_ocr(engine, g)["mean_confidence"] or 0) >= min_confidence]
+    attached = set()
+    if margin_page is not None:
+        groups, attached = attach_margin_numbers(groups, margin_page)
     for group in groups:
         lines = [
             Line(line.text, [offset[0] + v * scale if i % 2 == 0 else offset[1] + v * scale for i, v in enumerate(line.bbox)])
@@ -2066,7 +2070,9 @@ def _ocr_blocks(
                 ocr={**block_ocr(engine, group), "dpi": dpi, **({"number_words_replaced": replaced} if replaced else {})},
                 checks={"number_readings": [r for line in group for r in line.number_readings]} if replaced or any(line.number_readings for line in group) else None,
                 flags=["ocr_unverified", *flags] + (["render_dpi_reduced"] if dpi < RENDER_DPI else [])
-                + (["numbers_from_second_reading"] if replaced else []) + text_flags(text),
+                + (["numbers_from_second_reading"] if replaced else [])
+                + (["reading_order_ocr_margin_numbers_unverified"] if any(id(line) in attached for line in group) else [])
+                + text_flags(text),
             )
         )
     return read
@@ -2250,8 +2256,9 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
     unruled = table_rows(result.lines, scale, doc._rtl) if OCR_TABLE_ROWS else []
     taken = {id(line) for table in unruled for line in table.lines}
     form_tables = [t.bbox for t in grids if "table_open_sides_inferred" in t.flags]
+    margin_page = image.size if doc._rtl and not unruled and not grids else None
     read = _ocr_blocks(doc, index, engine, OcrResult([line for line in result.lines if id(line) not in taken]), scale,
-                       form_tables=form_tables)
+                       form_tables=form_tables, margin_page=margin_page)
     if _order_ocr_paragraphs(doc.blocks, first):
         flags = flags + ["reading_order_ocr_adjusted_unverified"]
     if not unruled and not grids and _order_ocr_bands(doc.blocks, first, image, scale):

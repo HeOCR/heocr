@@ -71,6 +71,7 @@ Flags are open lists of strings: a later v1 may add more. The main ones, by what
   - `reading_order_unresolved_columns`, `reading_order_row_major_unverified`, `reading_order_column_major_unverified`;
   - `reading_order_ocr_adjusted_unverified` (consecutive OCR paragraphs in the same visual column were put in vertical order);
   - `reading_order_ocr_bands_unverified` (a long printed rule separates OCR regions, so the upper columns come before the lower region);
+  - `reading_order_ocr_margin_numbers_unverified` (isolated RTL margin numbers were placed before the OCR lines they align with);
   - `reading_order_region_appended`, `reading_order_region_placed` (an image region's text, placed among the layer's blocks by its top edge), `reading_order_rotated_appended`;
   - `bidi_ambiguous_ltr_run`.
 - **The page's text layer:**
