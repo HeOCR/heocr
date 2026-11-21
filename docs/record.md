@@ -87,6 +87,7 @@ Flags are open lists of strings: a later v1 may add more. The main ones, by what
 - **Tables:**
   - `ruled_table`, `unruled_table` (on a text layer, or on an OCR page, whose Tesseract columns are given back in rows; its `ocr.duplicate_lines_dropped` counts a number read twice), `ocr_tables`;
   - `table_open_sides_inferred` (a raster table's outer edges were inferred from its lower rule and internal dividers);
+  - `ocr_grid_rectified` (the OCR route validated a perspective-corrected grid and returned its boxes in page coordinates);
   - `table_cells_ink_unread`, `table_cell_unconfirmed`, `table_cell_garbled`, `table_cell_not_a_number`, `faint_ink_read`, `number_read_at_half_resolution`, `merged_above`, `span_capped`.
 - **Numbers:**
   - `number_read_by_number_model`, `numbers_from_second_reading`;
