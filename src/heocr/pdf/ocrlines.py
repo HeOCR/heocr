@@ -263,7 +263,8 @@ def recover_photo_lines(engine, image, result: OcrResult, dpi) -> OcrResult:
             if remainder is not None:
                 novel.append(remainder)
         if all(
-            0 <= line.bbox[0] < line.bbox[2] <= image.width
+            _credible(line)
+            and 0 <= line.bbox[0] < line.bbox[2] <= image.width
             and 0 <= line.bbox[1] < line.bbox[3] <= image.height
             and not any(_overlaps_line(line.bbox, other.bbox) for other in occupied)
             for line in novel

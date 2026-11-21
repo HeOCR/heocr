@@ -53,10 +53,10 @@ def fixture(slope=0.024):
 class Probe:
     psm = 3
 
-    def __init__(self, native, *, disagree=False, narrow_word=False):
+    def __init__(self, native, *, disagree=False, first_line=None):
         self.native = native
         self.disagree = disagree
-        self.narrow_word = narrow_word
+        self.first_line = first_line
         self.calls = 0
 
     def recognize(self, image, dpi, psm=None):
@@ -65,7 +65,7 @@ class Probe:
         if psm != 7:
             return OcrResult([])
         index = self.calls // 2
-        text = "גן נפתח מחדש" if self.narrow_word and index == 0 else RECOVERED[index]
+        text = self.first_line if self.first_line and index == 0 else RECOVERED[index]
         if self.disagree and self.calls % 2:
             text = "כיתוב אחר לגמרי"
         self.calls += 1
@@ -74,7 +74,7 @@ class Probe:
             OcrWord(word, [30 + n * 50, y - 5, 65 + n * 50, y + 5], 91)
             for n, word in enumerate(text.split())
         ]
-        if self.narrow_word and index == 0:
+        if self.first_line and index == 0:
             words[0].bbox[2] = 36
         return OcrResult(
             [OcrLine(text, [30, y - 5, 165, y + 5], [91] * len(words), words=words)]
@@ -146,20 +146,23 @@ class PhotoGapTest(unittest.TestCase):
                     )
                     self.assertEqual(heocr.validate(doc.to_dict()), [])
 
-    def test_jpeg_drops_a_narrow_word_already_emitted_in_a_native_fragment(self):
+    def jpeg_with_native_fragments(self, first_line, fragment_count):
         image, native = fixture()
         encoded = BytesIO()
         image.save(encoded, format="JPEG", dpi=(72, 72))
         data = encoded.getvalue()
         with Image.open(BytesIO(data)) as decoded:
             initial = recover_photo_lines(
-                Probe(native, narrow_word=True), decoded.convert("L"), native, 72
+                Probe(native, first_line=first_line), decoded.convert("L"), native, 72
             )
         first = initial.lines[2]
-        word = first.words[0]
-        native.lines.append(
-            OcrLine(word.text, word.bbox, [word.confidence], ("late", "1"), [word])
-        )
+        self.assertEqual(first.text, first_line)
+        for i, word in enumerate(first.words[:fragment_count]):
+            native.lines.append(
+                OcrLine(
+                    word.text, word.bbox, [word.confidence], ("late", str(i)), [word]
+                )
+            )
 
         with TemporaryDirectory() as tmp:
             (Path(tmp) / "heb.traineddata").write_bytes(b"invented OCR model")
@@ -167,7 +170,7 @@ class PhotoGapTest(unittest.TestCase):
                 os.environ.pop("TESSDATA_PREFIX", None)
 
                 def extract():
-                    probe = Probe(native, narrow_word=True)
+                    probe = Probe(native, first_line=first_line)
 
                     def recognize(engine, raster, dpi=300, psm=None):
                         return probe.recognize(raster, dpi, psm)
@@ -176,17 +179,23 @@ class PhotoGapTest(unittest.TestCase):
                         patch.object(Tesseract, "recognize", recognize),
                         patch("heocr.pdf.reader.skew_angle", return_value=0),
                     ):
-                        return heocr.extract(
+                        doc = heocr.extract(
                             data, tesseract=FAKE, ocr_model="heb", check_numbers=False
                         )
+                    return doc, probe.calls
 
                 with patch(
                     "heocr.pdf.reader.recover_photo_lines",
                     side_effect=lambda engine, image, result, dpi: result,
                 ):
-                    baseline = extract()
-                doc = extract()
+                    baseline, baseline_calls = extract()
+                doc, candidate_calls = extract()
+        self.assertEqual(baseline_calls, 0)
+        self.assertEqual(candidate_calls, 6)
+        return baseline, doc
 
+    def test_jpeg_drops_a_narrow_word_already_emitted_in_a_native_fragment(self):
+        baseline, doc = self.jpeg_with_native_fragments("גן נפתח מחדש", 1)
         self.assertEqual(baseline.text.split().count("גן"), 1)
         self.assertEqual(doc.text.split().count("גן"), 1)
         self.assertIn(
@@ -197,4 +206,10 @@ class PhotoGapTest(unittest.TestCase):
         self.assertEqual(
             sum(block.ocr["words"] for block in doc.blocks), baseline_words + 8
         )
+        self.assertEqual(heocr.validate(doc.to_dict()), [])
+
+    def test_jpeg_rejects_strip_when_dedup_leaves_a_lone_numeral(self):
+        baseline, doc = self.jpeg_with_native_fragments("גן נפתח 37", 2)
+        self.assertNotIn("37", doc.text.split())
+        self.assertEqual(doc.to_dict(), baseline.to_dict())
         self.assertEqual(heocr.validate(doc.to_dict()), [])
