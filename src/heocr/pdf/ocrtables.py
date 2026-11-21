@@ -73,11 +73,15 @@ def _lines(runs: list[tuple[int, int, int]]) -> list[tuple[float, float, float]]
     return [((g[0] + g[1]) / 2, g[2], g[3]) for g in done]
 
 
+def _min_rule_pixels(scale: float) -> int:
+    return max(int(MIN_RULE_PT * scale), 8)
+
+
 def image_rulings(image, scale: float) -> tuple[list[Rule], list[Rule]]:
     """Horizontal and vertical rulings of a rendered page, in points, top-left origin."""
     gray = image.convert("L")
     binary = gray.point(lambda v: 0 if v < INK_LEVEL else 255)
-    min_len = max(int(MIN_RULE_PT * scale), 8)
+    min_len = _min_rule_pixels(scale)
     w, h = binary.size
     horizontal = [Rule(y / scale, x0 / scale, x1 / scale) for y, x0, x1 in _lines(_runs(binary.tobytes(), w, h, min_len))]
     turned = binary.transpose(method=_TRANSPOSE)
@@ -97,8 +101,15 @@ except ImportError:  # pragma: no cover
 
 
 def tables_in(image, scale: float) -> list[Table]:
-    """Ruled tables found in a rendered page, with at least one row."""
-    return [t for t in find_tables(*image_rulings(image, scale)) if t.rows]
+    """Ruled tables in a rendered image, with space for a ruling in both directions."""
+    # Long strokes can extend beyond their intersections, for example around text or at
+    # a photo edge. Their enclosed patch must itself be large enough to support the rulings.
+    # A run covers one more pixel than the distance between its first and last pixel centres.
+    min_extent = (_min_rule_pixels(scale) - 1) / scale
+    return [
+        table for table in find_tables(*image_rulings(image, scale))
+        if table.rows and min(table.bbox[2] - table.bbox[0], table.bbox[3] - table.bbox[1]) >= min_extent
+    ]
 
 
 def cell_crop(image, box, scale: float):
