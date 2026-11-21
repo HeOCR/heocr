@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from difflib import SequenceMatcher
 
 from heocr.contract import Block, Document
 
@@ -129,6 +130,86 @@ def _sub_block(block: Block, lines, role: str) -> Block:
         lines=list(lines),
         flags=flags,
     )
+
+
+def _ocr_header_row(anchor: Block, blocks: list[Block], rtl: bool) -> list[Block]:
+    """Take the contiguous fragments in the anchor's visual row."""
+    _, top, _, bottom = anchor.bbox
+    height = bottom - top
+    row = sorted((b for b in blocks if min(bottom, b.bbox[3]) - max(top, b.bbox[1])
+                  >= 0.5 * min(height, b.bbox[3] - b.bbox[1])), key=lambda b: b.bbox[0])
+    left = right = next(i for i, b in enumerate(row) if b is anchor)
+    while left > 0 and row[left].bbox[0] - row[left - 1].bbox[2] <= height:
+        left -= 1
+    while right + 1 < len(row) and row[right + 1].bbox[0] - row[right].bbox[2] <= height:
+        right += 1
+    return row[left:right + 1][::(-1 if rtl else 1)]
+
+
+def _ocr_header_text(text: str) -> str:
+    if any(ch.isdigit() for ch in text) or len(text.split()) < 2:
+        return ""
+    normalized = "".join(ch for ch in text.casefold() if ch.isalpha())
+    return normalized if 7 <= len(normalized) <= 60 else ""
+
+
+def mark_ocr_running_headers(doc: Document) -> None:
+    """Move a recurring centered scan header and its neighboring OCR fragments out of the body.
+
+    Require textual support on three nearby pages in the same margin position. Never split an
+    OCR block: doing so would detach its confidence and second readings from their source.
+    """
+    pages = {p.index: p for p in doc.pages if p.route == "ocr" and p.width > 0 and p.height > 0}
+    candidates: dict[int, list[Block]] = defaultdict(list)
+    for block in doc.blocks:
+        page = pages.get(block.page)
+        if page is None or block.source != "ocr" or block.role != "body" or not block.bbox or not block.lines:
+            continue
+        x0, y0, x1, y1 = block.bbox
+        if (0.32 * page.width <= x0 < x1 <= 0.68 * page.width and y1 <= 0.075 * page.height
+                and 0 < y1 - y0 <= 0.022 * page.height):
+            candidates[page.index].append(block)
+
+    anchors: dict[int, list[tuple[list[Block], set[str], float, float]]] = {}
+    for index, blocks in candidates.items():
+        page = pages[index]
+        anchors[index] = []
+        if len(blocks) > 16:  # Too many fragments to identify a single running title confidently.
+            continue
+        for block in blocks:
+            if any(ch.isdigit() for ch in block.text) or not any(ch.isalpha() for ch in block.text):
+                continue
+            row = _ocr_header_row(block, blocks, doc._rtl)
+            joined = " ".join(b.text for b in row if not any(ch.isdigit() for ch in b.text))
+            texts = {_ocr_header_text(block.text), _ocr_header_text(joined)} - {""}
+            x0, y0, x1, y1 = block.bbox
+            if texts:
+                anchors[index].append((row, texts, (x0 + x1) / (2 * page.width), (y0 + y1) / (2 * page.height)))
+
+    headers = []
+    for index, items in anchors.items():
+        supported = []
+        for row, texts, x, y in items:
+            repeats = sum(
+                any(abs(x - xx) <= 0.10 and abs(y - yy) <= 0.025
+                    and any(SequenceMatcher(None, text, other, autojunk=False).ratio() >= 0.75
+                            for text in texts for other in other_texts)
+                    for _, other_texts, xx, yy in anchors.get(i, ()))
+                for i in range(index - 4, index + 5) if i != index
+            )
+            if repeats >= 2:
+                supported.append((repeats, max(map(len, texts)), row))
+        if not supported:
+            continue
+        row = max(supported, key=lambda item: item[:2])[2]
+        for block in row:
+            block.role = "header"
+            block.flags.append("page_furniture")
+        headers.extend(row)
+
+    if headers:
+        selected = {id(b) for b in headers}
+        doc.blocks[:] = _ordered([*headers, *(b for b in doc.blocks if id(b) not in selected)])
 
 
 def _ordered(blocks: list[Block]) -> list[Block]:

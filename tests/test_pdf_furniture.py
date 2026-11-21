@@ -18,6 +18,28 @@ def extract(pages):
 
 
 class FurnitureTest(unittest.TestCase):
+    def test_running_scan_title_can_be_split_into_single_words(self) -> None:
+        from heocr.contract import Block, Document, Line, Page
+        from heocr.pdf.furniture import mark_ocr_running_headers
+
+        pages = [Page(n, 600, 800, "T5", "ocr") for n in range(3)]
+
+        def block(page, text, bbox):
+            return Block("text", text, source="ocr", page=page, bbox=bbox, lines=[Line(text, bbox)])
+
+        doc = Document("", 0, "pdf", "fixture", pages=pages, blocks=[
+            block(0, "דוח המעבדה", [260, 27, 334, 37]),
+            block(1, "דוח המעבדה", [259, 28, 333, 38]),
+            block(2, "הוראות לקורא", [330, 155, 520, 168]),
+            block(2, "המעבדה", [260, 29, 298, 39]),
+            block(2, "דוח", [305, 28, 333, 38]),
+        ])
+        mark_ocr_running_headers(doc)
+        self.assertEqual([(b.text, b.role) for b in doc.blocks if b.page == 2], [
+            ("דוח", "header"), ("המעבדה", "header"), ("הוראות לקורא", "body"),
+        ])
+        self.assertTrue(all(b.role == "header" for b in doc.blocks if b.page < 2))
+
     def test_running_header_page_number_and_footer_get_roles(self) -> None:
         doc = extract([tender_page(n) for n in range(1, 5)])
         headers = [b.text for b in doc.blocks if b.role == "header"]

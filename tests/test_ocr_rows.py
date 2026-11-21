@@ -182,6 +182,29 @@ class OcrRowsReaderTest(unittest.TestCase):
         self.assertEqual([b.text for b in doc.blocks], ["קטע ראשון", "קטע חופף"])
         self.assertNotIn("reading_order_ocr_adjusted_unverified", doc.pages[0].flags)
 
+    def test_repeated_scan_header_keeps_its_fragment_and_ocr_provenance(self) -> None:
+        from tests.synth.pdf import PdfPage, make_pdf
+
+        rows = [self.tsv.read_text(encoding="utf-8").splitlines()[0]]
+        # Engine emits a body line first, then the left fragment of the header, then its anchor.
+        for n, (x, y, width, text) in enumerate([
+            (1600, 550, 620, "הוראות שימוש"), (910, 146, 130, "שנתי"),
+            (1048, 144, 415, "עלון התחנה"), (1770, 145, 120, "עמוד"),
+        ], 1):
+            rows.append(f"5\t1\t{n}\t1\t1\t1\t{x}\t{y}\t{width}\t{H}\t90.0\t{text}")
+        self.tsv.write_text("\n".join(rows) + "\n", encoding="utf-8")
+        pdf = make_pdf([PdfPage(images=[(0, 0, 595, 842)], image_gray=0xFF) for _ in range(3)])
+        doc = heocr.extract(pdf, tesseract=self.FAKE, ocr_model="heb", check_numbers=False)
+        for page in range(3):
+            blocks = [b for b in doc.blocks if b.page == page]
+            self.assertEqual([(b.text, b.role) for b in blocks], [
+                ("עלון התחנה", "header"), ("שנתי", "header"), ("הוראות שימוש", "body"), ("עמוד", "body"),
+            ])
+            self.assertTrue(all(b.ocr and b.ocr["mean_confidence"] == 90.0 for b in blocks))
+        self.assertEqual(heocr.validate(doc.to_dict()), [])
+        short = heocr.extract(pdf, tesseract=self.FAKE, ocr_model="heb", check_numbers=False, max_pages=2)
+        self.assertTrue(all(b.role == "body" for b in short.blocks))
+
     def write_paragraphs(self, paragraphs) -> None:
         rows = [self.tsv.read_text(encoding="utf-8").splitlines()[0]]
         for n, (x, y, text) in enumerate(paragraphs, 1):

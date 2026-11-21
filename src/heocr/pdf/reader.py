@@ -779,10 +779,11 @@ def read_pdf(body: bytes, doc: Document) -> None:
     if doc.options.get("repairs", True):
         _repair_rtl_brackets(doc)
         _repair_latin_wraps(doc)
-    from heocr.pdf.furniture import mark_furniture
+    from heocr.pdf.furniture import mark_furniture, mark_ocr_running_headers
     from heocr.pdf.webprint import mark_site_footer, mark_site_menu
 
     mark_furniture(doc)
+    mark_ocr_running_headers(doc)
     mark_site_menu(doc)
     mark_site_footer(doc)
 
