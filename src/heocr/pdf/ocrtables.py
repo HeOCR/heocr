@@ -151,7 +151,7 @@ def tables_in(image, scale: float) -> list[Table]:
     min_extent = (_min_rule_pixels(scale) - 1) / scale
     horizontal, vertical = image_rulings(image, scale)
     tables = [
-        table for table in find_tables(horizontal, vertical)
+        table for table in find_tables(horizontal, vertical, require_closed=True)
         if table.rows and min(table.bbox[2] - table.bbox[0], table.bbox[3] - table.bbox[1]) >= min_extent
     ]
     _open_sided_rows(horizontal, vertical, tables, min_extent)
