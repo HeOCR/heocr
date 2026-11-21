@@ -135,9 +135,11 @@ heocr manuscript.pdf -f json --handwriting recognizer.safetensors \
   --handwriting-sha256 "$RECOGNIZER_SHA256" --handwriting-mode force
 ```
 
-Automatic mode uses a separately supplied segmentation model. Pass `--handwriting-segmenter MODEL.safetensors` and `--handwriting-segmenter-sha256 HEX`. Every segmented text line must carry the `handwriting` or `handwritten` type tag for the page to enter the Kraken route. The generic bundled 7.2 segmenter is for force mode. Mixed and untyped pages take ordinary OCR. This prototype routes whole image-only pages and image frames.
+Automatic mode defaults to type tags. Pass `--handwriting-segmenter MODEL.safetensors` and `--handwriting-segmenter-sha256 HEX`. Every segmented text line must carry the `handwriting` or `handwritten` type tag for the page to enter the Kraken route. Mixed and untyped pages take ordinary OCR with this detector.
 
-In Python, pass `handwriting=heocr.HandwritingConfig(model, sha256, mode="force")` to `heocr.extract`. To use automatic mode, provide `segmenter` and `segmenter_sha256` to the config. Either form requires OCR to be enabled.
+To opt into the experimental geometry detector, pass `--handwriting-detector geometry` with the recognizer and its SHA-256. It checks whole-page stroke widths, baseline regularity, and component shapes before loading Kraken. Pages that fail the gate take ordinary OCR. This detector and force mode can use the bundled segmenter. The geometry gate applies to image-only pages and image frames. Its behavior on mixed handwriting and print is unverified.
+
+In Python, pass `handwriting=heocr.HandwritingConfig(model, sha256, mode="force")` to `heocr.extract`. To use the tags detector, provide `segmenter` and `segmenter_sha256` to the automatic config. To use the geometry detector, specify `detector="geometry"`. All forms require OCR to be enabled.
 
 Successful lines are emitted in Kraken's reading order as `source: ocr` and `ocr.engine: kraken`, with page-point boxes and unverified confidence. Kraken and both model digests appear in the record. Wide images receive white padding below the original pixels to bound the segmenter's internal width. Boxes are clipped to the original image. The `handwriting_*` flags record the route or its fallback. Backend failure, an empty or incomplete reading, and padding beyond the pixel budget fall back to ordinary OCR. Ink outside recognized lines can mark a successful reading partial.
 

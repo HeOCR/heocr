@@ -27,17 +27,24 @@ SHA256 = re.compile(r"[0-9a-f]{64}")
 
 @dataclass(frozen=True)
 class HandwritingConfig:
-    """Local pinned recognizer and an optional handwriting-tagging segmenter."""
+    """Local pinned recognizer, optional segmenter, and automatic page gate."""
 
     model: str | Path
     sha256: str
     mode: Literal["auto", "force"] = "auto"
     segmenter: str | Path | None = None
     segmenter_sha256: str | None = None
+    detector: Literal["tags", "geometry"] = "tags"
 
     def __post_init__(self):
         if self.mode not in ("auto", "force"):
             raise ValueError("handwriting mode must be auto or force")
+        if self.detector not in ("tags", "geometry"):
+            raise ValueError("handwriting detector must be tags or geometry")
+        if self.detector == "geometry" and self.mode != "auto":
+            raise ValueError(
+                "the geometry detector requires automatic handwriting mode"
+            )
         if (
             not SHA256.fullmatch(self.sha256)
             or Path(self.model).suffix != ".safetensors"
@@ -56,17 +63,20 @@ class HandwritingConfig:
             raise ValueError(
                 "handwriting requires a local .safetensors segmenter and a lowercase SHA-256"
             )
-        if self.mode == "auto" and self.segmenter is None:
+        if self.mode == "auto" and self.detector == "tags" and self.segmenter is None:
             raise ValueError(
                 "automatic handwriting requires a handwriting-tagging segmenter"
             )
 
     def provenance(self):
-        return {
+        pins = {
             "mode": self.mode,
             "recognizer": f"sha256:{self.sha256}",
             "segmenter": f"sha256:{self.segmenter_sha256 or BUNDLED_SEGMENTER_SHA256}",
         }
+        if self.detector == "geometry":
+            pins["detector"] = "geometry-v1"
+        return pins
 
 
 def _check_pin(path, expected):
@@ -124,6 +134,12 @@ def _tagged(line):
     return bool(types) and types <= HANDWRITING_TAGS
 
 
+def _detect_geometry(image):
+    from heocr.handwriting_geometry import is_handwritten
+
+    return is_handwritten(image)
+
+
 def _box(record, size):
     if getattr(record, "bbox", None) is not None:
         x0, y0, x1, y1 = record.bbox
@@ -153,6 +169,15 @@ class HandwritingReader:
             return "handwriting_input_too_wide", []
         if time_up(doc):
             return "handwriting_time_limit", []
+        if self.config.detector == "geometry":
+            try:
+                detected = _detect_geometry(image)
+            except Exception:
+                return "handwriting_detector_unavailable", []
+            if not detected:
+                return "handwriting_not_detected", []
+            if time_up(doc):
+                return "handwriting_time_limit", []
         if self.engine is None and not self.load_failed:
             try:
                 self.engine = _load(self.config)
@@ -177,7 +202,11 @@ class HandwritingReader:
             lines = segmentation.lines
             if not lines:
                 return "handwriting_no_lines", []
-            if self.config.mode == "auto" and not all(_tagged(line) for line in lines):
+            if (
+                self.config.mode == "auto"
+                and self.config.detector == "tags"
+                and not all(_tagged(line) for line in lines)
+            ):
                 return "handwriting_not_detected", []
             if time_up(doc):
                 return "handwriting_time_limit", []
