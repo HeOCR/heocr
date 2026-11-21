@@ -1104,6 +1104,8 @@ def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = froz
     chars = "".join(a.text for a in text.atoms)
     signals = text_signals(chars, built.lines, text.invisible, text.chars_total, text.symbol_pua - text.other_pua)
     signals.update(stream_signals(stats.stream_text))
+    if stats.painted_whitespace:
+        signals["painted_whitespace"] = True
     signals.update(
         {
             "images": stats.images,

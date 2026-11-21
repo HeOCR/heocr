@@ -29,6 +29,9 @@ MIN_HEBREW_WORDS = 5
 # Broken mapping: U+FFFD above max(2, 0.5%) of the characters counts as unmapped.
 BROKEN_MIN = 3
 BROKEN_SHARE = 0.005
+# Verify only small standalone space objects. The probe budget caps the raster work on a page.
+SPACE_PROBE_MAX_PT = 48
+SPACE_PROBE_LIMIT = 128
 # An OCR layer (invisible text over a page image) is foreign OCR; below this Hebrew share it is garbage.
 INVISIBLE_SHARE = 0.5
 OCR_HEBREW_SHARE = 0.3
@@ -57,6 +60,7 @@ class ObjectStats:
     paths: int = 0
     text_objects: int = 0
     stream_text: str = ""
+    painted_whitespace: bool = False
     image_boxes: list[list[float]] = field(default_factory=list)  # top-left origin, points
     image_digests: list[str] = field(default_factory=list)  # each image box's stream digest (repeated images)
 
@@ -96,6 +100,37 @@ def _union_area(rects: list[tuple[float, float, float, float]]) -> float:
     return area
 
 
+def _type3_space_candidate(raw, obj, box) -> bool:
+    """Type 3 glyphs have drawing programs and no embedded font-file stream."""
+    x0, y0, x1, y1 = box
+    if not (0 < x1 - x0 <= SPACE_PROBE_MAX_PT and 0 < y1 - y0 <= SPACE_PROBE_MAX_PT):
+        return False
+    if raw.FPDFTextObj_GetTextRenderMode(obj) != 0:
+        return False
+    font = raw.FPDFTextObj_GetFont(obj)
+    size = ctypes.c_size_t()
+    return bool(font and raw.FPDFFont_GetIsEmbedded(font) == 1
+                and raw.FPDFFont_GetFontData(font, None, 0, ctypes.byref(size)) and size.value == 0)
+
+
+def _paints_ink(raw, page, obj) -> bool:
+    """Test the object in isolation so ink from neighboring letters cannot count."""
+    bitmap = raw.FPDFTextObj_GetRenderedBitmap(page.pdf, page, obj, 2.0)
+    if not bitmap:
+        return False
+    try:
+        if raw.FPDFBitmap_GetFormat(bitmap) != raw.FPDFBitmap_BGRA:
+            return False
+        stride = raw.FPDFBitmap_GetStride(bitmap)
+        row_bytes = raw.FPDFBitmap_GetWidth(bitmap) * 4
+        size = stride * raw.FPDFBitmap_GetHeight(bitmap)
+        pixels = ctypes.string_at(raw.FPDFBitmap_GetBuffer(bitmap), size)
+        # The fourth byte of each BGRA pixel is alpha. Skip any row padding.
+        return any(any(pixels[row + 3 : row + row_bytes : 4]) for row in range(0, size, stride))
+    finally:
+        raw.FPDFBitmap_Destroy(bitmap)
+
+
 def object_stats(page, max_objects: int = 20000) -> ObjectStats:
     """Images, paths and text objects of a page, with the text objects' text in content-stream order."""
     import pypdfium2.raw as raw
@@ -110,6 +145,7 @@ def object_stats(page, max_objects: int = 20000) -> ObjectStats:
     textpage = page.get_textpage()
     pieces: list[str] = []
     previous_box = None
+    tested_spaces = painted_spaces = 0
     try:
         for count, obj in enumerate(page.get_objects(max_depth=8)):
             if count >= max_objects:
@@ -133,9 +169,14 @@ def object_stats(page, max_objects: int = 20000) -> ObjectStats:
                 buffer = ctypes.create_string_buffer(size)
                 raw.FPDFTextObj_GetText(obj.raw, textpage, ctypes.cast(buffer, ctypes.POINTER(raw.FPDF_WCHAR)), size)
                 text = buffer.raw[: size - 2].decode("utf-16-le", "replace")
+                box = obj.get_bounds()
+                # Chrome can draw a letter whose entire text object decodes to one space.
+                if (text == " " and tested_spaces < SPACE_PROBE_LIMIT and painted_spaces < BROKEN_MIN
+                        and _type3_space_candidate(raw, obj, box) and not frame.outside(frame.box(*box))):
+                    tested_spaces += 1
+                    painted_spaces += _paints_ink(raw, page, obj)
                 # pdfium attaches its own inserted spaces to object text; keep only drawn space glyphs.
                 text = " " if text.isspace() else text.strip()
-                box = obj.get_bounds()
                 if previous_box is not None:
                     font_gap = WORD_GAP_EM * max(box[3] - box[1], 1.0)
                     same_line = abs((box[1] + box[3]) / 2 - (previous_box[1] + previous_box[3]) / 2) < (box[3] - box[1]) / 2
@@ -150,6 +191,7 @@ def object_stats(page, max_objects: int = 20000) -> ObjectStats:
     stats.image_boxes = [list(rect) for rect in rects]
     stats.image_digests = digests
     stats.stream_text = "".join(pieces)
+    stats.painted_whitespace = painted_spaces >= BROKEN_MIN
     return stats
 
 
@@ -218,6 +260,8 @@ def classify(signals: dict) -> tuple[str, list[str]]:
     paths = signals["paths"]
     if is_spread(signals.get("width", 0.0), signals.get("height", 0.0)):
         flags.append("possible_spread")
+    if signals.get("painted_whitespace"):
+        return "T3", flags + ["broken_font_mapping", "text_layer_whitespace_draws_ink"]
     if chars == 0:
         if signals["images"] and coverage > 0:
             return "T5", flags
