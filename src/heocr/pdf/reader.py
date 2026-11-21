@@ -47,6 +47,7 @@ from heocr.pdf.lines import Atom, PageLines, build_lines, line_is_rtl, paragraph
 from heocr.pdf.columns import UNRESOLVED, Segment, arrange
 from heocr.pdf.ocrmargins import attach_margin_numbers
 from heocr.pdf.ocrrows import TableRows, table_rows
+from heocr.pdf.ocrsparse import recover_scan_lines
 from heocr.pdf.ocrlatin import reread_latin_runs
 from heocr.pdf.ocrtables import (
     CELL_TEXT_PAGE_EDGE, cell_crop, cell_has_faint_ink, cell_has_ink, cell_psm, faint_cell_image,
@@ -2296,6 +2297,16 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
         english, english_size = english_page
         body = (line for line in result.lines if id(line) not in taken)
         reread_latin_runs(page_image, round(scale * 72), body, english, english_size, lambda: latin_reviewer_for(doc))
+    gray = page_image.convert("L")
+    short, outside_share = short_for_ink(gray, result)
+    recovered_lines = 0
+    if page is not None and page_class == "T5" and doc._rtl and not (unruled or grids or rectified) and not time_up(doc):
+        supplemented = recover_scan_lines(engine, gray, result, scale, outside_share)
+        if supplemented is not result:
+            recovered_lines = len(supplemented.lines) - len(result.lines)
+            result = supplemented
+            short, outside_share = short_for_ink(gray, result)
+            flags = flags + ["ocr_same_column_lines_recovered"]
     form_tables = [t.bbox for t in grids if "table_open_sides_inferred" in t.flags]
     margin_page = image.size if doc._rtl and not unruled and not (grids or rectified) else None
     read = _ocr_blocks(doc, index, engine, OcrResult([line for line in result.lines if id(line) not in taken]), scale,
@@ -2326,7 +2337,6 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
     found = bool(result.lines) or read > 0  # text read in table cells counts (D3e)
     if not found:
         doc.unread.append(Unread(scope="page", reason="ocr_found_no_text", page=index, detail=f"class {page_class}"))
-    short, outside_share = short_for_ink(page_image.convert("L"), result)
     if short and found:
         flags = flags + ["ocr_short_for_ink"]
         doc.unread.append(
@@ -2339,6 +2349,7 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
         Page(index, width, height, page_class, "ocr", signals,
              {"chars_total": text.chars_total, "chars_read": 0, "chars_ocr": read,
               "ink_outside_ocr_share": outside_share,
+              **({"ocr_same_column_lines_recovered": recovered_lines} if recovered_lines else {}),
               **({"number_words_reread": number_words[0], "number_words_replaced": number_words[1]} if number_words else {}),
               **({"page_number_tokens": page_numbers[0], "page_number_words_replaced": page_numbers[1]} if page_numbers else {}),
               "status": "ocr" if found and not (short or page_failed) else "partial" if found else "unread"}, flags)
