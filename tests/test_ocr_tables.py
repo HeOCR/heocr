@@ -223,6 +223,19 @@ class OcrTableTest(unittest.TestCase):
         self.assertEqual(page.coverage["ink_outside_ocr_share"], 0.0)
         self.assertEqual(doc.unread, [])
 
+    def test_a_closed_fragment_of_an_unfinished_grid_does_not_mask_the_page(self) -> None:
+        from PIL import ImageDraw
+
+        image = scan(LEVELS)
+        draw = ImageDraw.Draw(image)
+        end = YS[-1] + 70
+        for x in XS:
+            draw.line((px(x), px(YS[-1]), px(x), px(end)), width=3, fill=0)
+        doc = heocr.extract(scanned_pdf(image), tesseract=FAKE)
+        self.assertFalse(any(block.kind == "table" for block in doc.blocks))
+        self.assertEqual(self.calls("3"), 1)
+        self.assertEqual(self.calls("6|7"), 0)
+
     def test_ink_outside_the_table_that_ocr_missed_is_partial(self) -> None:
         image = scan(LEVELS)
         from PIL import ImageDraw
@@ -704,6 +717,16 @@ class OcrTableTest(unittest.TestCase):
 
 
 class ImageRulingsTest(unittest.TestCase):
+    def test_a_single_long_rule_beyond_a_complete_grid_keeps_the_table(self) -> None:
+        from PIL import ImageDraw
+
+        from heocr.pdf.ocrtables import tables_in
+
+        image = scan(LEVELS)
+        ImageDraw.Draw(image).line((px(XS[0]), px(YS[-1]), px(XS[0]), px(YS[-1] + 70)), width=3, fill=0)
+        (table,) = tables_in(image, DPI / 72)
+        self.assertEqual([len(row) for row in table.rows], [3, 3, 3])
+
     def test_long_strokes_crossing_in_a_tiny_area_do_not_make_a_table(self) -> None:
         from PIL import Image, ImageDraw
 

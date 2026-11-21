@@ -155,7 +155,24 @@ def tables_in(image, scale: float) -> list[Table]:
         if table.rows and min(table.bbox[2] - table.bbox[0], table.bbox[3] - table.bbox[1]) >= min_extent
     ]
     _open_sided_rows(horizontal, vertical, tables, min_extent)
-    return tables
+    return [table for table in tables if not _grid_continues(table, horizontal, vertical, min_extent)]
+
+
+def _grid_continues(table: Table, horizontal: list[Rule], vertical: list[Rule], min_extent: float) -> bool:
+    """Keep an incomplete grid on the page when parallel rules continue beyond its closed patch."""
+    if "table_open_sides_inferred" in table.flags:
+        return False  # its validated dividers terminate at the lower border
+    left, top, right, bottom = table.bbox
+
+    def extends(rules, cross_start, cross_end, start, end):
+        # A single overshooting stroke is normal. Two full tracks on the same side
+        # leave room for another row or column that the closed grid did not include.
+        tracks = [rule for rule in rules if cross_start <= rule.pos <= cross_end
+                  and rule.start <= start + OPEN_END_PT and rule.end >= end - OPEN_END_PT]
+        return (sum(rule.start <= start - min_extent for rule in tracks) >= 2
+                or sum(rule.end >= end + min_extent for rule in tracks) >= 2)
+
+    return extends(vertical, left, right, top, bottom) or extends(horizontal, top, bottom, left, right)
 
 
 def cell_crop(image, box, scale: float):
