@@ -132,7 +132,7 @@ def _apply(line, runs, accepted):
         line.latin_runs_reread += changed
 
 
-def reread_latin_runs(image, dpi, primary, english, english_size, get_reviewer):
+def reread_latin_runs(image, dpi, lines, english, english_size, get_reviewer):
     """Use English word candidates only with closely aligned mixed-language confirmation."""
     sx, sy = image.width / english_size[0], image.height / english_size[1]
     candidates = []
@@ -145,7 +145,7 @@ def reread_latin_runs(image, dpi, primary, english, english_size, get_reviewer):
     if not candidates:
         return
     reviewed = 0
-    for line in primary.lines:
+    for line in lines:
         runs = [run for run in _runs(_proposals(line, candidates))
                 if all(_replaceable(line.words[item.start:item.stop], item.word.text) for item in run)]
         if not runs:
