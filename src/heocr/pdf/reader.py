@@ -49,6 +49,7 @@ from heocr.pdf.ocrlines import recover_photo_lines
 from heocr.pdf.ocrmargins import attach_margin_numbers
 from heocr.pdf.ocrorder import order_across_disjoint_gaps
 from heocr.pdf.ocrrows import TableRows, table_rows
+from heocr.pdf.ocrpixel import recover_pixel_lines
 from heocr.pdf.ocrsparse import recover_scan_lines
 from heocr.pdf.ocrlatin import reread_latin_runs
 from heocr.pdf.ocrtables import (
@@ -2351,6 +2352,7 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
     gray = page_image.convert("L")
     short, outside_share = short_for_ink(gray, result)
     recovered_lines = 0
+    pixel_gap_lines = 0
     if page is not None and page_class == "T5" and doc._rtl and not (unruled or grids or rectified) and not time_up(doc):
         supplemented = recover_scan_lines(engine, gray, result, scale, outside_share)
         if supplemented is not result:
@@ -2358,6 +2360,14 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
             result = supplemented
             short, outside_share = short_for_ink(gray, result)
             flags = flags + ["ocr_same_column_lines_recovered"]
+        if short and not time_up(doc):
+            supplemented = recover_pixel_lines(engine, gray, result, scale, outside_share,
+                                               stop=lambda: time_up(doc))
+            if supplemented is not result:
+                pixel_gap_lines = len(supplemented.lines) - len(result.lines)
+                result = supplemented
+                short, outside_share = short_for_ink(gray, result)
+                flags = flags + ["ocr_pixel_lines_recovered"]
     photo_gap_lines = 0
     if (page is None and page_class == "T5" and signals.get("image_format") == "jpeg" and doc._rtl
             and not (unruled or grids or rectified) and not time_up(doc)):
@@ -2416,6 +2426,7 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
               "ink_outside_ocr_share": outside_share,
               **({"ocr_same_column_lines_recovered": recovered_lines} if recovered_lines else {}),
               **({"ocr_photo_gap_lines_recovered": photo_gap_lines} if photo_gap_lines else {}),
+              **({"ocr_pixel_lines_recovered": pixel_gap_lines} if pixel_gap_lines else {}),
               **({"number_words_reread": number_words[0], "number_words_replaced": number_words[1]} if number_words else {}),
               **({"page_number_tokens": page_numbers[0], "page_number_words_replaced": page_numbers[1]} if page_numbers else {}),
               "status": "ocr" if found and not (short or page_failed) else "partial" if found else "unread"}, flags)

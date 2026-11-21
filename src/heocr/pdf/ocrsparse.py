@@ -30,20 +30,20 @@ def _overlaps_line(box, other):
     return _overlap(box, other, 0) * _overlap(box, other, 1) >= 0.10 * area
 
 
-def _reading_slot(line, original, width, height):
+def _reading_slot(box, original, width, height, *, edge_share=.05):
     """Locate the line in the existing stream without disturbing the native order."""
-    x0, y0, x1, y1 = line.bbox
+    x0, y0, x1, y1 = box
     if x1 - x0 < 0.15 * width or y1 <= y0:
         return None
     above = []
     below = []
     for index, native in enumerate(original):
         left, top, right, bottom = native.bbox
-        overlap = _overlap(line.bbox, native.bbox, 0)
-        if _overlaps_line(line.bbox, native.bbox):
+        overlap = _overlap(box, native.bbox, 0)
+        if _overlaps_line(box, native.bbox):
             return None
         if (len(native.words) < 2 or overlap < 0.70 * min(x1-x0, right-left)
-                or abs(right-x1) > 0.05 * width):
+                or abs(right-x1) > edge_share * width):
             continue
         if 0 <= y0 - bottom <= 4 * height:
             above.append((y0 - bottom, index))
@@ -100,7 +100,7 @@ def recover_scan_lines(engine, gray, result, scale, outside_share):
         confidence = mean(word.confidence for word in line.words)
         if confidence < MIN_LINE_CONFIDENCE:
             continue
-        slot = _reading_slot(line, native, w, height)
+        slot = _reading_slot(line.bbox, native, w, height)
         if slot is not None:
             proposals.append((-confidence, *slot, line))
     if not proposals:

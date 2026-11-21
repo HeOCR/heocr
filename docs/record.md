@@ -83,6 +83,7 @@ Flags are open lists of strings: a later v1 may add more. The main ones, by what
   - `possible_spread`, `spread_split`.
 - **OCR:**
   - `ocr_unverified`, `ocr_short_for_ink`, `ocr_empty_with_ink`, `render_dpi_reduced`, `deskewed`;
+  - `ocr_pixel_lines_recovered` (isolated OCR confirmed new lines from unread pixel bands on a scan; the coverage key of the same name counts them);
   - `ocr_call_failed` (a page, and the document, where a Tesseract call failed or timed out; the page's `signals.ocr_calls_failed` counts them);
   - `latin_from_second_reading` (an aligned Latin run from the English page pass was confirmed by a stock Hebrew/English line read; `ocr.latin_runs_reread` counts the replacements);
   - `from_image_region`, `layer_text_masked`, `repeated_image_text`.
