@@ -736,6 +736,16 @@ class OcrTableTest(unittest.TestCase):
 
 
 class ImageRulingsTest(unittest.TestCase):
+    def test_a_single_long_rule_beyond_a_complete_grid_keeps_the_table(self) -> None:
+        from PIL import ImageDraw
+
+        from heocr.pdf.ocrtables import tables_in
+
+        image = scan(LEVELS)
+        ImageDraw.Draw(image).line((px(XS[0]), px(YS[-1]), px(XS[0]), px(YS[-1] + 70)), width=3, fill=0)
+        (table,) = tables_in(image, DPI / 72)
+        self.assertEqual([len(row) for row in table.rows], [3, 3, 3])
+
     def test_a_supported_narrow_column_keeps_its_cells(self) -> None:
         from PIL import Image, ImageDraw
 
@@ -751,16 +761,6 @@ class ImageRulingsTest(unittest.TestCase):
         (table,) = tables_in(image, 1)
         self.assertEqual([len(row) for row in table.rows], [3, 3])
         self.assertEqual(table.xs, [20, 34, 167, 300])
-
-    def test_a_single_long_rule_beyond_a_complete_grid_keeps_the_table(self) -> None:
-        from PIL import ImageDraw
-
-        from heocr.pdf.ocrtables import tables_in
-
-        image = scan(LEVELS)
-        ImageDraw.Draw(image).line((px(XS[0]), px(YS[-1]), px(XS[0]), px(YS[-1] + 70)), width=3, fill=0)
-        (table,) = tables_in(image, DPI / 72)
-        self.assertEqual([len(row) for row in table.rows], [3, 3, 3])
 
     def test_long_strokes_crossing_in_a_tiny_area_do_not_make_a_table(self) -> None:
         from PIL import Image, ImageDraw
