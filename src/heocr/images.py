@@ -10,7 +10,8 @@ PDF page: ruled tables cell by cell (D3e), ink accounting, the number model for 
   flagged ``dpi_assumed`` (Tesseract's results depend on it). Boxes are in points at that DPI.
 - **Size:** a frame over ``MAX_RENDER_PIXELS`` is scaled down to it before OCR and flagged
   ``image_downscaled``; a hostile size cannot allocate unbounded memory, and Pillow's own
-  decompression-bomb limit stays on.
+  decompression-bomb limit stays on. Page-sized continuous-tone PNG and TIFF scans with a
+  declared low DPI can be upsampled for OCR, keeping their physical page and box coordinates.
 - **Colour:** transparency is flattened onto white, and the frame is read in grey levels.
 - **Pages:** at most ``max_pages`` frames are read (``contract.MAX_PAGES``, 2,000 by default);
   the rest are one ``unread`` entry (``page_limit``), and the document is flagged.
@@ -28,6 +29,8 @@ from heocr.ocr.regions import MAX_RENDER_PIXELS, RENDER_DPI, has_ink
 MIN_DPI = 50  # a smaller declared resolution is a placeholder (JFIF's 1:1 aspect, 72 by default in some tools)
 MAX_DPI = 2400
 ASSUMED_DPI = RENDER_DPI
+LOW_SCAN_DPI = RENDER_DPI / 3
+MIN_SCAN_EDGE_PT = 360  # smallest side of a page, to exclude labels and other cropped regions
 
 
 def _grey(frame):
@@ -96,11 +99,22 @@ def read_image(body: bytes, doc: Document) -> None:
             frame = frame.resize((max(1, int(frame.size[0] * factor)), max(1, int(frame.size[1] * factor))))
             scale *= factor
             flags.append("image_downscaled")
-        signals = {"image_format": (image.format or "").lower(), "frame": index, "dpi": round(dpi, 1), "pixels": list(frame.size)}
+        image_format = (image.format or "").lower()
+        signals = {"image_format": image_format, "frame": index, "dpi": round(dpi, 1), "pixels": list(frame.size)}
         if not has_ink(frame):
             doc.pages.append(Page(index, round(width, 2), round(height, 2), "empty", "none", signals, {"chars_total": 0, "chars_read": 0, "status": "nothing_to_read"}, flags))
             continue
         exif = image.getexif() if image.format == "JPEG" and doc._rtl else {}
         camera_jpeg = bool(exif.get(271) or exif.get(272))  # Camera Make or Model.
+        if (doc._ocr_settings is not None and doc._handwriting is None
+                and image_format in ("png", "tiff") and not assumed and dpi <= LOW_SCAN_DPI
+                and min(width, height) >= MIN_SCAN_EDGE_PT
+                and 4 * frame.width * frame.height <= MAX_RENDER_PIXELS
+                and frame.getcolors(maxcolors=2) is None):
+            # Interpolate gray edges for layout and recognition at the working scale.
+            frame = frame.resize((2 * frame.width, 2 * frame.height), Image.Resampling.BICUBIC)
+            scale *= 2
+            signals["ocr_pixels"] = list(frame.size)
+            flags.append("image_ocr_upsampled")
         _ocr_page(doc, index, None, round(width, 2), round(height, 2), "T5", signals, PageText(), flags,
                   rendered=(frame, scale), camera_jpeg=camera_jpeg)
