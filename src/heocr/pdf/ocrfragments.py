@@ -6,7 +6,7 @@ from dataclasses import replace
 from math import ceil, floor
 from statistics import mean, median
 
-from PIL import ImageOps
+from PIL import Image, ImageOps
 
 from heocr.ocr.regions import paper_level
 from heocr.ocr.tesseract import OcrResult, OcrUnavailable
@@ -65,7 +65,7 @@ def _read(engine, crop, box, dpi, border, paper):
     return replace(line, bbox=mapped(line.bbox), words=words)
 
 
-def _confirmed(engine, gray, box, dpi, typical, stop):
+def _confirmed(engine, gray, box, dpi, typical, stop, *, native_words=None):
     crop = gray.crop(box)
     try:
         raw = _read(engine, crop, box, dpi, 30, paper_level(crop))
@@ -76,8 +76,20 @@ def _confirmed(engine, gray, box, dpi, typical, stop):
         contrast = _read(engine, flattened, box, dpi, 20, 255)
     except OcrUnavailable:
         return None
-    if not contrast or contrast.text.split() != raw.text.split() or len(contrast.words) != len(raw.words):
+    if not contrast or len(contrast.words) != len(raw.words):
         return None
+    if native_words is None:
+        if contrast.text.split() != raw.text.split():
+            return None
+    else:
+        if len(native_words) != len(raw.words):
+            return None
+        changed = sum(a.text != native or b.text != native
+                      for a, b, native in zip(raw.words, contrast.words, native_words, strict=True))
+        # Joining keeps every native word. For a long line, tolerate one
+        # uncertain word position across both corroborating reads.
+        if changed > int(len(native_words) >= 10):
+            return None
     if all(_covered(a.bbox, b.bbox) >= .65 and _covered(b.bbox, a.bbox) >= .65
            for a, b in zip(raw.words, contrast.words, strict=True)):
         return contrast
@@ -118,6 +130,77 @@ def suppress_contained_fragments(engine, gray, result, scale, stop=lambda: False
 
 def _mid_y(box):
     return (box[1] + box[3]) / 2
+
+
+def _straightened_pair(gray, left, right, x0, x1):
+    """Shear only the corroborating crop to follow the observed word baselines."""
+    def mid_x(word):
+        return (word.bbox[0] + word.bbox[2]) / 2
+
+    xa, xb = (median(mid_x(word) for word in line.words) for line in (left, right))
+    ya, yb = (median(word.bbox[3] for word in line.words) for line in (left, right))
+    if xb <= xa:
+        return None
+    slope = (yb - ya) / (xb - xa)
+    if abs(slope) > .15:
+        return None
+    words = left.words + right.words
+    top = floor(min(word.bbox[1] - slope * (mid_x(word) - x0) for word in words)) - 3
+    bottom = ceil(max(word.bbox[3] - slope * (mid_x(word) - x0) for word in words)) + 3
+    return gray.transform((x1 - x0, bottom - top), Image.Transform.AFFINE,
+                          (1, 0, x0, slope, 1, top), Image.Resampling.BICUBIC,
+                          fillcolor=paper_level(gray))
+
+
+def join_camera_line_fragments(engine, gray, result, scale, stop=lambda: False):
+    """Join a reversed pair of Hebrew fragments inside a continuous text column."""
+    lines = result.lines
+    if engine.psm != 3 or len(lines) < 4 or stop():
+        return result
+    typical = median(line.bbox[3] - line.bbox[1] for line in lines)
+    merged = {}
+    checks = 0
+    for i in range(1, len(lines) - 2):
+        if checks >= MAX_LINE_CHECKS or stop():
+            break
+        above, left, right, below = lines[i - 1:i + 3]
+        if (i - 1 in merged or left.paragraph == right.paragraph
+                or left.paragraph != above.paragraph or right.paragraph != below.paragraph):
+            continue
+        parts = (right, left)
+        if any(len(line.words) < 2 or _confidence(line) < 85 or len(_HEBREW.findall(line.text)) < 6
+               or any(ch.isdecimal() for ch in line.text)
+               or line.text.split() != [word.text for word in line.words]
+               or line.number_readings or line.numbers_replaced or line.latin_runs_reread for line in parts):
+            continue
+        a, b = left.bbox, right.bbox
+        if not 0 <= b[0] - a[2] <= .75 * typical or abs(_mid_y(a) - _mid_y(b)) > .35 * typical:
+            continue
+        if _overlap(a, b, 1) < .70 * min(a[3] - a[1], b[3] - b[1]):
+            continue
+        x0, y0, x1, y1 = a[0], min(a[1], b[1]), b[2], max(a[3], b[3])
+        if any(max(abs(line.bbox[0] - x0), abs(line.bbox[2] - x1)) > typical
+               for line in (above, below)):
+            continue
+        if any(not -.10 * typical <= gap <= typical for gap in (y0 - above.bbox[3], below.bbox[1] - y1)):
+            continue
+        box = (max(0, floor(x0) - 3), max(0, floor(y0) - 3),
+               min(gray.width, ceil(x1) + 3), min(gray.height, ceil(y1) + 3))
+        if any(_intersects(box, line.bbox) for j, line in enumerate(lines) if j < i - 1 or j > i + 2):
+            continue
+        checks += 1
+        row = _straightened_pair(gray, left, right, box[0], box[2])
+        if row is None:
+            continue
+        words = [word for line in parts for word in line.words]
+        native_words = [word.text for word in words]
+        if _confirmed(engine, row, (0, 0, row.width, row.height), round(scale * 72), typical, stop,
+                      native_words=native_words):
+            merged[i] = replace(left, text=" ".join(word.text for word in words),
+                                bbox=[x0, y0, x1, y1], words=words, confidences=[word.confidence for word in words])
+    if not merged:
+        return result
+    return OcrResult([merged.get(i, line) for i, line in enumerate(lines) if i - 1 not in merged])
 
 
 def _narrow_slot(box, lines, typical):

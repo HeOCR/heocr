@@ -50,7 +50,7 @@ from heocr.pdf.ocrforms import needs_form_probe, preserve_form_cell_lines
 from heocr.pdf.ocrmargins import attach_margin_numbers
 from heocr.pdf.ocrorder import order_across_disjoint_gaps
 from heocr.pdf.ocrrows import TableRows, table_rows
-from heocr.pdf.ocrfragments import recover_narrow_lines, suppress_contained_fragments
+from heocr.pdf.ocrfragments import join_camera_line_fragments, recover_narrow_lines, suppress_contained_fragments
 from heocr.pdf.ocrpixel import recover_pixel_lines
 from heocr.pdf.ocrsparse import recover_scan_lines
 from heocr.pdf.ocrlatin import reread_latin_runs
@@ -2378,6 +2378,7 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
         if fragments_removed:
             flags = flags + ["ocr_contained_fragments_removed"]
     photo_gap_lines = 0
+    joined_camera_lines = 0
     if (page is None and page_class == "T5" and signals.get("image_format") == "jpeg" and doc._rtl
             and not (unruled or grids or rectified) and not time_up(doc)):
         supplemented = recover_photo_lines(engine, gray, result, dpi)
@@ -2396,6 +2397,12 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
                 result = narrow
                 short, outside_share = short_for_ink(gray, result)
                 flags = flags + ["ocr_pixel_lines_recovered"]
+        if camera_jpeg:
+            joined = join_camera_line_fragments(engine, gray, result, scale, stop=lambda: time_up(doc))
+            if joined is not result:
+                joined_camera_lines = len(result.lines) - len(joined.lines)
+                result = joined
+                flags = flags + ["ocr_camera_line_fragments_joined"]
     form_tables = [t.bbox for t in grids if "table_open_sides_inferred" in t.flags]
     margin_page = image.size if doc._rtl and not unruled and not (grids or rectified) else None
     record_lines = page is not None and page_class == "T5" and margin_page is not None
@@ -2456,6 +2463,7 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
               **({"ocr_photo_gap_lines_recovered": photo_gap_lines} if photo_gap_lines else {}),
               **({"ocr_pixel_lines_recovered": pixel_gap_lines} if pixel_gap_lines else {}),
               **({"ocr_contained_fragments_removed": fragments_removed} if fragments_removed else {}),
+              **({"ocr_camera_line_fragments_joined": joined_camera_lines} if joined_camera_lines else {}),
               **({"number_words_reread": number_words[0], "number_words_replaced": number_words[1]} if number_words else {}),
               **({"page_number_tokens": page_numbers[0], "page_number_words_replaced": page_numbers[1]} if page_numbers else {}),
               "status": "ocr" if found and not (short or page_failed) else "partial" if found else "unread"}, flags)
