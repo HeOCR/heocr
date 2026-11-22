@@ -2239,7 +2239,7 @@ def _rest_has_ink(image, scale: float) -> bool:
 
 
 def _ocr_page(doc: Document, index: int, page, width, height, page_class, signals, text: PageText, flags,
-              rendered=None, *, camera_jpeg: bool = False) -> None:
+              rendered=None, *, camera_jpeg: bool = False, form_image=None) -> None:
     """Read a page by OCR. ``rendered`` is (image, pixels per point) when the page is already an
     image (an image file, D4b); otherwise the PDF page is rendered."""
     if page_class == "T5" and doc._handwriting is not None:
@@ -2283,6 +2283,8 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
         turned_grids = tables_in(turned, scale)
         if turned_grids or (not grids and abs(deskew) >= DESKEW_TEXT_MIN_DEG):
             image, grids = turned, turned_grids
+            if form_image is not None:
+                form_image = form_image.rotate(deskew, resample=_BICUBIC, fillcolor=(level,) * 3)
             flags = flags + ["deskewed"]
             signals["deskew_degrees"] = deskew
         else:
@@ -2440,6 +2442,15 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
         flags = flags + ["ocr_tables"]
         if any("table_cells_ink_unread" in t.flags for t in t_blocks):
             flags = flags + ["table_cells_ink_unread"]
+    entries = []
+    if form_image is not None and not page_failed and not time_up(doc):
+        from heocr.pdf.formtext import recover_colored_form_entries
+
+        tables = [[v * scale for v in block.bbox] for block in doc.blocks[first:] if block.kind == "table"]
+        entries = recover_colored_form_entries(engine, form_image, gray, result, tables, dpi, lambda: time_up(doc))
+        if entries:
+            read += _ocr_blocks(doc, index, engine, OcrResult(entries), scale, flags=["ocr_form_entry"])
+            flags = flags + ["ocr_form_entries_recovered"]
     if page_class == "T4":
         flags = flags + ["text_layer_ignored"]
     elif page_class == "T3":
@@ -2459,6 +2470,7 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
         Page(index, width, height, page_class, "ocr", signals,
              {"chars_total": text.chars_total, "chars_read": 0, "chars_ocr": read,
               "ink_outside_ocr_share": outside_share,
+              **({"ocr_form_entries_recovered": len(entries)} if entries else {}),
               **({"ocr_same_column_lines_recovered": recovered_lines} if recovered_lines else {}),
               **({"ocr_photo_gap_lines_recovered": photo_gap_lines} if photo_gap_lines else {}),
               **({"ocr_pixel_lines_recovered": pixel_gap_lines} if pixel_gap_lines else {}),
