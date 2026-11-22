@@ -54,6 +54,7 @@
 | **D2h** | DOCX numbering residuals: "%1" that follows a heading from another list, and an off-by-one case in one file. Each is first reproduced as a synthetic case. The model changes only where evaluation's synthetic gold (D-bench §4 b) shows which side is right. | D1 |
 | **D2i** | Experimental handwriting OCR. Opt-in Kraken 7.2 segmentation and recognition on image-only pages using local SHA-256-pinned weights. Auto mode needs explicit handwriting tags across the segmented lines. Force mode is for known handwriting. Use path-free OCR provenance and fall back on mixed or incomplete reads. DEV only. | D2e, D2f |
 | **D2j** | Opt-in geometry gate for automatic handwriting OCR on whole scan pages. Classify before loading Kraken and keep ordinary OCR for rejected, sparse, or unavailable detections. The tags detector remains the automatic default. DEV only. | D2i |
+| **D2k** | Optional CPU ONNX recognition for Hebrew print. Read the same ordered prose boxes produced by Tesseract with local SHA-256-pinned weights. Record recognition provenance per block. | D2e, D2f |
 
 **Order of the PRs:** D2a, D2b and D2h can go first, in parallel. D2e comes next. D2c and D2d follow D2b. D2f follows D2e, and D2g comes last.
 
