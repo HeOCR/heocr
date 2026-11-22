@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
+from itertools import groupby
 from math import dist
 import re
 
@@ -11,13 +12,15 @@ from PIL import Image, ImageFilter
 
 from heocr.ocr.regions import INK_LEVEL, MAX_RENDER_PIXELS, paper_level
 from heocr.pdf.ocrtables import MIN_CELL_PT, MIN_RULE_PT, image_rulings
-from heocr.pdf.tables import Table, find_tables
+from heocr.pdf.tables import COVER, Rule, Table, find_tables
 
 # Use a bounded thumbnail to find connected rule networks, then warp the original pixels.
 THUMBNAIL = 720
 MAX_CANDIDATES = 4
 OUTLINE_PAD = 8
 INK_RUN = re.compile(rb"\x00+")
+SWEEP_COVERAGE = 0.70
+MAX_SWEEP_BAND_PX = 20
 
 
 def _outlines(binary):
@@ -134,7 +137,52 @@ class RectifiedGrid:
         return [min(xs) / scale, min(ys) / scale, max(xs) / scale, max(ys) / scale]
 
 
-def _warp_grid(image, scale, corners):
+def _swept_rulings(patch, scale):
+    """Find strongly supported rules with small breaks or residual slope."""
+    ink = patch.convert("L").point(lambda v: 255 if v < INK_LEVEL else 0)
+    ink = ink.filter(ImageFilter.MaxFilter(3))
+    turned = ink.transpose(Image.Transpose.TRANSPOSE)
+    margin = OUTLINE_PAD + 3
+
+    def positions(mask):
+        if mask.width <= 2 * margin:
+            return []
+        stripe = mask.crop((margin, 0, mask.width - margin, mask.height))
+        profile = stripe.resize((1, mask.height), Image.Resampling.BOX).tobytes()
+        supported = [i for i, value in enumerate(profile) if value >= 255 * SWEEP_COVERAGE]
+        result = []
+        for _, run in groupby(enumerate(supported), key=lambda pair: pair[1] - pair[0]):
+            band = [i for _, i in run]
+            if len(band) <= MAX_SWEEP_BAND_PX:
+                result.append(round(sum(band) / len(band)))
+        return result
+
+    ys, xs = positions(ink), positions(turned)
+    if min(len(xs), len(ys)) < 3:
+        return [], []
+
+    def supported_edges(mask, across, along):
+        data = mask.tobytes()
+        width = mask.width
+        for line in across:
+            for a, b in zip(along, along[1:]):
+                if b - a < MIN_CELL_PT * scale:
+                    return False
+                stripe = data[line * width + a:line * width + b]
+                if stripe.count(255) < COVER * (b - a):
+                    return False
+        return True
+
+    if not supported_edges(ink, ys, xs) or not supported_edges(turned, xs, ys):
+        return [], []
+
+    def rules(across, along):
+        return [Rule(i / scale, along[0] / scale, along[-1] / scale) for i in across]
+
+    return rules(ys, xs), rules(xs, ys)
+
+
+def _warp_grid(image, scale, corners, *, tolerate_gaps=False):
     tl, tr, br, bl = corners
     width = round((dist(tl, tr) + dist(bl, br)) / 2)
     height = round((dist(tl, bl) + dist(tr, br)) / 2)
@@ -149,7 +197,7 @@ def _warp_grid(image, scale, corners):
     source = image if image.mode in ("L", "RGB") else image.convert("RGB")
     fill = level if source.mode == "L" else (level,) * 3
     patch = source.transform(size, Image.Transform.PERSPECTIVE, inverse, Image.Resampling.BICUBIC, fillcolor=fill)
-    horizontal, vertical = image_rulings(patch, scale)
+    horizontal, vertical = _swept_rulings(patch, scale) if tolerate_gaps else image_rulings(patch, scale)
     grids = [grid for grid in find_tables(horizontal, vertical) if grid.rows]
     if len(grids) != 1:
         return None
@@ -174,13 +222,17 @@ def _warp_grid(image, scale, corners):
     return RectifiedGrid(patch, grid, mask, inverse)
 
 
-def rectify_grid(image, scale):
+def rectify_grid(image, scale, *, tolerate_gaps=False):
     """Return a single independently supported recovered grid, or keep the ordinary OCR route."""
-    recovered = None
-    for corners in _candidates(image, scale):
-        result = _warp_grid(image, scale, corners)
-        if result is not None:
-            if recovered is not None:
-                return None  # ambiguous candidates: don't mask either region
-            recovered = result
-    return recovered
+    candidates = _candidates(image, scale)
+    for gapped in (False, True) if tolerate_gaps else (False,):
+        recovered = None
+        for corners in candidates:
+            result = _warp_grid(image, scale, corners, tolerate_gaps=gapped)
+            if result is not None:
+                if recovered is not None:
+                    return None  # ambiguous candidates: don't mask either region
+                recovered = result
+        if recovered is not None:
+            return recovered
+    return None
