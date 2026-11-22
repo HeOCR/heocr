@@ -10,7 +10,7 @@ from PIL import ImageOps
 
 from heocr.ocr.regions import paper_level
 from heocr.ocr.tesseract import OcrResult, OcrUnavailable
-from heocr.pdf.ocrpixel import _HEBREW, _bands, _foreground, _glyphs, _intersects, _mask
+from heocr.pdf.ocrpixel import THUMBNAIL, _HEBREW, _bands, _foreground, _glyphs, _intersects, _mask
 from heocr.pdf.ocrsparse import LINE_PSM, _overlap
 
 MAX_LINE_CHECKS = 6
@@ -131,7 +131,7 @@ def _narrow_slot(box, lines, typical):
     return closest + int(_mid_y(lines[closest].bbox) <= middle)
 
 
-def recover_narrow_lines(engine, gray, result, scale, outside_share, stop=lambda: False):
+def recover_narrow_lines(engine, gray, result, scale, outside_share, stop=lambda: False, *, preview_size=THUMBNAIL):
     """Recover isolated narrow prose after two confident, agreeing crop reads."""
     lines = result.lines
     if engine.psm != 3 or outside_share < NARROW_MIN_UNCOVERED_INK or len(lines) < 2 or stop():
@@ -139,7 +139,7 @@ def recover_narrow_lines(engine, gray, result, scale, outside_share, stop=lambda
     typical = median(line.bbox[3] - line.bbox[1] for line in lines)
     if not .005 * gray.height <= typical <= .06 * gray.height:
         return result
-    mask, sx, sy = _mask(gray, lines, typical)
+    mask, sx, sy = _mask(gray, lines, typical, preview_size=preview_size)
     if mask.histogram()[0] > .24 * mask.width * mask.height:
         return result
     proposals = []
