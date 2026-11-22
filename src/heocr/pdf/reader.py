@@ -2451,7 +2451,17 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
                     form_probe = engine.recognize(image, dpi=dpi).lines
                 except OcrUnavailable:
                     pass
-            t_blocks, in_cells = _ocr_tables(doc, index, engine, image, scale, grids,
+            table_image = image
+            if (page is not None and page_class == "T5" and doc._rtl and dpi == RENDER_DPI and engine.psm == 3
+                    and not (page_failed or routes.pending(doc) or time_up(doc))
+                    and all("table_open_sides_inferred" not in grid.flags for grid in grids)):
+                from heocr.ocr.scan_gaps import bridge_scan_stroke_gaps
+
+                table_image, bands = bridge_scan_stroke_gaps(image)
+                if bands:
+                    flags = flags + ["ocr_scan_table_stroke_gaps_bridged"]
+                    signals["ocr_scan_table_dropout_bands"] = bands
+            t_blocks, in_cells = _ocr_tables(doc, index, engine, table_image, scale, grids,
                                             None if numbers is engine else numbers,
                                             **({"form_probe": form_probe} if form_probe else {}))
         _place_tables(doc, first, t_blocks)
