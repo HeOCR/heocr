@@ -186,6 +186,38 @@ class ImageInputTest(unittest.TestCase):
         self.assertEqual([u.reason for u in doc.unread], ["ocr_route_unavailable"])
         self.assertEqual(doc.pages[0].route, "none")
 
+    def test_colored_entry_requires_new_geometry_and_a_confirming_crop(self) -> None:
+        from PIL import Image, ImageDraw
+
+        from heocr.ocr.tesseract import OcrResult, Tesseract
+        from tests.test_ocr_pixel import line
+
+        image = Image.new("RGB", (1650, 2100), "white")
+        pen = ImageDraw.Draw(image)
+        positions = [(200, 400, 300, 416), (200, 500, 330, 516), (200, 600, 300, 616)]
+        for rect in positions:
+            pen.rectangle(rect, fill=(20, 53, 130))
+        pen.rectangle((490, 300, 610, 375), fill="black")
+        entries = [line(text, rect) for text, rect in zip(("6423", "דף כחול", "1972"), positions, strict=True)]
+        calls = []
+
+        def recognize(_engine, raster, dpi, psm=None):
+            calls.append(psm)
+            if psm == 11:
+                return OcrResult(entries)
+            if psm == 7:
+                text = "6423" if calls.count(7) == 1 else "שורה אחרת"
+                return OcrResult([line(text, (9, 9, raster.width - 9, raster.height - 9))])
+            return OcrResult([entries[2]])
+
+        with mock.patch.object(Tesseract, "recognize", recognize):
+            doc = heocr.extract(encoded(image, "PNG", dpi=(300, 300)), tesseract=FAKE,
+                                ocr_model="heb", check_numbers=False)
+        self.assertEqual(calls, [None, 11, 7, 7])
+        self.assertEqual([b.text for b in doc.blocks], ["1972", "6423"])
+        self.assertEqual(doc.pages[0].coverage["ocr_form_entries_recovered"], 1)
+        self.assertEqual(heocr.validate(doc.to_dict()), [])
+
 
 class PageLimitTest(unittest.TestCase):
     """At most max_pages pages or frames are read; the rest are one unread entry, never silent."""

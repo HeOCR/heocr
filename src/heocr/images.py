@@ -86,7 +86,8 @@ def read_image(body: bytes, doc: Document) -> None:
             break
         try:
             image.seek(index)
-            frame = _grey(image.copy())
+            copied = image.copy()
+            frame = _grey(copied)
         except (OSError, ValueError, EOFError) as exc:
             doc.unread.append(Unread(scope="page", reason="image_unreadable", page=index, detail=f"frame {index}: {type(exc).__name__}"))
             continue
@@ -116,5 +117,11 @@ def read_image(body: bytes, doc: Document) -> None:
             scale *= 2
             signals["ocr_pixels"] = list(frame.size)
             flags.append("image_ocr_upsampled")
+        options = {}
+        if (image_format in ("png", "tiff") and copied.mode == "RGB"
+                and frame.size == copied.size and min(width, height) >= MIN_SCAN_EDGE_PT):
+            from PIL import ImageOps
+
+            options["form_image"] = ImageOps.exif_transpose(copied)
         _ocr_page(doc, index, None, round(width, 2), round(height, 2), "T5", signals, PageText(), flags,
-                  rendered=(frame, scale), camera_jpeg=camera_jpeg)
+                  rendered=(frame, scale), camera_jpeg=camera_jpeg, **options)
