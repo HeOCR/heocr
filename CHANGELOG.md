@@ -17,7 +17,7 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 
 ### Fixed
 
-- **Bridge thin dropouts in scanned PDF text.** Repeated gaps across printed strokes can be repaired in the OCR working raster when the reading corroborates a prose column. Page geometry is preserved.
+- **Bridge thin dropouts in scanned PDF text.** Repeated gaps across printed strokes can be repaired in the OCR working raster when the reading corroborates a prose column. A shallow turn is applied when it exposes those gaps and the repaired reading confirms the column. Page geometry is preserved.
 - **Prepare low-resolution grayscale scans for OCR.** Page-sized continuous-tone PNG and TIFF scans with a declared low DPI use a larger working raster while retaining the source resolution and point geometry.
 - **Recover corroborated blue form entries.** Sparse blue words or numbers on a mostly neutral scan can be read separately and added with their own boxes when the original OCR leaves that region uncovered.
 - **Restore Hebrew prose ellipses after OCR.** A three-dot run attached to Hebrew prose can be restored to an ellipsis. The text-layer and `--no-repairs` paths preserve the original reading.

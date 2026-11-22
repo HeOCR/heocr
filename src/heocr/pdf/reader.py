@@ -2271,9 +2271,10 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
     # degree of skew a ruling leaves its pixel row before it is long enough to count (set C's heavily
     # skewed table scans had no table found at all). Every box this page records is turned back.
     # A page with ruled tables is turned from SKEW_MIN_DEG: its cells are read one by one and need
-    # straight rows. Running text and unruled tables are turned only from DESKEW_TEXT_MIN_DEG:
-    # Tesseract copes with a small skew there, and turning the image cost set C's office scans rows.
+    # straight rows. Ordinary OCR turns running text and unruled tables only from
+    # DESKEW_TEXT_MIN_DEG. The dropout repair below can corroborate a smaller turn.
     deskew = skew_angle(image)
+    shallow_turn = None
     first_block, first_unread = len(doc.blocks), len(doc.unread)
     grids = tables_in(image, scale)
     if deskew:
@@ -2288,6 +2289,8 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
             flags = flags + ["deskewed"]
             signals["deskew_degrees"] = deskew
         else:
+            if not grids:
+                shallow_turn = (turned, deskew)
             deskew = 0.0
     # Ruled tables in the image are read cell by cell; the rest of the page once, without them (D3e).
     rectified = rectify_grid(image, scale, tolerate_gaps=camera_jpeg) if not grids else None
@@ -2328,17 +2331,30 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
                     and not (grids or rectified or routes.pending(doc))):
                 from heocr.ocr.scan_gaps import bridge_scan_stroke_gaps, has_prose_column
 
-                bridged_image, bands = bridge_scan_stroke_gaps(page_image)
-                if bands:
+                # Keep a corroborated repair at the current angle. When tilt
+                # hides its dropout bands, a shallow turn can expose them.
+                trials = [(page_image, 0.0)]
+                if shallow_turn is not None:
+                    trials.append(shallow_turn)
+                for trial, angle in trials:
+                    bridged_image, bands = bridge_scan_stroke_gaps(trial)
+                    if not bands:
+                        continue
                     try:
                         candidate = engine.recognize(bridged_image, dpi=dpi)
                     except OcrUnavailable:
-                        pass
-                    else:
-                        if has_prose_column(candidate.lines, page_image.width):
-                            result = candidate
-                            flags = flags + ["ocr_scan_stroke_gaps_bridged"]
-                            signals["ocr_scan_dropout_bands"] = bands
+                        continue
+                    if not has_prose_column(candidate.lines, trial.width):
+                        continue
+                    if angle:
+                        image = page_image = trial
+                        deskew = angle
+                        flags = flags + ["deskewed"]
+                        signals["deskew_degrees"] = angle
+                    result = candidate
+                    flags = flags + ["ocr_scan_stroke_gaps_bridged"]
+                    signals["ocr_scan_dropout_bands"] = bands
+                    break
             if result is None:
                 result = engine.recognize(page_image, dpi=dpi)
         if not probed and routes.pending(doc) and routes.observe(doc, page_image, result, dpi, last_page=last_page):
