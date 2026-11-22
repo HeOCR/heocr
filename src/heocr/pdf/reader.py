@@ -2323,7 +2323,24 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
             result = OcrResult([])
             flags = flags + ["ocr_rest_blank"]
         else:
-            result = probe if probe is not None and page_image is image else engine.recognize(page_image, dpi=dpi)
+            result = probe if probe is not None and page_image is image else None
+            if (page is not None and page_class == "T5" and doc._rtl and dpi == RENDER_DPI and engine.psm == 3
+                    and not (grids or rectified or routes.pending(doc))):
+                from heocr.ocr.scan_gaps import bridge_scan_stroke_gaps, has_prose_column
+
+                bridged_image, bands = bridge_scan_stroke_gaps(page_image)
+                if bands:
+                    try:
+                        candidate = engine.recognize(bridged_image, dpi=dpi)
+                    except OcrUnavailable:
+                        pass
+                    else:
+                        if has_prose_column(candidate.lines, page_image.width):
+                            result = candidate
+                            flags = flags + ["ocr_scan_stroke_gaps_bridged"]
+                            signals["ocr_scan_dropout_bands"] = bands
+            if result is None:
+                result = engine.recognize(page_image, dpi=dpi)
         if not probed and routes.pending(doc) and routes.observe(doc, page_image, result, dpi, last_page=last_page):
             engine = engine_for(doc)
             result = engine.recognize(page_image, dpi=dpi)
