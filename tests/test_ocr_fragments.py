@@ -1,6 +1,7 @@
 """Invented residual line and fragment checks."""
 
 from dataclasses import replace
+from io import BytesIO
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -80,6 +81,47 @@ class ResidualScanLineTest(unittest.TestCase):
     def test_narrow_standalone_numerals_are_excluded(self):
         result, original = self.check_narrow("725 804 916")
         self.assertIs(result, original)
+
+    def test_camera_jpeg_recovers_a_corroborated_narrow_line(self):
+        draw = ImageDraw.Draw(self.gray)
+        paint(draw, 232)
+        paint(draw, 298)
+        for x in range(145, 215, 7):
+            draw.rectangle((x, 268, x + 2, 279), fill=10)
+            draw.rectangle((x, 275, x + 4, 279), fill=10)
+        camera = Image.Exif()
+        camera[272] = "Invented camera"
+        original = OcrResult([self.body, self.other])
+        extra = "טל ירד בשדה"
+        cases = (("JPEG", camera, True, True), ("JPEG", Image.Exif(), True, False),
+                 ("PNG", camera, True, False), ("JPEG", camera, False, False))
+        for fmt, exif, short, expected in cases:
+            with self.subTest(format=fmt, camera=bool(exif), short=short), TemporaryDirectory() as folder:
+                (Path(folder) / "heb.traineddata").write_bytes(b"invented model")
+                body = BytesIO()
+                self.gray.save(body, format=fmt, dpi=(72, 72), exif=exif)
+                crops = []
+
+                def recognize(engine, image, dpi=300, psm=None):
+                    if psm != 7:
+                        return original if psm is None else OcrResult([])
+                    border = 30 if not crops else 20
+                    crops.append(dpi)
+                    return OcrResult([line(extra, (border + 4, border + 1,
+                                                  image.width - border - 4, image.height - border - 1))])
+
+                outside = (short, .60 if short else .31)
+                with (patch.dict(os.environ, {"FAKE_TESSDATA": folder}),
+                      patch.object(Tesseract, "recognize", recognize),
+                      patch("heocr.pdf.reader.short_for_ink", return_value=outside)):
+                    os.environ.pop("TESSDATA_PREFIX", None)
+                    doc = heocr.extract(body.getvalue(), tesseract=FAKE, ocr_model="heb", check_numbers=False)
+                self.assertEqual(crops, [72, 72] if expected else [])
+                self.assertEqual(doc.text.splitlines(),
+                                 [self.body.text, extra, self.other.text] if expected else
+                                 [self.body.text, self.other.text])
+                self.assertEqual(doc.pages[0].coverage.get("ocr_pixel_lines_recovered", 0), int(expected))
+                self.assertEqual(heocr.validate(doc.to_dict()), [])
 
     def test_scanned_pdf_reports_removed_fragments(self):
         draw = ImageDraw.Draw(self.gray)

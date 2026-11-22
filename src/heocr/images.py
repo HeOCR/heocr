@@ -100,4 +100,7 @@ def read_image(body: bytes, doc: Document) -> None:
         if not has_ink(frame):
             doc.pages.append(Page(index, round(width, 2), round(height, 2), "empty", "none", signals, {"chars_total": 0, "chars_read": 0, "status": "nothing_to_read"}, flags))
             continue
-        _ocr_page(doc, index, None, round(width, 2), round(height, 2), "T5", signals, PageText(), flags, rendered=(frame, scale))
+        exif = image.getexif() if image.format == "JPEG" and doc._rtl else {}
+        camera_jpeg = bool(exif.get(271) or exif.get(272))  # Camera Make or Model.
+        _ocr_page(doc, index, None, round(width, 2), round(height, 2), "T5", signals, PageText(), flags,
+                  rendered=(frame, scale), camera_jpeg=camera_jpeg)

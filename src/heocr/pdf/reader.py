@@ -2238,7 +2238,8 @@ def _rest_has_ink(image, scale: float) -> bool:
     return densest * tile * tile / 255 >= MIN_INK_PIXELS
 
 
-def _ocr_page(doc: Document, index: int, page, width, height, page_class, signals, text: PageText, flags, rendered=None) -> None:
+def _ocr_page(doc: Document, index: int, page, width, height, page_class, signals, text: PageText, flags,
+              rendered=None, *, camera_jpeg: bool = False) -> None:
     """Read a page by OCR. ``rendered`` is (image, pixels per point) when the page is already an
     image (an image file, D4b); otherwise the PDF page is rendered."""
     if page_class == "T5" and doc._handwriting is not None:
@@ -2385,6 +2386,16 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
             result = supplemented
             short, outside_share = short_for_ink(gray, result)
             flags = flags + ["ocr_photo_gap_lines_recovered"]
+        if camera_jpeg and short:
+            # Bound the proposal analysis on large camera images. Crop reads still
+            # use the original raster.
+            narrow = recover_narrow_lines(engine, gray, result, scale, outside_share,
+                                          stop=lambda: time_up(doc), preview_size=1150)
+            if narrow is not result:
+                pixel_gap_lines = len(narrow.lines) - len(result.lines)
+                result = narrow
+                short, outside_share = short_for_ink(gray, result)
+                flags = flags + ["ocr_pixel_lines_recovered"]
     form_tables = [t.bbox for t in grids if "table_open_sides_inferred" in t.flags]
     margin_page = image.size if doc._rtl and not unruled and not (grids or rectified) else None
     record_lines = page is not None and page_class == "T5" and margin_page is not None

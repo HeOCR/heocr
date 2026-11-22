@@ -36,9 +36,9 @@ def _foreground(gray, window):
     return ImageChops.subtract(background, gray)
 
 
-def _mask(gray, native, typical):
+def _mask(gray, native, typical, *, preview_size=THUMBNAIL):
     thumb = gray.copy()
-    thumb.thumbnail((THUMBNAIL, THUMBNAIL), Image.Resampling.LANCZOS)
+    thumb.thumbnail((preview_size, preview_size), Image.Resampling.LANCZOS)
     w, h = thumb.size
     sx, sy = w / gray.width, h / gray.height
     glyph = typical * sy

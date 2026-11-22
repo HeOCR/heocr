@@ -17,6 +17,7 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 
 ### Fixed
 
+- **Recover missed narrow prose on partially read camera JPEGs.** Add a line only when two crop reads corroborate it and its box is separate from existing text. Keep the original page reading.
 - **Recover missed text bands on scanned PDFs.** HeOCR proposes line boxes from unread pixels and adds corroborated, non-overlapping reads within an existing text track.
 - **Recover text on shaded bands in partially read scans.** A crop-confirmed line can be added when its background is consistently darker than the paper and it fits an existing text track.
 - **Recover narrow prose and remove spurious overlapping fragments on scanned PDFs.** Two independent crop reads corroborate each change. Narrow lines are placed in their own paragraphs to preserve native reading order.
