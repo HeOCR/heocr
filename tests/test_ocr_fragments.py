@@ -142,3 +142,44 @@ class ResidualScanLineTest(unittest.TestCase):
         self.assertEqual(doc.pages[0].coverage["ocr_contained_fragments_removed"], 1)
         self.assertEqual([self.body.text, self.other.text], doc.text.splitlines())
         self.assertEqual(heocr.validate(doc.to_dict()), [])
+
+    def test_camera_joins_only_a_corroborated_reversed_row(self):
+        draw = ImageDraw.Draw(self.gray)
+        for top in (222, 245, 270):
+            paint(draw, top)
+        above = line("עננים לבנים מעל היער", (160, 220, 520, 240))
+        left = line("בסוף השביל", (160, 244, 275, 262))
+        right = replace(line("נחים ליד האגם", (282, 246, 520, 264)), paragraph=("2", "1"))
+        below = replace(line("ציפורים עפות מעל המים", (160, 268, 520, 288)), paragraph=right.paragraph)
+        native = OcrResult([above, left, right, below])
+        joined = f"{right.text} {left.text}"
+        camera = Image.Exif()
+        camera[272] = "Invented camera"
+        for exif, reread, should_join in ((camera, joined, True), (Image.Exif(), joined, False),
+                                          (camera, left.text, False)):
+            with self.subTest(camera=bool(exif), corroborated=should_join), TemporaryDirectory() as folder:
+                (Path(folder) / "heb.traineddata").write_bytes(b"invented model")
+                body = BytesIO()
+                self.gray.save(body, format="JPEG", dpi=(72, 72), exif=exif)
+                calls = []
+
+                def recognize(engine, image, dpi=300, psm=None):
+                    if psm != 7:
+                        return native
+                    border = 30 if not calls else 20
+                    calls.append(dpi)
+                    return OcrResult([line(reread, (border + 4, border + 4,
+                                                   image.width - border - 4, image.height - border - 4))])
+
+                with (patch.dict(os.environ, {"FAKE_TESSDATA": folder}),
+                      patch.object(Tesseract, "recognize", recognize),
+                      patch("heocr.pdf.reader.short_for_ink", return_value=(False, .01)),
+                      patch("heocr.pdf.reader.recover_photo_lines", return_value=native)):
+                    os.environ.pop("TESSDATA_PREFIX", None)
+                    doc = heocr.extract(body.getvalue(), tesseract=FAKE, ocr_model="heb", check_numbers=False)
+                parsed = [item.text for block in doc.blocks for item in block.lines or []]
+                self.assertEqual(parsed, [above.text, joined, below.text] if should_join else
+                                 [above.text, left.text, right.text, below.text])
+                self.assertEqual(doc.pages[0].coverage.get("ocr_camera_line_fragments_joined", 0), int(should_join))
+                self.assertEqual(bool(calls), bool(exif))
+                self.assertEqual(heocr.validate(doc.to_dict()), [])
