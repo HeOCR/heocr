@@ -95,6 +95,7 @@ def append_checkmarks(doc, index, rgb, scale):
     direction = "rtl" if doc._rtl else "ltr"
     doc.blocks.extend(Block("text", "☑", page=index, bbox=box, source="ocr",
                             tool="heocr", direction=direction, lines=[Line("☑", box, direction)],
+                            ocr={"status": "unverified", "engine": "heocr", "method": "checkbox_geometry"},
                             flags=["ocr_checkbox", "ocr_unverified"])
                       for box in found)
     if found:
