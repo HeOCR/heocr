@@ -60,6 +60,58 @@ class ImageInputTest(unittest.TestCase):
         self.assertIn("dpi_assumed", doc.pages[0].flags)
         self.assertEqual(doc.pages[0].signals["dpi"], 300.0)
 
+    def test_small_low_dpi_scans_keep_their_point_geometry(self) -> None:
+        from PIL import ImageDraw
+
+        from heocr.ocr.tesseract import OcrLine, OcrResult, Tesseract
+
+        image = page_image(size=(600, 800), ink=False)
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((80, 120, 530, 134), fill=50)
+        draw.rectangle((90, 122, 520, 132), fill=12)
+        calls = []
+
+        def recognize(_engine, raster, dpi, psm=None):
+            calls.append((raster.size, dpi))
+            factor = raster.width / image.width
+            return OcrResult([OcrLine("העץ הצעיר", [v * factor for v in (80, 120, 530, 134)], [95])])
+
+        for kind in ("PNG", "TIFF"):
+            with self.subTest(kind=kind), mock.patch.object(Tesseract, "recognize", recognize):
+                body = encoded(image, kind, dpi=(80, 80))
+                calls.clear()
+                doc = heocr.extract(body, tesseract=FAKE, ocr_model="heb", check_numbers=False)
+                self.assertEqual(calls, [((1200, 1600), 160)])
+                (page,) = doc.pages
+                self.assertEqual((page.width, page.height), (540, 720))
+                self.assertIn("image_ocr_upsampled", page.flags)
+                self.assertEqual(page.signals["pixels"], [600, 800])
+                self.assertEqual(page.signals["ocr_pixels"], [1200, 1600])
+                self.assertEqual((page.signals["dpi"], page.signals["render_dpi"]), (80, 160))
+                self.assertEqual([round(v, 1) for v in doc.blocks[0].lines[0].bbox], [72, 108, 477, 120.6])
+                self.assertEqual(heocr.validate(doc.to_dict()), [])
+
+    def test_upsampling_skips_unsupported_images_and_respects_the_pixel_cap(self) -> None:
+        from PIL import ImageDraw
+
+        scan = page_image(size=(600, 800), ink=False)
+        pen = ImageDraw.Draw(scan)
+        pen.rectangle((80, 120, 530, 135), fill=40)
+        pen.rectangle((90, 123, 520, 131), fill=80)
+        cases = [
+            (encoded(scan, "PNG"), 40_000_000),  # no declared DPI
+            (encoded(scan, "PNG", dpi=(150, 150)), 40_000_000),
+            (encoded(scan, "JPEG", dpi=(80, 80)), 40_000_000),
+            (encoded(scan.convert("1"), "PNG", dpi=(80, 80)), 40_000_000),
+            (encoded(scan, "PNG", dpi=(80, 80)), 700_000),
+        ]
+        for i, (body, cap) in enumerate(cases):
+            with self.subTest(case=i), mock.patch("heocr.images.MAX_RENDER_PIXELS", cap):
+                doc = heocr.extract(body, tesseract=FAKE, ocr_model="heb", check_numbers=False)
+                page, = doc.pages
+                self.assertNotIn("image_ocr_upsampled", page.flags)
+                self.assertNotIn("ocr_pixels", page.signals)
+
     def test_every_tiff_frame_is_a_page_and_a_blank_one_is_empty(self) -> None:
         frames = [page_image(), page_image(ink=False), page_image()]
         body = encoded(frames[0], "TIFF", save_all=True, append_images=frames[1:], dpi=(150, 150))

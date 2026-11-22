@@ -17,6 +17,7 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 
 ### Fixed
 
+- **Prepare low-resolution grayscale scans for OCR.** Page-sized continuous-tone PNG and TIFF scans with a declared low DPI use a larger working raster while retaining the source resolution and point geometry.
 - **Restore Hebrew prose ellipses after OCR.** A three-dot run attached to Hebrew prose can be restored to an ellipsis. The text-layer and `--no-repairs` paths preserve the original reading.
 - **Recover ruled tables from camera JPEGs with broken strokes.** If ordinary grid detection fails, corroborate the grid against ink on each cell edge before attempting the existing validated cell reads.
 - **Recover missed narrow prose on partially read camera JPEGs.** Add a line only when two crop reads corroborate it and its box is separate from existing text. Keep the original page reading.
