@@ -2288,7 +2288,7 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
         else:
             deskew = 0.0
     # Ruled tables in the image are read cell by cell; the rest of the page once, without them (D3e).
-    rectified = rectify_grid(image, scale) if not grids else None
+    rectified = rectify_grid(image, scale, tolerate_gaps=camera_jpeg) if not grids else None
     rectified_read = None
     page_failed = False
     last_page = index + 1 >= min(doc.page_count or index + 1, doc._max_pages)

@@ -17,6 +17,7 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 
 ### Fixed
 
+- **Recover ruled tables from camera JPEGs with broken strokes.** If ordinary grid detection fails, corroborate the grid against ink on each cell edge before attempting the existing validated cell reads.
 - **Recover missed narrow prose on partially read camera JPEGs.** Add a line only when two crop reads corroborate it and its box is separate from existing text. Keep the original page reading.
 - **Recover missed text bands on scanned PDFs.** HeOCR proposes line boxes from unread pixels and adds corroborated, non-overlapping reads within an existing text track.
 - **Recover text on shaded bands in partially read scans.** A crop-confirmed line can be added when its background is consistently darker than the paper and it fits an existing text track.

@@ -431,6 +431,48 @@ class OcrTableTest(unittest.TestCase):
             self.assertAlmostEqual(value, expected, delta=4)
         self.assertEqual(heocr.validate(doc.to_dict()), [])
 
+    def test_camera_grid_recovers_rules_with_small_breaks(self) -> None:
+        from PIL import Image, ImageDraw
+
+        image = scan(LEVELS, line_width=8)
+        draw = ImageDraw.Draw(image)
+        for y in YS[1:-1]:
+            for x in range(px(XS[0]) + 30, px(XS[-1]) - 20, 40):
+                if all(abs(x - px(edge)) > 10 for edge in XS):
+                    draw.rectangle((x, px(y) - 5, x + 4, px(y) + 5), fill=255)
+        image = capture_obliquely(image)
+        tags = Image.Exif()
+        tags[272] = "Invented camera"
+
+        def encode(exif):
+            body = io.BytesIO()
+            image.save(body, format="JPEG", dpi=(DPI, DPI), exif=exif, quality=97)
+            return body.getvalue()
+
+        ordinary = heocr.extract(encode(Image.Exif()), tesseract=FAKE, check_numbers=False)
+        self.assertFalse(any(block.kind == "table" for block in ordinary.blocks))
+        camera = heocr.extract(encode(tags), tesseract=FAKE, check_numbers=False)
+        self.assertIn("ocr_grid_rectified", camera.pages[0].flags)
+        (table,) = [block for block in camera.blocks if block.kind == "table"]
+        self.assertEqual([[c.text for c in row] for row in table.cells],
+                         [["שם", "תפקיד", "סכום"], ["ספק א", "מנהל", "100"], ["ספק ב", "עובד", "200"]])
+        self.assertEqual(heocr.validate(camera.to_dict()), [])
+
+    def test_swept_rulings_reject_a_missing_cell_edge(self) -> None:
+        from PIL import Image, ImageDraw
+        from heocr.pdf.perspective import _swept_rulings
+
+        image = Image.new("L", (420, 190), 255)
+        draw = ImageDraw.Draw(image)
+        for x in (8, 108, 208, 308, 408):
+            draw.line((x, 8, x, 178), fill=0, width=3)
+        for y in (8, 65, 120, 178):
+            draw.line((8, y, 408, y), fill=0, width=3)
+        h, v = _swept_rulings(image, 1)
+        self.assertEqual((len(h), len(v)), (4, 5))
+        draw.rectangle((113, 61, 203, 69), fill=255)
+        self.assertEqual(_swept_rulings(image, 1), ([], []))
+
     def test_an_unread_rectified_row_leaves_the_page_unmasked(self) -> None:
         image = capture_obliquely(scan([LEVELS[0], [137, 137, 137], LEVELS[2]], line_width=8))
         with mock.patch("heocr.pdf.reader._without", side_effect=AssertionError("unvalidated grid masked the page")):
