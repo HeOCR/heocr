@@ -60,6 +60,29 @@ class ImageInputTest(unittest.TestCase):
         self.assertIn("dpi_assumed", doc.pages[0].flags)
         self.assertEqual(doc.pages[0].signals["dpi"], 300.0)
 
+    def test_a_blue_tick_needs_a_frame_and_companion_empty_boxes(self) -> None:
+        from PIL import Image, ImageDraw
+
+        for companions in (True, False):
+            with self.subTest(companions=companions):
+                image = Image.new("RGB", (1650, 2100), "white")
+                draw = ImageDraw.Draw(image)
+                starts = (200, 290, 380, 470) if companions else (200,)
+                for x in starts:
+                    draw.rectangle((x, 200, x + 35, 235), outline="black", width=2)
+                draw.line([(207, 219), (215, 227), (228, 208)], fill=(15, 48, 118), width=3)
+                draw.line([(480, 216), (490, 226), (505, 209)], fill="black", width=3)
+                draw.rectangle((600, 300, 700, 320), fill="black")
+                body = encoded(image, "PNG", dpi=(300, 300))
+                doc = heocr.extract(body, tesseract=FAKE, ocr_model="heb", check_numbers=False)
+                checked = [block for block in doc.blocks if "ocr_checkbox" in block.flags]
+                self.assertEqual(len(checked), int(companions))
+                if checked:
+                    self.assertEqual(checked[0].text, "☑")
+                    self.assertEqual([round(v, 2) for v in checked[0].bbox], [48, 48, 56.64, 56.64])
+                    self.assertEqual(checked[0].lines[0].bbox, checked[0].bbox)
+                self.assertEqual(heocr.validate(doc.to_dict()), [])
+
     def test_small_low_dpi_scans_keep_their_point_geometry(self) -> None:
         from PIL import ImageDraw
 
