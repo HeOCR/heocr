@@ -13,6 +13,7 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 
 ### Added
 
+- An optional local CPU CRNN model can read printed Hebrew lines on OCR pages using Tesseract’s line boxes.
 - `heocr regress` runs the frozen local engineering checks for a release candidate and writes a private report.
 
 ### Fixed

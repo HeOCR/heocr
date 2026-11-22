@@ -52,6 +52,8 @@ def extract(
     tesseract: str | Sequence[str] | None = None,
     ocr_model: str | None = DEFAULT_MODEL,
     force_ocr: bool = False,
+    crnn_model: str | os.PathLike[str] | None = None,
+    crnn_sha256: str | None = None,
     handwriting: HandwritingConfig | None = None,
     check_numbers: str | bool = "suspect",
     convert: bool = True,
@@ -83,6 +85,9 @@ def extract(
     Without Tesseract, or with ``ocr=False``, those pages are recorded as unread.
     ``force_ocr`` reads every PDF page by OCR, its text layer ignored (flag ``ocr_forced``): a workaround
     for a text layer heocr reads badly. It needs ``ocr``.
+    ``crnn_model`` and ``crnn_sha256`` opt OCR page prose into a local CPU ONNX line reader.
+    Tesseract supplies the ordered boxes and reads tables, form entries and image regions.
+    This option needs Hebrew OCR and the ``crnn`` extra.
     ``handwriting`` opts image-only pages into the experimental Kraken route. Provide a local,
     SHA-256-pinned recognition model. Auto mode requires a segmenter with handwriting line tags.
     Use force mode for input known to be handwritten. Tesseract remains the fallback.
@@ -140,6 +145,10 @@ def extract(
         raise ValueError("force_ocr needs OCR: it cannot be combined with ocr=False (--no-ocr)")
     if handwriting is not None and (not ocr or not isinstance(handwriting, HandwritingConfig)):
         raise ValueError("handwriting needs OCR and a HandwritingConfig")
+    if (crnn_model is None) != (crnn_sha256 is None):
+        raise ValueError("supply both crnn_model and crnn_sha256")
+    if crnn_model is not None and (not ocr or ocr_lang != DEFAULT_LANG):
+        raise ValueError("CRNN needs Hebrew OCR (ocr_lang='heb')")
     kind = identify(body)
     doc = Document(
         sha256=hashlib.sha256(body).hexdigest(),
@@ -156,6 +165,11 @@ def extract(
     )
     if force_ocr:
         doc.options["force_ocr"] = True
+    if crnn_model is not None:
+        from heocr.ocr.crnn import CrnnReader
+
+        doc._crnn = CrnnReader(crnn_model, crnn_sha256)
+        doc.options["crnn"] = {"engine": "crnn", "model_sha256": doc._crnn.sha256}
     if handwriting is not None:
         doc._handwriting = HandwritingReader(handwriting)
         doc.options["handwriting"] = handwriting.provenance()

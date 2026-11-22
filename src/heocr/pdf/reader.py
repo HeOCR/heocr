@@ -2469,6 +2469,10 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
         flags = flags + ["ocr_tables"]
         if any("table_cells_ink_unread" in t.flags for t in t_blocks):
             flags = flags + ["table_cells_ink_unread"]
+    if doc._crnn is not None:
+        from heocr.ocr.crnn import read_page_lines
+
+        read += read_page_lines(doc, doc.blocks[first:], page_image, scale)
     entries = []
     if form_image is not None and not page_failed and not time_up(doc):
         from heocr.pdf.formtext import recover_colored_form_entries
@@ -2482,7 +2486,7 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
         flags = flags + ["text_layer_ignored"]
     elif page_class == "T3":
         flags = flags + ["text_layer_ignored_broken_mapping"]
-    found = bool(result.lines) or read > 0  # text read in table cells counts (D3e)
+    found = read > 0 or (doc._crnn is None and bool(result.lines))  # text read in table cells counts (D3e)
     if not found:
         doc.unread.append(Unread(scope="page", reason="ocr_found_no_text", page=index, detail=f"class {page_class}"))
     if short and found:
