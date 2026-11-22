@@ -66,6 +66,12 @@ def bullet_docx() -> bytes:
 
 
 class RuleListTest(unittest.TestCase):
+    def test_hebrew_ellipsis_leaves_other_dot_patterns_as_read(self) -> None:
+        raw = "בבית... שוב\r\nהשער נפתח...\nList... options\nפריט ....... 22\nקוד 20...23\nדגם... 45\nשדה.... מילוי"
+        expected = raw.replace("בבית...", "בבית…").replace("נפתח...", "נפתח…")
+        self.assertEqual(repairs.ocr_hebrew_ellipsis(raw), (expected, {("...", "…"): 2}))
+        self.assertEqual(repairs.ocr_hebrew_ellipsis(expected), (expected, {}))
+
     def test_every_rule_is_documented_and_its_example_holds(self) -> None:
         self.assertIn("symbol_font_bullet", repairs.RULES)
         for rule in repairs.RULES.values():
@@ -97,6 +103,14 @@ class RuleListTest(unittest.TestCase):
 
 
 class SwitchTest(unittest.TestCase):
+    def test_kept_pdf_text_preserves_three_literal_periods(self) -> None:
+        raw = "בשביל... ליד העץ"
+        body = make_pdf([PdfPage(lines=lines_block([raw]))])
+        doc = heocr.extract(body, ocr=False)
+        self.assertEqual(doc.pages[0].route, "text_layer")
+        self.assertEqual(pdf_lines(doc), [raw])
+        self.assertEqual(doc.blocks[0].repairs, [])
+
     def test_hebrew_comma_spacing_in_kept_pdf_lines(self) -> None:
         raw = "ננעל השער , ונותר הפעמון"
         body = make_pdf([PdfPage(lines=lines_block([raw]))])

@@ -115,6 +115,17 @@ OCR_DATE_BRACKET_ORDER = Rule(
     ),
 )
 
+OCR_HEBREW_ELLIPSIS = Rule(
+    rule_id="ocr_hebrew_ellipsis",
+    reason="OCR transcribes the ellipsis glyph as three full stops.",
+    example=("הפעמון צלצל... הדלת נפתחה", "הפעמון צלצל… הדלת נפתחה"),
+    formats=("ocr",),
+    evidence=(
+        "exactly three full stops attached to a Hebrew letter at the end of a physical line or before "
+        "a space and another Hebrew letter; isolated dot leaders, numbers and Latin runs keep their reading"
+    ),
+)
+
 
 FONT_PRIVATE_USE_BY_OCR = Rule(
     rule_id="font_private_use_by_ocr",
@@ -183,7 +194,7 @@ def cp1255_letter(code: int) -> str | None:
 RULES: dict[str, Rule] = {
     rule.rule_id: rule
     for rule in (SYMBOL_FONT_BULLET, DIRECTION_MARKS, LATIN1_ETH_NUN, RTL_BRACKET_ORDER, LATIN_WRAP_BRACKETS,
-                 HEBREW_COMMA_SPACING, OCR_DATE_BRACKET_ORDER, FONT_PRIVATE_USE_BY_OCR,
+                 HEBREW_COMMA_SPACING, OCR_DATE_BRACKET_ORDER, OCR_HEBREW_ELLIPSIS, FONT_PRIVATE_USE_BY_OCR,
                  REVERSED_DIGIT_GROUPS, CP1255_SHIFTED_FONT)
 }
 
@@ -292,6 +303,36 @@ def repair_ocr_date_brackets(doc: Document) -> None:
                 line.text = updated
             block.text = text
             block.repairs += record(OCR_DATE_BRACKET_ORDER, changes)
+
+
+_HEBREW_ELLIPSIS = re.compile(r"(?<=[א-ת])\.\.\.(?=[ \t]+[א-ת]|[ \t]*$)")
+
+
+def ocr_hebrew_ellipsis(text: str) -> tuple[str, Counter]:
+    if "..." not in text:
+        return text, Counter()
+    lines = []
+    count = 0
+    for line in text.splitlines(keepends=True):
+        content = line.rstrip(_LINE_ENDS)
+        updated, replaced = _HEBREW_ELLIPSIS.subn("…", content)
+        lines.append(updated + line[len(content):])
+        count += replaced
+    return "".join(lines), Counter({("...", "…"): count}) if count else Counter()
+
+
+def repair_ocr_ellipses(doc: Document) -> None:
+    for block in doc.blocks:
+        if block.source != "ocr":
+            continue
+        block.text, changes = ocr_hebrew_ellipsis(block.text)
+        for line in block.lines or []:
+            line.text, _ = ocr_hebrew_ellipsis(line.text)
+        for row in block.cells or []:
+            for cell in row:
+                cell.text, edits = ocr_hebrew_ellipsis(cell.text)
+                changes.update(edits)
+        block.repairs += record(OCR_HEBREW_ELLIPSIS, changes)
 
 
 def symbol_font_bullet(text: str) -> tuple[str, Counter]:
