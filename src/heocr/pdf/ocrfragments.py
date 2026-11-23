@@ -214,7 +214,39 @@ def _narrow_slot(box, lines, typical):
     return closest + int(_mid_y(lines[closest].bbox) <= middle)
 
 
-def recover_narrow_lines(engine, gray, result, scale, outside_share, stop=lambda: False, *, preview_size=THUMBNAIL):
+def _paragraph_tail_box(gray, box, lines, index, height):
+    """Extend a proposal to the right edge of the surrounding Hebrew column."""
+    if not 2 <= index < len(lines):
+        return None
+    earlier, upper, lower = lines[index - 2:index + 1]
+    if earlier.paragraph != upper.paragraph or upper.paragraph == lower.paragraph:
+        return None
+    prev, above, below = earlier.bbox, upper.bbox, lower.bbox
+    if any(line[2] - line[0] < 0.35 * gray.width for line in (prev, above, below)):
+        return None
+    if max(abs(above[0] - below[0]), abs(above[2] - below[2]), abs(prev[2] - above[2])) > height:
+        return None
+    left, top, right, bottom = box
+    upper_gap, lower_gap = top - above[3], below[1] - bottom
+    if not 0 <= upper_gap <= height or not upper_gap + .30 * height <= lower_gap <= 2 * height:
+        return None
+    edge = max(above[2], below[2])
+    if not .55 * height <= edge - right <= 2.5 * height:
+        return None
+    extended = (max(0, left - round(.50 * height)), top,
+                min(gray.width, ceil(edge) + round(.20 * height)), bottom)
+    if any(_intersects(extended, line.bbox) for line in lines):
+        return None
+    extra = gray.crop((right, top, extended[2], bottom))
+    threshold = paper_level(extra) - 30
+    ink = extra.point(lambda value: 255 if value < threshold else 0).getbbox()
+    if ink is None or min(ink[2] - ink[0], ink[3] - ink[1]) < .35 * height:
+        return None
+    return extended
+
+
+def recover_narrow_lines(engine, gray, result, scale, outside_share, stop=lambda: False, *,
+                         preview_size=THUMBNAIL, extend_paragraph_tails=False):
     """Recover isolated narrow prose after two confident, agreeing crop reads."""
     lines = result.lines
     if engine.psm != 3 or outside_share < NARROW_MIN_UNCOVERED_INK or len(lines) < 2 or stop():
@@ -242,6 +274,10 @@ def recover_narrow_lines(engine, gray, result, scale, outside_share, stop=lambda
         if stop():
             break
         line = _confirmed(engine, gray, box, round(scale * 72), typical, stop)
+        if line is None and extend_paragraph_tails and not stop():
+            extended = _paragraph_tail_box(gray, box, lines, index, typical)
+            if extended is not None:
+                line = _confirmed(engine, gray, extended, round(scale * 72), typical, stop)
         if (line and len(line.words) >= 3 and len(_HEBREW.findall(line.text)) >= 6
                 and not any(ch.isdecimal() for ch in line.text)
                 and not any(_intersects(line.bbox, other.bbox) for _, other in additions)):

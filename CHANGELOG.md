@@ -43,6 +43,8 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
   - A number Tesseract split over two blocks, and the number model read again whole, could come out twice; in such a table the repeat is dropped, and the block records it (`ocr.duplicate_lines_dropped`).
   - Its effect is not measured on a held-out set yet.
 
+- **Recover clipped Hebrew paragraph tails in camera photos.** A second crop can reach the aligned column edge when a narrow proposal misses visible ink there. The existing two-read validation still applies.
+
 ### Record
 
 - On OCR pages: the block flag `unruled_table`, the page flag `unruled_tables` and the key `ocr.duplicate_lines_dropped` (additive, within v1).

@@ -2410,7 +2410,7 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
             # Bound the proposal analysis on large camera images. Crop reads still
             # use the original raster.
             narrow = recover_narrow_lines(engine, gray, result, scale, outside_share,
-                                          stop=lambda: time_up(doc), preview_size=1150)
+                                          stop=lambda: time_up(doc), preview_size=1150, extend_paragraph_tails=True)
             if narrow is not result:
                 pixel_gap_lines = len(narrow.lines) - len(result.lines)
                 result = narrow

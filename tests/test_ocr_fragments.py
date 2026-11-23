@@ -12,7 +12,7 @@ from PIL import Image, ImageDraw
 
 import heocr
 from heocr.ocr.tesseract import OcrResult, Tesseract
-from heocr.pdf.ocrfragments import recover_narrow_lines, suppress_contained_fragments
+from heocr.pdf.ocrfragments import _paragraph_tail_box, recover_narrow_lines, suppress_contained_fragments
 from tests.synth.pdf import PdfPage, make_pdf
 from tests.test_ocr import FAKE
 from tests.test_ocr_pixel import line, paint
@@ -81,6 +81,34 @@ class ResidualScanLineTest(unittest.TestCase):
     def test_narrow_standalone_numerals_are_excluded(self):
         result, original = self.check_narrow("725 804 916")
         self.assertIs(result, original)
+
+    def test_retry_includes_missing_ink_at_aligned_paragraph_edge(self):
+        gray = Image.new("L", (1000, 1000), 255)
+        ImageDraw.Draw(gray).rectangle((788, 346, 799, 360), fill=20)
+        earlier = line("הרוח הקלה חלפה", (100, 275, 801, 295))
+        upper = line("הענפים נעו בשקט", (100, 310, 800, 330))
+        lower = replace(line("הציפורים חזרו לקן", (102, 390, 799, 410)), paragraph=("2", "1"))
+        native = OcrResult([earlier, upper, lower])
+        recovered = line("השמש עלתה שוב", (682, 345, 800, 363))
+        with patch("heocr.pdf.ocrfragments._bands", return_value=[(690, 345, 765, 362)]), \
+                patch("heocr.pdf.ocrfragments._confirmed", side_effect=[None, recovered]) as confirm:
+            result = recover_narrow_lines(self.engine, gray, native, 1, .3, extend_paragraph_tails=True)
+        first_crop, extended = [call.args[2] for call in confirm.call_args_list]
+        self.assertLess(extended[0], first_crop[0])
+        self.assertGreaterEqual(extended[2], 800)
+        self.assertEqual([item.text for item in result.lines],
+                         [earlier.text, upper.text, recovered.text, lower.text])
+
+    def test_tail_requires_ink_and_a_paragraph_boundary(self):
+        gray = Image.new("L", (1000, 1000), 255)
+        earlier = line("השעון בחדר תקתק", (100, 275, 801, 295))
+        upper = line("הדלת נשארה פתוחה", (100, 310, 800, 330))
+        lower = line("הרחוב היה שקט", (102, 390, 799, 410))
+        box = (687, 342, 768, 365)
+        with_boundary = replace(lower, paragraph=("2", "1"))
+        self.assertIsNone(_paragraph_tail_box(gray, box, [earlier, upper, with_boundary], 2, 20))
+        ImageDraw.Draw(gray).rectangle((788, 346, 799, 360), fill=20)
+        self.assertIsNone(_paragraph_tail_box(gray, box, [earlier, upper, lower], 2, 20))
 
     def test_camera_jpeg_recovers_a_corroborated_narrow_line(self):
         draw = ImageDraw.Draw(self.gray)
