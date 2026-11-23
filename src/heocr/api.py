@@ -52,6 +52,7 @@ def extract(
     tesseract: str | Sequence[str] | None = None,
     ocr_model: str | None = DEFAULT_MODEL,
     ocr_capture_type: str | None = None,
+    ocr_line_v6: str | os.PathLike[str] | None = None,
     force_ocr: bool = False,
     crnn_model: str | os.PathLike[str] | None = None,
     crnn_sha256: str | None = None,
@@ -89,6 +90,9 @@ def extract(
     This route needs Hebrew Tesseract OCR and reports unread OCR when its model is unavailable.
     ``force_ocr`` reads every PDF page by OCR, its text layer ignored (flag ``ocr_forced``): a workaround
     for a text layer heocr reads badly. It needs ``ocr``.
+    ``ocr_line_v6`` opts Rivok Full page prose into a two-model reread of the existing lines.
+    It takes the local pinned v6 ``.traineddata`` file and requires Rivok Full as the page model.
+
     ``crnn_model`` and ``crnn_sha256`` opt OCR page prose into a local CPU ONNX line reader.
     Tesseract supplies the ordered boxes and reads tables, form entries and image regions.
     This option needs Hebrew OCR and the ``crnn`` extra.
@@ -138,6 +142,14 @@ def extract(
         if not ocr or ocr_lang != DEFAULT_LANG or ocr_model != DEFAULT_MODEL or crnn_model is not None or handwriting is not None:
             raise ValueError("ocr_capture_type needs Hebrew Tesseract OCR with the default model option")
         ocr_model = capture_model_for(ocr_capture_type)
+    if ocr_line_v6 is not None:
+        from heocr.ocr.routes import RIVOK_FULL
+
+        if (not ocr or ocr_lang != DEFAULT_LANG or ocr_model != RIVOK_FULL
+                or crnn_model is not None or handwriting is not None):
+            raise ValueError("ocr_line_v6 needs Rivok Full page OCR without CRNN or handwriting")
+        if Path(ocr_line_v6).suffix != ".traineddata":
+            raise ValueError("ocr_line_v6 needs a local .traineddata file")
     if ocr_model in STOCK_MODELS or (ocr_model in ("auto", DEFAULT_MODEL) and ocr_lang != DEFAULT_LANG):
         ocr_model = None  # stock Tesseract: asked for, or a Hebrew model with a language list it would replace
     if isinstance(source, (bytes, bytearray, memoryview)):
@@ -192,6 +204,11 @@ def extract(
     if ocr_capture_type is not None:
         doc.options["ocr"]["capture_type"] = ocr_capture_type
         doc._ocr_settings["capture_type"] = ocr_capture_type
+    if ocr_line_v6 is not None:
+        from heocr.ocr.line_models import V6_SHA256
+
+        doc._ocr_settings["line_v6"] = ocr_line_v6
+        doc.options["ocr"]["line_v6_sha256"] = V6_SHA256
     if kind.format in CONVERSIONS:
         doc.options["convert"] = {"engine": "libreoffice", "to": CONVERSIONS[kind.format][1]} if convert else False
         doc._convert_settings = {"cmd": soffice, "timeout": convert_timeout or CONVERT_TIMEOUT} if convert else None

@@ -37,6 +37,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--no-ocr", action="store_true", help="do not run OCR; pages that need it are reported unread")
     parser.add_argument("--force-ocr", action="store_true", help="read every PDF page by OCR, ignoring its text layer (a workaround for a text layer heocr reads badly)")
+    parser.add_argument("--ocr-line-v6", metavar="MODEL", help="reread Rivok Full prose lines with the pinned local v6 model")
     parser.add_argument("--crnn-model", metavar="MODEL", help="read OCR page prose with a local CPU ONNX line model")
     parser.add_argument("--crnn-sha256", metavar="HEX", help="expected SHA-256 of the ONNX model")
     parser.add_argument("--handwriting", metavar="MODEL", help="opt into Kraken on scan pages with a local .safetensors recognizer")
@@ -121,6 +122,7 @@ def main(argv: list[str] | None = None) -> int:
             tesseract=args.tesseract,
             ocr_model=args.ocr_model,
             ocr_capture_type=args.ocr_capture_type,
+            ocr_line_v6=args.ocr_line_v6,
             force_ocr=args.force_ocr,
             crnn_model=args.crnn_model,
             crnn_sha256=args.crnn_sha256,
