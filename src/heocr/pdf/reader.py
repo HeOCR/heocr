@@ -2624,18 +2624,34 @@ def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids, n
                     # Ink too light for the ink test: read with its contrast stretched, and flagged so.
                     crop, faint = faint_cell_image(crop), True
                 inked += 1
+                native_crop = crop if text_scale is not None and text_scale < 1 else None
                 if text_scale is not None:
                     crop = isolated_cell_text(crop, text_scale)
                 psm = cell_psm(crop)
-                psms[psm] += 1
                 result = None
                 try:
                     result = engine.recognize(crop, dpi=dpi, psm=psm)
                     text = "\n".join(line.text for line in result.lines if line.text.strip())
-                    lines_all.extend(result.lines)
                     cell_flags = []
                 except OcrUnavailable:
                     text, cell_flags = "", ["ocr_failed"]
+                if result is not None and not text and native_crop is not None and not time_up(doc):
+                    # Reducing a rectified crop can erase weak strokes in an otherwise readable cell.
+                    native_crop = isolated_cell_text(native_crop, 1)
+                    native_psm = cell_psm(native_crop)
+                    try:
+                        native = engine.recognize(native_crop, dpi=dpi, psm=native_psm)
+                    except OcrUnavailable:
+                        pass
+                    else:
+                        native_text = "\n".join(line.text for line in native.lines if line.text.strip())
+                        if ((native.mean_confidence or 0) >= REGION_MIN_CONFIDENCE
+                                and any(ch.isalnum() for ch in native_text)):
+                            crop, psm, result, text = native_crop, native_psm, native, native_text
+                            cell_flags.append("ocr_cell_native_scale_retry")
+                psms[psm] += 1
+                if result is not None:
+                    lines_all.extend(result.lines)
                 if faint:
                     cell_flags.append("faint_ink_read")
                 if not text.strip():
