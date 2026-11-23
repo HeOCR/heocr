@@ -40,6 +40,13 @@ class CliTest(unittest.TestCase):
         self.assertIn("page_limit_reached", payload["flags"])
         self.assertIn("unread: page_limit", err.getvalue())
 
+    def test_declared_capture_reaches_extract(self) -> None:
+        out = Path(self.tmp.name) / "out.json"
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(main([str(self.input), "--ocr-capture-type", "issuer-render", "-o", str(out)]), 0)
+        ocr = json.loads(out.read_text(encoding="utf-8"))["options"]["ocr"]
+        self.assertEqual((ocr["capture_type"], ocr["model"]), ("issuer-render", "heb_rivok"))
+
     def test_quiet_text_to_stdout(self) -> None:
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):

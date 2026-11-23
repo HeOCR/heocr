@@ -141,7 +141,7 @@ class Tesseract:
     models: dict[str, str]  # language -> sha256 of its traineddata
     timeout: float = TIMEOUT
     released: object = None  # the heocr.models.ReleasedModel in use, if any
-    route: dict | None = None  # ocr_model="auto": how this engine was chosen (heocr.ocr.routes)
+    route: dict | None = None  # how a routed model was chosen (heocr.ocr.routes)
     failures: int = 0  # recognize() calls that failed or timed out (heocr.ocr.call_failures)
 
     @classmethod
@@ -157,7 +157,7 @@ class Tesseract:
     ) -> "Tesseract":
         """Find Tesseract, and the models for ``lang``.
 
-        With ``model`` (a released HeOCR model's name, or a ``.traineddata`` path), that model
+        With ``model`` (a registered model name, or a ``.traineddata`` path), that model
         replaces ``lang``. It runs from a private tessdata folder holding the model and a copy of
         the installation's ``configs`` folder, which Tesseract needs for TSV output once
         ``--tessdata-dir`` points elsewhere (the R8b card's note).
@@ -197,6 +197,8 @@ class Tesseract:
             if not model.is_file():
                 raise OcrUnavailable(f"no {language}.traineddata installed for tesseract")
             models[language] = _sha256(model)
+        if released is not None and models.get(lang) != released.sha256:
+            raise OcrUnavailable(f"{lang}.traineddata changed while staging the pinned model")
         executable = shutil.which(argv[0]) or argv[0]
         executable_sha256 = _sha256(Path(executable)) if Path(executable).is_file() else "unknown"
         return cls(argv, folder, lang, psm, version, executable_sha256, models, timeout, released)
@@ -213,7 +215,8 @@ class Tesseract:
         for language, sha in self.models.items():
             out[f"tesseract:{language}.traineddata"] = f"sha256:{sha}"
         if self.released is not None:
-            out[f"tesseract:{self.released.name}.doi"] = self.released.doi
+            if self.released.doi is not None:
+                out[f"tesseract:{self.released.name}.doi"] = self.released.doi
             out[f"tesseract:{self.released.name}.licence"] = self.released.licence
         return out
 

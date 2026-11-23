@@ -83,6 +83,15 @@ heocr runs these when they are installed. It never bundles them. See NOTICE.
 | Tesseract OCR | Apache-2.0 | OCR (optional) |
 | LibreOffice | MPL-2.0 | DOC, RTF, ODT, ODS, XLS, ODP and PPT conversion (optional) |
 
+## Optional OCR models
+
+The opt-in capture router can use Rivok Labs' Rivok Full v2.0 int8, licensed
+under Apache-2.0 and downloaded explicitly. Its
+[component model card](src/heocr/models_data/MODEL_CARD.heb_rivok.md) records
+the weight pin and upstream attribution. The distribution preserves the
+upstream [LICENSE](src/heocr/models_data/LICENSE.heb_rivok) and
+[NOTICE](src/heocr/models_data/NOTICE.heb_rivok).
+
 ## When to redo this audit
 
 Redo it whenever a dependency is added, or a minimum version raised, and before each release (D5f). A new runtime dependency must also pass the allow-list in `scripts/package_smoke.py`.

@@ -1,4 +1,4 @@
-"""Which OCR model reads which print (D6): the route table for ``ocr_model="auto"``.
+"""OCR model routes for print-domain probing and caller-declared captures.
 
 Each domain names a released model (``heocr.models.MODELS``) or ``None`` for stock Tesseract ``heb``.
 The table comes from evaluation's default-model study. ``auto`` is opt-in: the default reads every
@@ -14,6 +14,23 @@ DEFAULT_DOMAIN = "modern"  # the fallback when the probe cannot tell (D6 note, c
 # From evaluation's default-model study (2026-11-19): the office-print model for modern print, the
 # P-hist pick for old print.
 ROUTES: dict[str, str | None] = {"modern": "heocr_modern_v1", "old": "heocr_oldprint_v1"}
+
+# D2e3 uses a single model per input based on capture metadata supplied by the caller.
+RIVOK_FULL = "heb_rivok"
+CAPTURE_MODELS = {
+    "phone": "heocr_modern_v1",
+    "iphone": "heocr_modern_v1",
+    "pixel": "heocr_modern_v1",
+    "scanner": RIVOK_FULL,
+    "issuer-render": RIVOK_FULL,
+}
+
+
+def capture_model_for(capture_type: str) -> str:
+    """Select a model for an explicitly declared capture."""
+    if not isinstance(capture_type, str) or capture_type not in CAPTURE_MODELS:
+        raise ValueError(f"ocr_capture_type must be one of: {', '.join(CAPTURE_MODELS)}")
+    return CAPTURE_MODELS[capture_type]
 
 
 def model_for(domain: str) -> str | None:
