@@ -10,6 +10,7 @@ from heocr import __version__
 from heocr.api import extract
 from heocr.contract import MAX_PAGES
 from heocr.handwriting import HandwritingConfig
+from heocr.ocr.routes import CAPTURE_MODELS
 
 _FORMATS = ("text", "markdown", "json", "docx")
 _BY_SUFFIX = {".md": "markdown", ".markdown": "markdown", ".json": "json", ".txt": "text", ".docx": "docx"}
@@ -70,6 +71,8 @@ def _parser() -> argparse.ArgumentParser:
         metavar="NAME",
         help=argparse.SUPPRESS,
     )
+    parser.add_argument("--ocr-capture-type", choices=CAPTURE_MODELS,
+                        help="opt into experimental OCR routing for a declared capture")
     parser.add_argument("-q", "--quiet", action="store_true", help="do not report unread parts on stderr (a missing OCR model is still reported)")
     parser.add_argument("--version", action="version", version=f"heocr {__version__}")
     return parser
@@ -117,6 +120,7 @@ def main(argv: list[str] | None = None) -> int:
             ocr_psm=args.psm,
             tesseract=args.tesseract,
             ocr_model=args.ocr_model,
+            ocr_capture_type=args.ocr_capture_type,
             force_ocr=args.force_ocr,
             crnn_model=args.crnn_model,
             crnn_sha256=args.crnn_sha256,

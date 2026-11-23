@@ -12,6 +12,7 @@ from unittest import mock
 import heocr
 from heocr import models
 from heocr.cli import main
+from heocr.ocr import routes
 from tests.synth.pdf import PdfPage, make_pdf
 
 FAKE = [sys.executable, str(Path(__file__).parent / "synth" / "fake_tesseract.py")]
@@ -109,6 +110,51 @@ class ModelRouteTest(unittest.TestCase):
         doc = heocr.extract(SCAN, tesseract=FAKE, ocr_model="auto")
         self.assertEqual(doc.to_dict()["options"]["ocr"]["model"], "auto")
         self.assertEqual(doc.blocks[0].ocr["model_route"]["mode"], "auto")
+
+    def test_capture_route_uses_the_declared_model(self) -> None:
+        self.cache.mkdir()
+        desktop = b"fake Rivok Full"
+        mobile = b"fake modern v1"
+        for name, data in (("heb_rivok", desktop), ("heocr_modern_v1", mobile)):
+            (self.cache / f"{name}.traineddata").write_bytes(data)
+        modern = models.ReleasedModel("heocr_modern_v1", hashlib.sha256(mobile).hexdigest(), len(mobile),
+                                      "https://example.invalid/model", "10.0/test", "Apache-2.0", bundled=True)
+        with mock.patch.dict(models.MODELS, {modern.name: modern}), mock.patch.object(
+            routes, "RIVOK_FULL_SHA256", hashlib.sha256(desktop).hexdigest()
+        ):
+            choices = (("phone", modern.name), ("iphone", modern.name), ("pixel", modern.name),
+                       ("scanner", "heb_rivok"), ("issuer-render", "heb_rivok"))
+            for capture, expected in choices:
+                with self.subTest(capture=capture):
+                    self.log.unlink(missing_ok=True)
+                    doc = heocr.extract(SCAN, tesseract=FAKE, ocr_capture_type=capture, check_numbers=False)
+                    self.assertEqual(doc.unread, [])
+                    call = self.recognition_call()
+                    self.assertEqual(call[call.index("-l") + 1], expected)
+                    self.assertEqual(doc.options["ocr"]["capture_type"], capture)
+                    self.assertEqual(doc.blocks[0].ocr["model_route"], {
+                        "mode": "capture", "capture_type": capture, "model": expected, "reason": "declared_capture",
+                    })
+                    self.assertNotIn(self.tmp.name, doc.to_json())
+
+    def test_capture_route_reports_missing_or_mismatched_models_without_ocr(self) -> None:
+        for capture in ("phone", "scanner"):
+            with self.subTest(capture=capture):
+                doc = heocr.extract(SCAN, tesseract=FAKE, ocr_capture_type=capture)
+                self.assertEqual(doc.unread[0].reason, "ocr_route_unavailable")
+        self.cache.mkdir()
+        (self.cache / "heb_rivok.traineddata").write_bytes(b"different model")
+        doc = heocr.extract(SCAN, tesseract=FAKE, ocr_capture_type="issuer-render")
+        self.assertIn("does not match the pinned capture model", doc.unread[0].detail)
+        calls = [json.loads(line) for line in self.log.read_text(encoding="utf-8").splitlines()]
+        self.assertTrue(all(call[0].startswith("--") for call in calls))
+
+    def test_capture_route_rejects_conflicting_settings(self) -> None:
+        for kwargs in ({"ocr_model": "auto"}, {"ocr_lang": "heb+eng"}, {"ocr": False}):
+            with self.subTest(kwargs=kwargs), self.assertRaisesRegex(ValueError, "needs Hebrew Tesseract"):
+                heocr.extract(SCAN, ocr_capture_type="phone", **kwargs)
+        with self.assertRaisesRegex(ValueError, "must be one of"):
+            heocr.extract(SCAN, ocr_capture_type="unknown")
 
     def test_heb_and_stock_read_with_stock_tesseract(self) -> None:
         for model in ("heb", "stock", None):

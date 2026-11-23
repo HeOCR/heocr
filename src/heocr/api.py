@@ -51,6 +51,7 @@ def extract(
     ocr_psm: int = DEFAULT_PSM,
     tesseract: str | Sequence[str] | None = None,
     ocr_model: str | None = DEFAULT_MODEL,
+    ocr_capture_type: str | None = None,
     force_ocr: bool = False,
     crnn_model: str | os.PathLike[str] | None = None,
     crnn_sha256: str | None = None,
@@ -83,6 +84,9 @@ def extract(
     flagged ``bundled_model_unavailable``. ``ocr_model="heb"`` (or ``"stock"``, or ``None``) reads with stock
     Tesseract ``ocr_lang``. A local ``.traineddata`` path runs that model instead of ``ocr_lang``.
     Without Tesseract, or with ``ocr=False``, those pages are recorded as unread.
+    ``ocr_capture_type`` opts into a single model for a declared capture. ``phone``, ``iphone`` and
+    ``pixel`` use modern_v1; ``scanner`` and ``issuer-render`` use a pinned local Rivok Full model.
+    This route needs Hebrew Tesseract OCR and reports unread OCR when its model is unavailable.
     ``force_ocr`` reads every PDF page by OCR, its text layer ignored (flag ``ocr_forced``): a workaround
     for a text layer heocr reads badly. It needs ``ocr``.
     ``crnn_model`` and ``crnn_sha256`` opt OCR page prose into a local CPU ONNX line reader.
@@ -128,6 +132,12 @@ def extract(
     if ocr:
         check_settings(ocr_lang, ocr_psm)
     ocr_model = MODEL_ALIASES.get(ocr_model, ocr_model) if isinstance(ocr_model, str) else ocr_model
+    if ocr_capture_type is not None:
+        from heocr.ocr.routes import capture_model_for
+
+        if not ocr or ocr_lang != DEFAULT_LANG or ocr_model != DEFAULT_MODEL or crnn_model is not None or handwriting is not None:
+            raise ValueError("ocr_capture_type needs Hebrew Tesseract OCR with the default model option")
+        ocr_model = capture_model_for(ocr_capture_type)
     if ocr_model in STOCK_MODELS or (ocr_model in ("auto", DEFAULT_MODEL) and ocr_lang != DEFAULT_LANG):
         ocr_model = None  # stock Tesseract: asked for, or a Hebrew model with a language list it would replace
     if isinstance(source, (bytes, bytearray, memoryview)):
@@ -179,6 +189,9 @@ def extract(
         doc.options["time_limit"] = time_limit
         doc._time_limit, doc._deadline = float(time_limit), started + time_limit
     doc._ocr_settings = {"cmd": tesseract, "lang": ocr_lang, "psm": ocr_psm, "model": ocr_model} if ocr else None
+    if ocr_capture_type is not None:
+        doc.options["ocr"]["capture_type"] = ocr_capture_type
+        doc._ocr_settings["capture_type"] = ocr_capture_type
     if kind.format in CONVERSIONS:
         doc.options["convert"] = {"engine": "libreoffice", "to": CONVERSIONS[kind.format][1]} if convert else False
         doc._convert_settings = {"cmd": soffice, "timeout": convert_timeout or CONVERT_TIMEOUT} if convert else None

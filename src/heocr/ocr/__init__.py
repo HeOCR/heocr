@@ -24,8 +24,6 @@ def engine_for(doc: "Document") -> Tesseract | None:
     if settings is None:
         return None
     if settings.get("model") == "auto":
-        from heocr.ocr import routes
-
         model, route = routes.current(doc)
         engine = engine_for_model(doc, model)
         if engine is None and model is not None:
@@ -40,17 +38,29 @@ def engine_for(doc: "Document") -> Tesseract | None:
         return engine
     if doc._ocr_engine is None and doc._ocr_error is None:
         model = settings.get("model")
-        if model is not None and _bundled_missing(model):
+        capture = settings.get("capture_type")
+        rivok = capture is not None and model == routes.RIVOK_FULL
+        if rivok:
+            from heocr.models import cache_dir
+
+            model = str(cache_dir() / f"{routes.RIVOK_FULL}.traineddata")
+        if capture is None and model is not None and _bundled_missing(model):
             # A bundled model whose file is not here (an install from the repository): stock Tesseract reads
             # instead, and the document says so. Never silent.
             if "bundled_model_unavailable" not in doc.flags:
                 doc.flags.append("bundled_model_unavailable")
             model = None
         try:
-            doc._ocr_engine = Tesseract.find(
+            engine = Tesseract.find(
                 settings["cmd"], lang=settings["lang"], psm=settings["psm"], model=model
             )
-            doc.components.update(doc._ocr_engine.provenance())
+            if rivok and engine.models.get(routes.RIVOK_FULL) != routes.RIVOK_FULL_SHA256:
+                raise OcrUnavailable("Rivok Full traineddata does not match the pinned capture model")
+            if capture is not None:
+                engine.route = {"mode": "capture", "capture_type": capture, "model": settings["model"],
+                                "reason": "declared_capture"}
+            doc._ocr_engine = engine
+            doc.components.update(engine.provenance())
         except OcrUnavailable as exc:
             doc._ocr_error = str(exc)
     return doc._ocr_engine

@@ -49,6 +49,14 @@ export TESSDATA_PREFIX=~/tessdata
 
 To check, run `tesseract --list-langs`: it should list `eng` and `heb`. heocr records the models it used, each with its sha256, in the record's `producer.components`.
 
+### Declared capture OCR prototype
+
+Use `--ocr-capture-type` or `ocr_capture_type=` when every page or image in the input has the same known capture type. `phone`, `iphone` and `pixel` use `heocr_modern_v1`. `scanner` and `issuer-render` use the pinned Rivok Full v2.0 int8 model. For inputs with unknown or mixed captures, omit the option and use the usual model setting.
+
+For example, use `heocr scan.png --ocr-capture-type scanner`. The prototype selects the main reader and uses the existing Hebrew Tesseract pipeline, including text-layer handling, layout and second readings. For an issuer PDF with a text layer, provide the intended raster or use `--force-ocr` to read the rendered page. Keep the model, language and alternate-backend options at their defaults. The OCR record includes the declared capture and chosen model. OCR reports the route as unavailable if the requested model is missing or differs from its pin.
+
+The Rivok route needs a local `heb_rivok.traineddata` in the HeOCR model cache (`HEOCR_MODELS` when set). The SHA-256 pin is `09ef1830f3393c590791abf9c18deca14450c8e5d3b556249d63b0183cf7a426`. HeOCR uses this as an optional Apache-2.0 model. [Pinned Rivok model card](https://huggingface.co/Rivok/tesseract-heb-rivok/raw/9253cacf097ab396a2fc36d633737c43af5c28a3/README.md)
+
 ### LibreOffice
 
 **macOS:**
