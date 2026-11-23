@@ -115,6 +115,19 @@ OCR_DATE_BRACKET_ORDER = Rule(
     ),
 )
 
+MIRRORED_BRACKET_PAIRS = Rule(
+    rule_id="mirrored_bracket_pairs",
+    reason="OCR and PDF text layers can give the mirrored glyph instead of the logical bracket.",
+    example=("הצוות הגיע )בלי ציוד(", "הצוות הגיע (בלי ציוד)"),
+    formats=("pdf", "ocr"),
+    evidence=(
+        "a closing bracket with no preceding unmatched opener of its type is followed by its opener "
+        "before another bracket of that type, a line break, or . ! ? : ; ,; the swaps reduce the "
+        "number of unmatched brackets of that type, and a preceding PDF repair has not already "
+        "resolved the block's bracket orientation"
+    ),
+)
+
 OCR_HEBREW_ELLIPSIS = Rule(
     rule_id="ocr_hebrew_ellipsis",
     reason="OCR transcribes the ellipsis glyph as three full stops.",
@@ -194,7 +207,8 @@ def cp1255_letter(code: int) -> str | None:
 RULES: dict[str, Rule] = {
     rule.rule_id: rule
     for rule in (SYMBOL_FONT_BULLET, DIRECTION_MARKS, LATIN1_ETH_NUN, RTL_BRACKET_ORDER, LATIN_WRAP_BRACKETS,
-                 HEBREW_COMMA_SPACING, OCR_DATE_BRACKET_ORDER, OCR_HEBREW_ELLIPSIS, FONT_PRIVATE_USE_BY_OCR,
+                 HEBREW_COMMA_SPACING, OCR_DATE_BRACKET_ORDER, MIRRORED_BRACKET_PAIRS,
+                 OCR_HEBREW_ELLIPSIS, FONT_PRIVATE_USE_BY_OCR,
                  REVERSED_DIGIT_GROUPS, CP1255_SHIFTED_FONT)
 }
 
@@ -370,6 +384,83 @@ def latin1_eth_nun(text: str) -> tuple[str, Counter]:
 
 MIRROR = _MIRROR = str.maketrans("()[]{}", ")(][}{")
 _PAIRS = {")": "(", "]": "[", "}": "{"}
+_PAIR_TOKENS = {
+    close: re.compile("[" + re.escape(open_ + close + ".!?:;," + _LINE_ENDS) + "]")
+    for close, open_ in _PAIRS.items()
+}
+
+
+def mirrored_bracket_pairs(text: str) -> tuple[str, Counter]:
+    """Swap evidenced pairs in the input's logical order, without changing other characters."""
+    changes: Counter = Counter()
+    if not any(close in text and open_ in text for close, open_ in _PAIRS.items()):
+        return text, changes
+    output = list(text)
+    for close, open_ in _PAIRS.items():
+        # The raw balance's lowest point counts unmatched closers before any repair.
+        raw_balance = raw_floor = 0
+        depth = unmatched = 0
+        pending = None
+        swaps = []
+        for token in _PAIR_TOKENS[close].finditer(text):
+            ch = token.group()
+            if ch == close:
+                raw_balance -= 1
+                raw_floor = min(raw_floor, raw_balance)
+                pending = None
+                if depth:
+                    depth -= 1
+                else:
+                    unmatched += 1
+                    pending = token.start()
+            elif ch == open_:
+                raw_balance += 1
+                if pending is None:
+                    depth += 1
+                else:
+                    swaps.append((pending, token.start()))
+                    unmatched -= 1
+                    pending = None
+            else:
+                # Break candidate pairs at punctuation and line ends. Keep depth so
+                # an ordinary parenthetical can close on a later part of the block.
+                pending = None
+        # An opener that merely attaches to a later closer is ambiguous if swapping
+        # leaves the same number unmatched. Each swap preserves the character counts.
+        if unmatched < -raw_floor:
+            for left, right in swaps:
+                output[left], output[right] = open_, close
+            changes[(f"U+{ord(close):04X} U+{ord(open_):04X}",
+                     f"U+{ord(open_):04X} U+{ord(close):04X}")] = len(swaps)
+    return ("".join(output) if changes else text), changes
+
+
+def repair_mirrored_brackets(doc: Document) -> None:
+    for block in doc.blocks:
+        if block.source not in ("ocr", "text_layer"):
+            continue
+        # A document-wide decision can orient brackets whose partners are in
+        # another block. Do not infer the opposite from the local fragment.
+        if "brackets_mirrored" in block.flags:
+            continue
+        if not block.lines:
+            block.text, changes = mirrored_bracket_pairs(block.text)
+        elif block.text == "\n".join(line.text for line in block.lines):
+            block.text, changes = mirrored_bracket_pairs(block.text)
+            if changes:
+                start = 0
+                for line in block.lines:
+                    end = start + len(line.text)
+                    line.text = block.text[start:end]
+                    start = end + 1
+        else:
+            # Keep both views as read if their original line boundaries differ.
+            changes = Counter()
+        for row in block.cells or []:
+            for cell in row:
+                cell.text, edited = mirrored_bracket_pairs(cell.text)
+                changes.update(edited)
+        block.repairs += record(MIRRORED_BRACKET_PAIRS, changes)
 
 
 def bracket_order_valid(text: str) -> bool | None:

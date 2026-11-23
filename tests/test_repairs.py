@@ -8,7 +8,7 @@ from pathlib import Path
 import heocr
 from heocr import repairs
 from heocr.cli import main
-from heocr.contract import Block, Document, Line
+from heocr.contract import Block, Cell, Document, Line
 from tests.synth.docx import Docx, abstract_num, lvl, num, para
 from tests.synth.pdf import PdfPage, lines_block, make_pdf
 
@@ -57,6 +57,44 @@ class OcrDateBracketTest(unittest.TestCase):
                 self.assertEqual(block.repairs, [])
 
 
+class MirroredBracketTest(unittest.TestCase):
+    def test_swaps_same_type_pairs_without_moving_letters_spaces_or_digits(self) -> None:
+        raw = "א)גשר  42( [ )[מפה]( ], }ים{\r\n)צד( )שביל("
+        expected = "א(גשר  42) [ ([מפה]) ], {ים}\r\n(צד) (שביל)"
+        fixed, changes = repairs.mirrored_bracket_pairs(raw)
+        self.assertEqual(fixed, expected)
+        self.assertEqual(sum(changes.values()), 5)
+
+    def test_stops_at_punctuation_line_breaks_and_same_type_brackets(self) -> None:
+        for boundary in ".!?:;,\r\n\u2028":
+            with self.subTest(boundary=boundary):
+                raw = f")א{boundary}ב("
+                self.assertEqual(repairs.mirrored_bracket_pairs(raw), (raw, {}))
+        self.assertEqual(repairs.mirrored_bracket_pairs("))עלים((")[0], ")(עלים)(")
+
+    def test_keeps_balanced_pairs_and_ambiguous_continuations(self) -> None:
+        for raw in (
+            "(עלה) לצד (פרח), [עציץ] ליד [צל]",
+            "(מכאן\nעד כאן) ומכאן (עד שם\nלמעלה)",
+            ")המשך (נפתח\nכאן)",
+        ):
+            with self.subTest(raw=raw):
+                self.assertEqual(repairs.mirrored_bracket_pairs(raw), (raw, {}))
+        self.assertEqual(
+            repairs.mirrored_bracket_pairs("(עלה) ליד (פרח) וגם )זר(")[0],
+            "(עלה) ליד (פרח) וגם (זר)",
+        )
+
+    def test_repairs_table_cells_independently(self) -> None:
+        block = Block("table", source="ocr", cells=[[Cell("}25{"), Cell(")קצה"), Cell("המשך(")]])
+        doc = Document("", 0, "pdf", "invented", blocks=[block])
+        repairs.repair_mirrored_brackets(doc)
+        self.assertEqual([cell.text for cell in block.cells[0]], ["{25}", ")קצה", "המשך("])
+        self.assertEqual(block.repairs, [{
+            "rule": "mirrored_bracket_pairs", "from": "U+007D U+007B", "to": "U+007B U+007D", "count": 1,
+        }])
+
+
 def bullet_docx() -> bytes:
     d = Docx()
     d.abstracts = [abstract_num(0, [lvl(0, "bullet", "")])]
@@ -103,6 +141,20 @@ class RuleListTest(unittest.TestCase):
 
 
 class SwitchTest(unittest.TestCase):
+    def test_mirrored_brackets_in_kept_pdf_text_below_document_threshold(self) -> None:
+        raw = "השביל עובר )ליד הגדר("
+        expected = "השביל עובר (ליד הגדר)"
+        body = make_pdf([PdfPage(lines=lines_block([expected]))])
+        off = heocr.extract(body, ocr=False, repairs=False)
+        on = heocr.extract(body, ocr=False)
+        self.assertEqual(on.pages[0].route, "text_layer")
+        self.assertEqual(pdf_lines(off), [raw])
+        self.assertEqual(pdf_lines(on), [expected])
+        self.assertEqual(on.blocks[0].text, on.blocks[0].lines[0].text)
+        self.assertEqual(on.blocks[0].lines[0].bbox, off.blocks[0].lines[0].bbox)
+        self.assertEqual(on.blocks[0].repairs[0]["rule"], "mirrored_bracket_pairs")
+        self.assertEqual(heocr.validate(on.to_dict()), [])
+
     def test_kept_pdf_text_preserves_three_literal_periods(self) -> None:
         raw = "בשביל... ליד העץ"
         body = make_pdf([PdfPage(lines=lines_block([raw]))])

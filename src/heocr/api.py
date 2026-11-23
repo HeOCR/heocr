@@ -191,10 +191,11 @@ def extract(
         return doc
     reader(body, doc)
     if repairs:
-        from heocr.repairs import repair_hebrew_commas, repair_ocr_date_brackets, repair_ocr_ellipses
+        from heocr.repairs import repair_hebrew_commas, repair_mirrored_brackets, repair_ocr_date_brackets, repair_ocr_ellipses
 
         repair_hebrew_commas(doc)
         repair_ocr_date_brackets(doc)
+        repair_mirrored_brackets(doc)
         repair_ocr_ellipses(doc)
     from heocr.ocr import call_failures
 
