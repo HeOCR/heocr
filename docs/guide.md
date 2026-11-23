@@ -55,7 +55,9 @@ Use `--ocr-capture-type` or `ocr_capture_type=` when every page or image in the 
 
 For example, use `heocr scan.png --ocr-capture-type scanner`. The prototype selects the main reader and uses the existing Hebrew Tesseract pipeline, including text-layer handling, layout and second readings. For an issuer PDF with a text layer, provide the intended raster or use `--force-ocr` to read the rendered page. Keep the model, language and alternate-backend options at their defaults. The OCR record includes the declared capture and chosen model. OCR reports the route as unavailable if the requested model is missing or differs from its pin.
 
-The Rivok route needs a local `heb_rivok.traineddata` in the HeOCR model cache (`HEOCR_MODELS` when set). The SHA-256 pin is `09ef1830f3393c590791abf9c18deca14450c8e5d3b556249d63b0183cf7a426`. HeOCR uses this as an optional Apache-2.0 model. [Pinned Rivok model card](https://huggingface.co/Rivok/tesseract-heb-rivok/raw/9253cacf097ab396a2fc36d633737c43af5c28a3/README.md)
+Install the optional Rivok Labs model with `heocr --download-model heb_rivok`. HeOCR checks the download before keeping it in the model cache (`HEOCR_MODELS` when set). OCR reads the local file. The router stays opt-in while carrier-matched DEV validation is pending.
+
+See the [HeOCR component model card](../src/heocr/models_data/MODEL_CARD.heb_rivok.md) for the immutable weight pin and upstream credits. The package includes Rivok's [Apache-2.0 licence](../src/heocr/models_data/LICENSE.heb_rivok) and [NOTICE](../src/heocr/models_data/NOTICE.heb_rivok).
 
 ### LibreOffice
 

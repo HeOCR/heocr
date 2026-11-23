@@ -119,9 +119,9 @@ class ModelRouteTest(unittest.TestCase):
             (self.cache / f"{name}.traineddata").write_bytes(data)
         modern = models.ReleasedModel("heocr_modern_v1", hashlib.sha256(mobile).hexdigest(), len(mobile),
                                       "https://example.invalid/model", "10.0/test", "Apache-2.0", bundled=True)
-        with mock.patch.dict(models.MODELS, {modern.name: modern}), mock.patch.object(
-            routes, "RIVOK_FULL_SHA256", hashlib.sha256(desktop).hexdigest()
-        ):
+        rivok = models.ReleasedModel(routes.RIVOK_FULL, hashlib.sha256(desktop).hexdigest(), len(desktop),
+                                     "https://example.invalid/rivok", None, "Apache-2.0")
+        with mock.patch.dict(models.MODELS, {modern.name: modern, rivok.name: rivok}):
             choices = (("phone", modern.name), ("iphone", modern.name), ("pixel", modern.name),
                        ("scanner", "heb_rivok"), ("issuer-render", "heb_rivok"))
             for capture, expected in choices:
@@ -135,6 +135,9 @@ class ModelRouteTest(unittest.TestCase):
                     self.assertEqual(doc.blocks[0].ocr["model_route"], {
                         "mode": "capture", "capture_type": capture, "model": expected, "reason": "declared_capture",
                     })
+                    if expected == rivok.name:
+                        self.assertEqual(doc.components["tesseract:heb_rivok.licence"], "Apache-2.0")
+                        self.assertNotIn("tesseract:heb_rivok.doi", doc.components)
                     self.assertNotIn(self.tmp.name, doc.to_json())
 
     def test_capture_route_reports_missing_or_mismatched_models_without_ocr(self) -> None:
@@ -145,7 +148,7 @@ class ModelRouteTest(unittest.TestCase):
         self.cache.mkdir()
         (self.cache / "heb_rivok.traineddata").write_bytes(b"different model")
         doc = heocr.extract(SCAN, tesseract=FAKE, ocr_capture_type="issuer-render")
-        self.assertIn("does not match the pinned capture model", doc.unread[0].detail)
+        self.assertIn("sha256 differs", doc.unread[0].detail)
         calls = [json.loads(line) for line in self.log.read_text(encoding="utf-8").splitlines()]
         self.assertTrue(all(call[0].startswith("--") for call in calls))
 
@@ -208,7 +211,11 @@ class DownloadTest(unittest.TestCase):
         r8b = models.MODELS["heocr_r8b"]
         self.assertEqual(r8b.sha256, "8cb22dbeb195c3c0ffbe9c66cf956d8c2052d3b1c4a872234a85c975c4526117")
         self.assertEqual((r8b.size, r8b.licence, r8b.doi), (3_633_477, "Apache-2.0", "10.5281/zenodo.24372346"))
-        self.assertTrue(all(m.url.startswith("https://huggingface.co/HeOCR/") for m in models.MODELS.values()))
+        rivok = models.MODELS[routes.RIVOK_FULL]
+        self.assertEqual(rivok.sha256, "09ef1830f3393c590791abf9c18deca14450c8e5d3b556249d63b0183cf7a426")
+        self.assertEqual((rivok.size, rivok.licence, rivok.bundled), (5_678_607, "Apache-2.0", False))
+        self.assertEqual(rivok.url, "https://huggingface.co/Rivok/tesseract-heb-rivok/resolve/"
+                         "9253cacf097ab396a2fc36d633737c43af5c28a3/tessdata/heb_rivok.traineddata")
 
     def test_cli(self) -> None:
         err = io.StringIO()

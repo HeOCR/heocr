@@ -39,11 +39,6 @@ def engine_for(doc: "Document") -> Tesseract | None:
     if doc._ocr_engine is None and doc._ocr_error is None:
         model = settings.get("model")
         capture = settings.get("capture_type")
-        rivok = capture is not None and model == routes.RIVOK_FULL
-        if rivok:
-            from heocr.models import cache_dir
-
-            model = str(cache_dir() / f"{routes.RIVOK_FULL}.traineddata")
         if capture is None and model is not None and _bundled_missing(model):
             # A bundled model whose file is not here (an install from the repository): stock Tesseract reads
             # instead, and the document says so. Never silent.
@@ -54,8 +49,6 @@ def engine_for(doc: "Document") -> Tesseract | None:
             engine = Tesseract.find(
                 settings["cmd"], lang=settings["lang"], psm=settings["psm"], model=model
             )
-            if rivok and engine.models.get(routes.RIVOK_FULL) != routes.RIVOK_FULL_SHA256:
-                raise OcrUnavailable("Rivok Full traineddata does not match the pinned capture model")
             if capture is not None:
                 engine.route = {"mode": "capture", "capture_type": capture, "model": settings["model"],
                                 "reason": "declared_capture"}

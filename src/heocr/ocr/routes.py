@@ -17,7 +17,6 @@ ROUTES: dict[str, str | None] = {"modern": "heocr_modern_v1", "old": "heocr_oldp
 
 # D2e3 uses a single model per input based on capture metadata supplied by the caller.
 RIVOK_FULL = "heb_rivok"
-RIVOK_FULL_SHA256 = "09ef1830f3393c590791abf9c18deca14450c8e5d3b556249d63b0183cf7a426"
 CAPTURE_MODELS = {
     "phone": "heocr_modern_v1",
     "iphone": "heocr_modern_v1",

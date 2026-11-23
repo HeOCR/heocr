@@ -7,3 +7,7 @@ from earlier distributions, pinned in `heocr/models.py`:
 
 When the requested bundled model is unavailable, heocr falls back to stock
 Tesseract and records `bundled_model_unavailable`.
+
+Rivok Full v2.0 int8 is an optional download from Rivok Labs. See its
+[component model card](MODEL_CARD.heb_rivok.md),
+[licence](LICENSE.heb_rivok) and [notice](NOTICE.heb_rivok).

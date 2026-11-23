@@ -1,7 +1,7 @@
-"""HeOCR's released OCR models: a pinned registry, an explicit download, and resolution.
+"""HeOCR's OCR models: a pinned registry, an explicit download, and resolution.
 
-Each model is a Tesseract ``.traineddata`` that HeOCR released openly (Apache-2.0, decision
-0014), pinned by sha256 to the file on its Zenodo record and its Hugging Face mirror.
+Each model is an openly released Tesseract ``.traineddata`` pinned by SHA-256.
+The registry includes HeOCR's releases and optional upstream components.
 
 - **No implicit download.** The core never downloads anything on its own. A model is a file
   the user supplies by path, or one downloaded on purpose with ``heocr --download-model NAME``
@@ -28,8 +28,8 @@ class ReleasedModel:
     name: str  # the Tesseract language name: the file name without .traineddata
     sha256: str
     size: int
-    url: str  # the Hugging Face mirror's file
-    doi: str  # the Zenodo version DOI
+    url: str  # the published weight file
+    doi: str | None  # the release DOI, when one exists
     licence: str
     domain: str = "unassigned"  # the print it is meant for (heocr.ocr.routes); set from evaluation's default-model study
     bundled: bool = False  # shipped inside the wheel (heocr/models_data/), so it needs no download
@@ -74,6 +74,15 @@ MODELS: dict[str, ReleasedModel] = {
             size=3_628_595,
             url="https://huggingface.co/HeOCR/heocr-r7-tesseract-heb/resolve/main/heocr_r7.traineddata",
             doi="10.5281/zenodo.24372343",
+            licence="Apache-2.0",
+        ),
+        ReleasedModel(
+            name="heb_rivok",
+            sha256="09ef1830f3393c590791abf9c18deca14450c8e5d3b556249d63b0183cf7a426",
+            size=5_678_607,
+            url=("https://huggingface.co/Rivok/tesseract-heb-rivok/resolve/"
+                 "9253cacf097ab396a2fc36d633737c43af5c28a3/tessdata/heb_rivok.traineddata"),
+            doi=None,
             licence="Apache-2.0",
         ),
     )
