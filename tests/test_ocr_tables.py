@@ -482,7 +482,7 @@ class OcrTableTest(unittest.TestCase):
         self.assertFalse(any(block.kind == "table" for block in doc.blocks))
         self.assertFalse(any(entry.reason == "table_row_ink_unread" for entry in doc.unread))
         self.assertTrue(doc.text.strip())
-        self.assertEqual(self.calls("6|7"), 9)
+        self.assertEqual(self.calls("6|7"), 12)  # nine first reads and three blank-cell retries
         self.assertEqual(self.calls("3"), 1)
         self.assertEqual(heocr.validate(doc.to_dict()), [])
 
@@ -494,6 +494,54 @@ class OcrTableTest(unittest.TestCase):
         self.assertIn("ocr_grid_cell_fallback", doc.pages[0].flags)
         observe.assert_called_once()
         self.assertEqual(self.calls("3"), 1)
+
+    def test_blank_reduced_cells_retry_at_native_scale_before_masking(self) -> None:
+        from heocr.ocr.tesseract import OcrLine, OcrResult, OcrUnavailable, Tesseract
+        from heocr.pdf.ocrtables import isolated_cell_text
+
+        image = capture_obliquely(scan(LEVELS, line_width=8))
+        recognize = Tesseract.recognize
+        expected = [[TEXTS[level] for level in reversed(row)] for row in LEVELS]
+        middle = set(expected[1])
+        factor = None
+
+        def prepare(crop, scale):
+            nonlocal factor
+            factor = scale
+            return isolated_cell_text(crop, scale)
+
+        for rejection in (None, "ruling", "low_confidence", "failure"):
+            with self.subTest(rejection=rejection):
+                def read(engine, crop, dpi, psm=None):
+                    result = recognize(engine, crop, dpi=dpi, psm=psm)
+                    if psm is None or not any(line.text in middle for line in result.lines):
+                        return result
+                    if factor < 1:
+                        return OcrResult([])
+                    if rejection == "ruling":
+                        return OcrResult([OcrLine("|", [1, 1, 3, 10], [99])])
+                    if rejection == "low_confidence":
+                        return OcrResult([OcrLine("א", [1, 1, 8, 10], [10])])
+                    if rejection == "failure":
+                        raise OcrUnavailable("invented native-scale retry failure")
+                    return result
+
+                with mock.patch("heocr.pdf.reader.isolated_cell_text", side_effect=prepare), \
+                     mock.patch.object(Tesseract, "recognize", new=read):
+                    doc = heocr.extract(scan_png(image), tesseract=FAKE, check_numbers=False)
+
+                tables = [block for block in doc.blocks if block.kind == "table"]
+                if rejection:
+                    self.assertIn("ocr_grid_cell_fallback", doc.pages[0].flags)
+                    self.assertTrue(doc.text.strip())
+                    self.assertEqual(tables, [])
+                else:
+                    (table,) = tables
+                    self.assertEqual([[cell.text for cell in row] for row in table.cells], expected)
+                    self.assertEqual([["ocr_cell_native_scale_retry" in cell.flags for cell in row]
+                                      for row in table.cells], [[False] * 3, [True] * 3, [False] * 3])
+                    self.assertEqual(table.ocr["cells_psm7"] + table.ocr["cells_psm6"], 9)
+                self.assertEqual(heocr.validate(doc.to_dict()), [])
 
     def test_a_failed_auto_model_probe_keeps_readable_rectified_cells(self) -> None:
         from heocr.ocr.tesseract import OcrUnavailable, Tesseract
