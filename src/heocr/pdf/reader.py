@@ -2467,7 +2467,17 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
                     form_probe = engine.recognize(image, dpi=dpi).lines
                 except OcrUnavailable:
                     pass
-            t_blocks, in_cells = _ocr_tables(doc, index, engine, image, scale, grids,
+            table_image = image
+            if (page is not None and page_class == "T5" and doc._rtl and dpi == RENDER_DPI and engine.psm == 3
+                    and not (page_failed or routes.pending(doc) or time_up(doc))
+                    and all("table_open_sides_inferred" not in grid.flags for grid in grids)):
+                from heocr.ocr.scan_gaps import bridge_scan_stroke_gaps
+
+                table_image, bands = bridge_scan_stroke_gaps(image)
+                if bands:
+                    flags = flags + ["ocr_scan_table_stroke_gaps_bridged"]
+                    signals["ocr_scan_table_dropout_bands"] = bands
+            t_blocks, in_cells = _ocr_tables(doc, index, engine, table_image, scale, grids,
                                             None if numbers is engine else numbers,
                                             **({"form_probe": form_probe} if form_probe else {}))
         _place_tables(doc, first, t_blocks)
@@ -2475,6 +2485,10 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
         flags = flags + ["ocr_tables"]
         if any("table_cells_ink_unread" in t.flags for t in t_blocks):
             flags = flags + ["table_cells_ink_unread"]
+    if doc._crnn is not None:
+        from heocr.ocr.crnn import read_page_lines
+
+        read += read_page_lines(doc, doc.blocks[first:], page_image, scale)
     entries = []
     if form_image is not None and not page_failed and not time_up(doc):
         from heocr.pdf.formtext import recover_colored_form_entries
@@ -2488,7 +2502,7 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
         flags = flags + ["text_layer_ignored"]
     elif page_class == "T3":
         flags = flags + ["text_layer_ignored_broken_mapping"]
-    found = bool(result.lines) or read > 0  # text read in table cells counts (D3e)
+    found = read > 0 or (doc._crnn is None and bool(result.lines))  # text read in table cells counts (D3e)
     if not found:
         doc.unread.append(Unread(scope="page", reason="ocr_found_no_text", page=index, detail=f"class {page_class}"))
     if short and found:
@@ -2626,18 +2640,34 @@ def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids, n
                     # Ink too light for the ink test: read with its contrast stretched, and flagged so.
                     crop, faint = faint_cell_image(crop), True
                 inked += 1
+                native_crop = crop if text_scale is not None and text_scale < 1 else None
                 if text_scale is not None:
                     crop = isolated_cell_text(crop, text_scale)
                 psm = cell_psm(crop)
-                psms[psm] += 1
                 result = None
                 try:
                     result = engine.recognize(crop, dpi=dpi, psm=psm)
                     text = "\n".join(line.text for line in result.lines if line.text.strip())
-                    lines_all.extend(result.lines)
                     cell_flags = []
                 except OcrUnavailable:
                     text, cell_flags = "", ["ocr_failed"]
+                if result is not None and not text and native_crop is not None and not time_up(doc):
+                    # Reducing a rectified crop can erase weak strokes in an otherwise readable cell.
+                    native_crop = isolated_cell_text(native_crop, 1)
+                    native_psm = cell_psm(native_crop)
+                    try:
+                        native = engine.recognize(native_crop, dpi=dpi, psm=native_psm)
+                    except OcrUnavailable:
+                        pass
+                    else:
+                        native_text = "\n".join(line.text for line in native.lines if line.text.strip())
+                        if ((native.mean_confidence or 0) >= REGION_MIN_CONFIDENCE
+                                and any(ch.isalnum() for ch in native_text)):
+                            crop, psm, result, text = native_crop, native_psm, native, native_text
+                            cell_flags.append("ocr_cell_native_scale_retry")
+                psms[psm] += 1
+                if result is not None:
+                    lines_all.extend(result.lines)
                 if faint:
                     cell_flags.append("faint_ink_read")
                 if not text.strip():

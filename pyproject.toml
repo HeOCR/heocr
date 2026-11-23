@@ -36,6 +36,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+crnn = ["numpy>=1.26", "onnxruntime>=1.20", "python-bidi>=0.6"]
 # Explicit heavyweight runtime for the experimental, off-by-default handwriting route.
 handwriting = ["kraken==7.2", "numpy>=1.26", "scipy>=1.11"]
 # Tests only: the record is checked against its JSON Schema (tests/__init__.py). Not needed at run time.

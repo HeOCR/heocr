@@ -7,6 +7,7 @@ import heocr
 from heocr.ocr.regions import unrotate_box
 from heocr.ocr.scan_gaps import bridge_scan_stroke_gaps
 from heocr.ocr.tesseract import OcrLine, OcrResult, OcrUnavailable, OcrWord, Tesseract
+from heocr.pdf import reader
 from tests.synth.pdf import PdfPage, make_pdf
 
 
@@ -97,6 +98,39 @@ class ScanStrokeGapTest(unittest.TestCase):
                     box = unrotate_box(box, angle, (source.width / (2 * scale), source.height / (2 * scale)))
                 for actual, expected in zip(doc.blocks[0].lines[0].bbox, box, strict=True):
                     self.assertAlmostEqual(actual, expected, places=6)
+
+    def test_scan_dropout_repair_is_confined_to_closed_table_reads(self):
+        source = striped_scan(208, 408)
+        draw = ImageDraw.Draw(source)
+        for y in (120, 320, 530):
+            draw.line((150, y, 1050, y), fill=(15,) * 3, width=3)
+        for x in (150, 585, 1050):
+            draw.line((x, 120, x, 530), fill=(15,) * 3, width=3)
+        scale = 300 / 72
+        grid, = reader.tables_in(source, scale)
+        engine = Tesseract([], None, "heb", 3, "tesseract 5.5.3", "fake", {}, 1)
+        body = make_pdf([PdfPage(images=[(0, 0, 595, 842)])])
+        for inferred in (False, True):
+            with self.subTest(inferred=inferred):
+                grid.flags[:] = ["table_open_sides_inferred"] if inferred else []
+                with (
+                    patch.object(Tesseract, "find", return_value=engine),
+                    patch.object(Tesseract, "recognize", return_value=OcrResult([])),
+                    patch.object(reader, "_render", return_value=(source, scale)),
+                    patch.object(reader, "skew_angle", return_value=0.0),
+                    patch.object(reader, "tables_in", return_value=[grid]),
+                    patch.object(reader, "_ocr_tables", wraps=reader._ocr_tables) as read_tables,
+                ):
+                    doc = heocr.extract(body, ocr_model="heb", check_numbers=False)
+                page, = doc.pages
+                table_image = read_tables.call_args.args[3]
+                original = (250, 251, 252)
+                self.assertEqual(source.getpixel((202, 209)), original)
+                self.assertEqual(table_image.getpixel((202, 209)), original if inferred else (30,) * 3)
+                self.assertEqual("ocr_scan_table_stroke_gaps_bridged" in page.flags, not inferred)
+                self.assertEqual(page.signals.get("ocr_scan_table_dropout_bands"), None if inferred else 2)
+                table, = (block for block in doc.blocks if block.kind == "table")
+                self.assertEqual(table.bbox, grid.bbox)
 
     def check_pdf_ocr(self, prose, fail_candidate=False):
         source = striped_scan(208, 408)

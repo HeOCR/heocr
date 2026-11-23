@@ -124,6 +124,28 @@ heocr --help                         # every option
 
 The CLI prints each `unread` entry on standard error, and `-q` silences them. It exits with 1 only when the file cannot be opened or an option is invalid. A document read only in part, or not at all, exits with 0, and its `unread` entries say why.
 
+## Experimental CPU line recognition
+
+From a checkout, install the optional runtime with `pip install '.[crnn]'`. Supply a compatible
+local ONNX model and its SHA-256 digest. The optional runtime and its dependencies have their own licence terms.
+
+```sh
+heocr scan.pdf -f json --ocr-model heb --crnn-model reader.onnx --crnn-sha256 "$READER_SHA256"
+```
+
+In Python, use `heocr.extract(path, crnn_model=model, crnn_sha256=digest)`. Tesseract provides
+page segmentation, line boxes and reading order. The CRNN reads those printed Hebrew prose lines
+from the working raster. Tesseract reads table cells, separately recovered form entries and
+embedded image regions. Text-layer pages follow the usual routing rules. CRNN blocks record the
+engine, the model checksum and unverified status. Missing readings from the model are flagged.
+
+Models use an ONNX float32 input of shape `[1, 1, 32, width]` and logits of shape
+`[1, width/4, classes]`, with dynamic width and time. Each grayscale crop is resized
+proportionally to 32 pixels high, with width rounded up to a multiple of four and capped at
+2,048. Input pixels use `1 - pixel/255`. Set ONNX metadata `heocr.crnn.schema=heocr.crnn.line.v1`
+and `heocr.crnn.alphabet` to a JSON array of unique single-character strings in visual-order
+CTC class order after the blank class at index zero. HeOCR decodes to a logical Hebrew line.
+
 ## Experimental handwriting OCR
 
 Install the optional Kraken 7.2 runtime with `pip install '.[handwriting]'` from the repository. Use local, authorized model weights and their SHA-256 pins. HeOCR reads them offline. The optional runtime and its dependencies have their own licence terms.
