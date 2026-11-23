@@ -4,6 +4,7 @@ from unittest.mock import patch
 from PIL import Image, ImageDraw
 
 import heocr
+from heocr.ocr.regions import unrotate_box
 from heocr.ocr.scan_gaps import bridge_scan_stroke_gaps
 from heocr.ocr.tesseract import OcrLine, OcrResult, OcrUnavailable, OcrWord, Tesseract
 from heocr.pdf import reader
@@ -48,6 +49,55 @@ class ScanStrokeGapTest(unittest.TestCase):
 
     def test_pdf_ocr_falls_back_when_the_repaired_read_fails(self):
         self.check_pdf_ocr(prose=False, fail_candidate=True)
+
+    def test_shallow_turn_requires_corroborating_prose_and_restores_page_boxes(self):
+        source = striped_scan().rotate(-0.8, Image.Resampling.BICUBIC, fillcolor=(255,) * 3)
+        repaired = striped_scan()
+        scale = 300 / 72
+        angle = 0.8
+        engine = Tesseract([], None, "heb", 3, "tesseract 5.5.3", "fake", {}, 1)
+        text = "דוגמה של שורה ארוכה בתוך פסקה"
+        boxes = [[180, top, 850, top + 24] for top in range(200, 480, 40)]
+        lines = [OcrLine(text, box, [99.0], (1, 1), [OcrWord(word, box, 99.0) for word in text.split()])
+                 for box in boxes]
+        body = make_pdf([PdfPage(images=[(0, 0, 595, 842)])])
+        for corroborates, native_repair in ((True, False), (False, False), (True, True)):
+            with self.subTest(corroborates=corroborates, native_repair=native_repair):
+                page_reads = []
+                bridge_calls = []
+
+                def recognize(_, image, dpi=300, psm=None):
+                    if image.size != source.size:
+                        return OcrResult([])
+                    if image is repaired or image is source:
+                        page_reads.append(image)
+                    return OcrResult(lines if image is source or corroborates else lines[:1])
+
+                def bridge(image):
+                    bridge_calls.append(image)
+                    return (image, 0) if image is source and not native_repair else (repaired, 2)
+
+                with (
+                    patch.object(Tesseract, "find", return_value=engine),
+                    patch.object(Tesseract, "recognize", recognize),
+                    patch("heocr.pdf.reader._render", return_value=(source, scale)),
+                    patch("heocr.pdf.reader.skew_angle", return_value=angle),
+                    patch("heocr.ocr.scan_gaps.bridge_scan_stroke_gaps", side_effect=bridge),
+                ):
+                    doc = heocr.extract(body, ocr_model="heb", check_numbers=False)
+                page, = doc.pages
+                self.assertIs(bridge_calls[0], source)
+                self.assertEqual(len(bridge_calls), 1 if native_repair else 2)
+                self.assertEqual(page_reads, [repaired] if corroborates else [repaired, source])
+                turned = corroborates and not native_repair
+                self.assertEqual("deskewed" in page.flags, turned)
+                self.assertEqual("ocr_scan_stroke_gaps_bridged" in page.flags, corroborates)
+                self.assertEqual(page.signals.get("deskew_degrees"), angle if turned else None)
+                box = [value / scale for value in boxes[0]]
+                if turned:
+                    box = unrotate_box(box, angle, (source.width / (2 * scale), source.height / (2 * scale)))
+                for actual, expected in zip(doc.blocks[0].lines[0].bbox, box, strict=True):
+                    self.assertAlmostEqual(actual, expected, places=6)
 
     def test_scan_dropout_repair_is_confined_to_closed_table_reads(self):
         source = striped_scan(208, 408)
