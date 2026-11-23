@@ -59,6 +59,9 @@ Install the optional Rivok Labs model with `heocr --download-model heb_rivok`. H
 
 See the [HeOCR component model card](../src/heocr/models_data/MODEL_CARD.heb_rivok.md) for the immutable weight pin and upstream credits. The package includes Rivok's [Apache-2.0 licence](../src/heocr/models_data/LICENSE.heb_rivok) and [NOTICE](../src/heocr/models_data/NOTICE.heb_rivok).
 
+For an experimental two-model reread of the prose lines, add `--ocr-line-v6 /path/to/v6.traineddata` or pass `ocr_line_v6=` in Python. Use this with `--ocr-capture-type scanner`, `--ocr-capture-type issuer-render`, or `--ocr-model heb_rivok`. The option only rereads existing prose lines and preserves their geometry and order. It expects the pinned local v6 checkpoint with SHA-256 `52b94ef13eaa3c8d32403ab05e12fc9be74d22a2d1aaa4d2de904b313b0e1609`. HeOCR records the hash of the staged model and the selections on changed lines. It retains the page reading when v6 is unavailable or a reread is inconclusive. Rereading adds two recognition calls per eligible prose line.
+
+
 ### LibreOffice
 
 **macOS:**

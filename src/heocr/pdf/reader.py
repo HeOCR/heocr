@@ -2485,6 +2485,10 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
         flags = flags + ["ocr_tables"]
         if any("table_cells_ink_unread" in t.flags for t in t_blocks):
             flags = flags + ["table_cells_ink_unread"]
+    if (doc._ocr_settings or {}).get("line_v6") is not None:
+        from heocr.ocr.line_models import read_page_lines as route_page_lines
+
+        read += route_page_lines(doc, doc.blocks[first:], page_image, scale, engine)
     if doc._crnn is not None:
         from heocr.ocr.crnn import read_page_lines
 

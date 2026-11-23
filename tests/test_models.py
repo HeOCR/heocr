@@ -140,6 +140,53 @@ class ModelRouteTest(unittest.TestCase):
                         self.assertNotIn("tesseract:heb_rivok.doi", doc.components)
                     self.assertNotIn(self.tmp.name, doc.to_json())
 
+    def test_line_v6_rereads_prose_and_keeps_layout(self) -> None:
+        self.cache.mkdir()
+        rivok_bytes, v6_bytes = b"Rivok fixture", b"v6 fixture"
+        rivok_sha = hashlib.sha256(rivok_bytes).hexdigest()
+        v6_sha = hashlib.sha256(v6_bytes).hexdigest()
+        (self.cache / "heb_rivok.traineddata").write_bytes(rivok_bytes)
+        model = Path(self.tmp.name) / "v6.traineddata"
+        model.write_bytes(v6_bytes)
+        rivok = models.ReleasedModel("heb_rivok", rivok_sha, len(rivok_bytes),
+                                     "https://example.invalid/rivok", None, "Apache-2.0")
+        options = {"tesseract": FAKE, "ocr_capture_type": "scanner", "check_numbers": False, "repairs": False}
+        with mock.patch.dict(models.MODELS, {rivok.name: rivok}), mock.patch(
+            "heocr.ocr.line_models.V6_SHA256", v6_sha
+        ), mock.patch("heocr.ocr.line_models._read_line", return_value=("שלום כולם", 95)) as reread:
+            base = heocr.extract(SCAN, **options)
+            self.assertFalse(reread.called)
+            opted_in = heocr.extract(SCAN, **options, ocr_line_v6=model)
+            self.assertTrue(reread.called)
+            model.write_bytes(b"wrong model")
+            fallback = heocr.extract(SCAN, **options, ocr_line_v6=model)
+
+        self.assertEqual(opted_in.blocks[0].lines[0].text, "שלום כולם")
+        self.assertEqual(opted_in.blocks[0].ocr["line_router"]["changes"],
+                         [{"line": 1, "selection": "rivok_agreement"}])
+        self.assertEqual(opted_in.components["tesseract:line_v6.traineddata"], f"sha256:{v6_sha}")
+        self.assertEqual(opted_in.components["tesseract:heb_rivok.traineddata"], f"sha256:{rivok_sha}")
+        for old, new in zip(base.blocks, opted_in.blocks, strict=True):
+            self.assertEqual(old.bbox, new.bbox)
+            self.assertEqual([line.bbox for line in old.lines], [line.bbox for line in new.lines])
+        self.assertEqual(base.text, fallback.text)
+        self.assertIn("ocr_line_v6_unavailable", fallback.flags)
+        self.assertNotIn(self.tmp.name, opted_in.to_json())
+        self.assertEqual(heocr.validate(opted_in.to_dict()), [])
+
+    def test_line_router_keeps_original_digits_and_complete_lines(self) -> None:
+        from heocr.ocr.line_models import choose_line
+
+        self.assertIsNone(choose_line("שלום 123", ("שלום 124", 98), ("שלום 124", 98)))
+        self.assertIsNone(choose_line("שלום עולם", ("שלום", 98), ("שלום", 98)))
+        self.assertIsNone(choose_line("שלום עולם", ("שלום כולם", 97), ("שלום כולם", 50)))
+
+    def test_line_v6_needs_explicit_rivok_and_a_traineddata_path(self) -> None:
+        with self.assertRaisesRegex(ValueError, "needs Rivok Full"):
+            heocr.extract(SCAN, ocr_capture_type="phone", ocr_line_v6="v6.traineddata")
+        with self.assertRaisesRegex(ValueError, "needs a local"):
+            heocr.extract(SCAN, ocr_model="heb_rivok", ocr_line_v6="v6")
+
     def test_capture_route_reports_missing_or_mismatched_models_without_ocr(self) -> None:
         for capture in ("phone", "scanner"):
             with self.subTest(capture=capture):
