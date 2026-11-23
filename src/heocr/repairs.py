@@ -121,10 +121,9 @@ MIRRORED_BRACKET_PAIRS = Rule(
     example=("הצוות הגיע )בלי ציוד(", "הצוות הגיע (בלי ציוד)"),
     formats=("pdf", "ocr"),
     evidence=(
-        "a closing bracket with no preceding unmatched opener of its type is followed by its opener "
-        "before another bracket of that type, a line break, or . ! ? : ; ,; the swaps reduce the "
-        "number of unmatched brackets of that type, and a preceding PDF repair has not already "
-        "resolved the block's bracket orientation"
+        "the next same-kind bracket after an unmatched closer is an unmatched opener. Matching "
+        "restarts at each line break and at . ! ? : ; , and a preceding PDF repair has not "
+        "already resolved the block's bracket orientation"
     ),
 )
 
@@ -384,8 +383,9 @@ def latin1_eth_nun(text: str) -> tuple[str, Counter]:
 
 MIRROR = _MIRROR = str.maketrans("()[]{}", ")(][}{")
 _PAIRS = {")": "(", "]": "[", "}": "{"}
+_BRACKET_SEGMENTS = re.compile("[^" + re.escape(".!?:;," + _LINE_ENDS) + "]+")
 _PAIR_TOKENS = {
-    close: re.compile("[" + re.escape(open_ + close + ".!?:;," + _LINE_ENDS) + "]")
+    close: re.compile("[" + re.escape(open_ + close) + "]")
     for close, open_ in _PAIRS.items()
 }
 
@@ -396,42 +396,25 @@ def mirrored_bracket_pairs(text: str) -> tuple[str, Counter]:
     if not any(close in text and open_ in text for close, open_ in _PAIRS.items()):
         return text, changes
     output = list(text)
-    for close, open_ in _PAIRS.items():
-        # The raw balance's lowest point counts unmatched closers before any repair.
-        raw_balance = raw_floor = 0
-        depth = unmatched = 0
-        pending = None
-        swaps = []
-        for token in _PAIR_TOKENS[close].finditer(text):
-            ch = token.group()
-            if ch == close:
-                raw_balance -= 1
-                raw_floor = min(raw_floor, raw_balance)
-                pending = None
-                if depth:
-                    depth -= 1
+    for segment in _BRACKET_SEGMENTS.finditer(text):
+        for close, open_ in _PAIRS.items():
+            # Match the original brackets before changing any of them.
+            tokens = list(_PAIR_TOKENS[close].finditer(text, segment.start(), segment.end()))
+            openers = []
+            unmatched_closers = set()
+            for token in tokens:
+                if token.group() == open_:
+                    openers.append(token.start())
+                elif openers:
+                    openers.pop()
                 else:
-                    unmatched += 1
-                    pending = token.start()
-            elif ch == open_:
-                raw_balance += 1
-                if pending is None:
-                    depth += 1
-                else:
-                    swaps.append((pending, token.start()))
-                    unmatched -= 1
-                    pending = None
-            else:
-                # Break candidate pairs at punctuation and line ends. Keep depth so
-                # an ordinary parenthetical can close on a later part of the block.
-                pending = None
-        # An opener that merely attaches to a later closer is ambiguous if swapping
-        # leaves the same number unmatched. Each swap preserves the character counts.
-        if unmatched < -raw_floor:
-            for left, right in swaps:
-                output[left], output[right] = open_, close
-            changes[(f"U+{ord(close):04X} U+{ord(open_):04X}",
-                     f"U+{ord(open_):04X} U+{ord(close):04X}")] = len(swaps)
+                    unmatched_closers.add(token.start())
+            unmatched_openers = set(openers)
+            for left, right in zip(tokens, tokens[1:]):
+                if left.start() in unmatched_closers and right.start() in unmatched_openers:
+                    output[left.start()], output[right.start()] = open_, close
+                    changes[(f"U+{ord(close):04X} U+{ord(open_):04X}",
+                             f"U+{ord(open_):04X} U+{ord(close):04X}")] += 1
     return ("".join(output) if changes else text), changes
 
 

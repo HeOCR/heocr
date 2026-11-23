@@ -59,8 +59,8 @@ class OcrDateBracketTest(unittest.TestCase):
 
 class MirroredBracketTest(unittest.TestCase):
     def test_swaps_same_type_pairs_without_moving_letters_spaces_or_digits(self) -> None:
-        raw = "א)גשר  42( [ )[מפה]( ], }ים{\r\n)צד( )שביל("
-        expected = "א(גשר  42) [ ([מפה]) ], {ים}\r\n(צד) (שביל)"
+        raw = "א)גשר  42(, [ )[מפה]( ], }ים{\r\n)צד(, )שביל("
+        expected = "א(גשר  42), [ ([מפה]) ], {ים}\r\n(צד), (שביל)"
         fixed, changes = repairs.mirrored_bracket_pairs(raw)
         self.assertEqual(fixed, expected)
         self.assertEqual(sum(changes.values()), 5)
@@ -70,20 +70,29 @@ class MirroredBracketTest(unittest.TestCase):
             with self.subTest(boundary=boundary):
                 raw = f")א{boundary}ב("
                 self.assertEqual(repairs.mirrored_bracket_pairs(raw), (raw, {}))
+                self.assertEqual(repairs.mirrored_bracket_pairs(f")א({boundary}ב)")[0],
+                                 f"(א){boundary}ב)")
+                self.assertEqual(repairs.mirrored_bracket_pairs(f"(א{boundary})ב(")[0],
+                                 f"(א{boundary}(ב)")
         self.assertEqual(repairs.mirrored_bracket_pairs("))עלים((")[0], ")(עלים)(")
 
-    def test_keeps_balanced_pairs_and_ambiguous_continuations(self) -> None:
-        for raw in (
-            "(עלה) לצד (פרח), [עציץ] ליד [צל]",
-            "(מכאן\nעד כאן) ומכאן (עד שם\nלמעלה)",
-            ")המשך (נפתח\nכאן)",
-        ):
+    def test_keeps_matched_pairs(self) -> None:
+        for raw in ("(עלה) לצד (פרח), [עציץ] ליד [צל]", ")א( )ב("):
             with self.subTest(raw=raw):
                 self.assertEqual(repairs.mirrored_bracket_pairs(raw), (raw, {}))
         self.assertEqual(
             repairs.mirrored_bracket_pairs("(עלה) ליד (פרח) וגם )זר(")[0],
             "(עלה) ליד (פרח) וגם (זר)",
         )
+
+    def test_repair_does_not_consume_an_opener_with_a_later_match(self) -> None:
+        for closer, opener in ((")", "("), ("]", "["), ("}", "{")):
+            raw = f"{closer}א {opener}ב{closer} וגם {closer}ג{opener}"
+            expected = f"{closer}א {opener}ב{closer} וגם {opener}ג{closer}"
+            with self.subTest(raw=raw):
+                fixed, changes = repairs.mirrored_bracket_pairs(raw)
+                self.assertEqual(fixed, expected)
+                self.assertEqual(sum(changes.values()), 1)
 
     def test_repairs_table_cells_independently(self) -> None:
         block = Block("table", source="ocr", cells=[[Cell("}25{"), Cell(")קצה"), Cell("המשך(")]])

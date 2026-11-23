@@ -18,7 +18,7 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 
 ### Fixed
 
-- **Restore mirrored bracket pairs in OCR and kept PDF text.** Swap the two bracket characters within a line and punctuation segment when the swap reduces unmatched brackets. Record the repair and preserve `--no-repairs`.
+- **Restore mirrored bracket pairs in OCR and kept PDF text.** Swap an unmatched closer with the next same-kind bracket when it is an unmatched opener in the same segment. Match brackets separately at line and punctuation boundaries. Record the repair and preserve `--no-repairs`.
 - **Retry empty rectified table cells at native scale.** When a reduced crop reads blank, a confident native-scale reading can keep its text and let the existing grid validation accept the table.
 - **Bridge thin stroke dropouts in closed table cells.** Scanned PDF cells can use a repaired OCR crop when repeated gaps cut across printed strokes. The table grid and page geometry are preserved.
 - **Bridge thin dropouts in scanned PDF text.** Repeated gaps across printed strokes can be repaired in the OCR working raster when the reading corroborates a prose column. Page geometry is preserved.
