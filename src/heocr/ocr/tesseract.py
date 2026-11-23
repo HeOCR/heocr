@@ -27,6 +27,7 @@ import subprocess
 import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from difflib import SequenceMatcher
 from pathlib import Path
 
 DEFAULT_LANG = "heb"
@@ -37,6 +38,7 @@ _LANG = re.compile(r"[A-Za-z0-9_]+(\+[A-Za-z0-9_]+)*")
 _VERSION = re.compile(r"tesseract v?[A-Za-z0-9.+_~-]+")
 _LIST_LANGS = re.compile(r'List of available languages in "(.+?)"')
 _MAX_MODEL_BYTES = 500_000_000
+_HEBREW_LETTERS = re.compile(r"[\u05d0-\u05ea]+")
 
 
 class OcrUnavailable(RuntimeError):
@@ -60,6 +62,7 @@ class OcrLine:
     numbers_replaced: int = 0  # words replaced by a second reading of numbers (pdf.reader)
     number_readings: list[dict] = field(default_factory=list)  # each replacement, both readings (pdf.reader)
     latin_runs_reread: int = 0  # English runs confirmed against a mixed Hebrew/English crop
+    raw_line_retry: bool = False
 
 
 @dataclass
@@ -143,6 +146,7 @@ class Tesseract:
     released: object = None  # the heocr.models.ReleasedModel in use, if any
     route: dict | None = None  # ocr_model="auto": how this engine was chosen (heocr.ocr.routes)
     failures: int = 0  # recognize() calls that failed or timed out (heocr.ocr.call_failures)
+    requested_lang: str | None = None  # explicit model aliases can replace the language passed to tesseract
 
     @classmethod
     def find(
@@ -163,6 +167,7 @@ class Tesseract:
         ``--tessdata-dir`` points elsewhere (the R8b card's note).
         """
         check_settings(lang, psm)
+        requested_lang = lang
         if cmd is None:
             cmd = os.environ.get("HEOCR_TESSERACT") or shutil.which("tesseract")
         if not cmd:
@@ -199,7 +204,8 @@ class Tesseract:
             models[language] = _sha256(model)
         executable = shutil.which(argv[0]) or argv[0]
         executable_sha256 = _sha256(Path(executable)) if Path(executable).is_file() else "unknown"
-        return cls(argv, folder, lang, psm, version, executable_sha256, models, timeout, released)
+        return cls(argv, folder, lang, psm, version, executable_sha256, models, timeout, released,
+                   requested_lang=requested_lang)
 
     def provenance(self) -> dict[str, str]:
         """Record components: versions and hashes only, no paths."""
@@ -226,16 +232,58 @@ class Tesseract:
             source = Path(temp) / "input.png"
             image.save(source, dpi=(dpi, dpi))
             base = Path(temp) / "result"
-            try:
-                done = self._recognize_call(source, base, dpi, psm)
-            except OcrUnavailable:
-                self.failures += 1
-                raise
-            tsv = base.with_suffix(".tsv")
-            if done.returncode != 0 or not tsv.is_file():
-                self.failures += 1
-                raise OcrUnavailable(f"tesseract failed with exit code {done.returncode}")
-            return parse_tsv(tsv.read_text(encoding="utf-8", errors="replace"))
+            first = self._read_tsv(source, base, dpi, psm)
+            if ((self.requested_lang or self.lang) == DEFAULT_LANG and self.psm == 7
+                    and psm in (None, 7) and image.width >= 2 * image.height):
+                return self._retry_raw_line(image, source, base, dpi, first)
+            return first
+
+    def _read_tsv(self, source: Path, base: Path, dpi: int, psm: int | None) -> OcrResult:
+        try:
+            done = self._recognize_call(source, base, dpi, psm)
+        except OcrUnavailable:
+            self.failures += 1
+            raise
+        tsv = base.with_suffix(".tsv")
+        if done.returncode != 0 or not tsv.is_file():
+            self.failures += 1
+            raise OcrUnavailable(f"tesseract failed with exit code {done.returncode}")
+        return parse_tsv(tsv.read_text(encoding="utf-8", errors="replace"))
+
+    def _retry_raw_line(self, image, source, base, dpi, first):
+        """Try raw line mode on an explicitly segmented Hebrew line."""
+        from PIL import ImageOps
+
+        if len(first.lines) > 1 or (first.lines and not _HEBREW_LETTERS.search(first.lines[0].text)):
+            return first
+        if not first.lines:
+            if image.mode != "RGB":
+                return first
+            gray = image.convert("L")
+            if gray.getextrema()[0] > 180:
+                return first
+            source = source.with_name("gray.png")
+            gray.save(source, dpi=(dpi, dpi))
+        try:
+            raw = self._read_tsv(source, base.with_name("raw"), dpi, 13)
+            if not _credible_raw_line(raw):
+                return first
+            text = raw.lines[0].text
+            if first.lines:
+                if not _only_adds_hebrew(first.lines[0].text, text):
+                    return first
+                padded = source.with_name("padded.png")
+                margin = max(10, round(image.height / 4))
+                ImageOps.expand(image.convert("L"), border=margin, fill=255).save(padded, dpi=(dpi, dpi))
+                check = self._read_tsv(padded, base.with_name("check"), dpi, 13)
+            else:
+                check = self._read_tsv(source, base.with_name("check"), dpi, 7)
+        except OcrUnavailable:
+            return first
+        if _credible_raw_line(check) and check.lines[0].text == text:
+            raw.lines[0].raw_line_retry = True
+            return raw
+        return first
 
     def _recognize_call(self, source: Path, base: Path, dpi: int, psm: int | None) -> subprocess.CompletedProcess:
         return _run(
@@ -255,6 +303,20 @@ class Tesseract:
             ],
             self.timeout,
         )
+
+
+def _credible_raw_line(result: OcrResult) -> bool:
+    return (len(result.lines) == 1 and (result.mean_confidence or 0) >= 85
+            and sum(map(len, _HEBREW_LETTERS.findall(result.lines[0].text))) >= 6)
+
+
+def _only_adds_hebrew(before: str, after: str) -> bool:
+    """Keep every original word, separator, numeral and punctuation mark in order."""
+    if not 0 < len(after) - len(before) <= 2 or len(before.split()) != len(after.split()):
+        return False
+    return all(tag == "insert" and _HEBREW_LETTERS.fullmatch(after[start:end])
+               for tag, _, _, start, end in SequenceMatcher(None, before, after, autojunk=False).get_opcodes()
+               if tag != "equal")
 
 
 def parse_tsv(tsv: str) -> OcrResult:

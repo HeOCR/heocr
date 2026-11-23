@@ -2062,6 +2062,7 @@ def _ocr_block(index, engine, lines, group, dpi, flags, attached) -> Block:
         flags=["ocr_unverified", *flags] + (["render_dpi_reduced"] if dpi < RENDER_DPI else [])
         + (["numbers_from_second_reading"] if replaced else [])
         + (["latin_from_second_reading"] if latin else [])
+        + (["ocr_raw_line_retry"] if any(line.raw_line_retry for line in group) else [])
         + (["reading_order_ocr_margin_numbers_unverified"] if any(id(line) in attached for line in group) else [])
         + text_flags(text),
     )

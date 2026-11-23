@@ -18,6 +18,7 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 
 ### Fixed
 
+- **Reread explicitly segmented Hebrew lines.** Agreeing crop reads can recover a blank color line or letters omitted by the first read. The retry preserves the first read's numbers and punctuation.
 - **Retry empty rectified table cells at native scale.** When a reduced crop reads blank, a confident native-scale reading can keep its text and let the existing grid validation accept the table.
 - **Bridge thin stroke dropouts in closed table cells.** Scanned PDF cells can use a repaired OCR crop when repeated gaps cut across printed strokes. The table grid and page geometry are preserved.
 - **Bridge thin dropouts in scanned PDF text.** Repeated gaps across printed strokes can be repaired in the OCR working raster when the reading corroborates a prose column. Page geometry is preserved.
