@@ -172,15 +172,17 @@ def column_order(lines, page_width: int) -> list | None:
             for band, side in enumerate(grouped) for line in sorted(side, key=lambda item: item.bbox[1])]
 
 
-def _edge_ink(gray):
-    w, h = gray.size
+def _edge_ink(image):
+    w, h = image.size
     if min(w, h) < 6:
         return ()
     strips = ((0, 0, 2, h), (0, 0, w, 2), (w - 2, 0, w, h), (0, h - 2, w, h))
     edges = []
     # A black edge extending along the whole scan is a border, not evidence of cropped text.
     for index, box in enumerate(strips):
-        crop = gray.crop(box)
+        crop = image.crop(box)
+        if crop.mode != "L":
+            crop = crop.convert("L")
         dark = sum(crop.histogram()[:128])
         if 4 <= dark < crop.width * crop.height / 3:
             edges.append(index)
@@ -228,10 +230,10 @@ def clip_guard(engine, image, dpi, primary, *, psm=None):
     """Retry with paper padding only when visible ink meets the image or crop edge."""
     from PIL import ImageOps
 
-    gray = image if image.mode == "L" else image.convert("L")
-    edges = _edge_ink(gray)
+    edges = _edge_ink(image)
     if not edges:
         return None
+    gray = image if image.mode == "L" else image.convert("L")
     padding = max(6, round(dpi / 24))
     padded = ImageOps.expand(gray, border=padding, fill=paper_level(gray))
     try:

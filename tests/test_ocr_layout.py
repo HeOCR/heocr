@@ -94,8 +94,8 @@ class LayoutTest(unittest.TestCase):
                          [["סכום", "15.00"], ["סכום", "25.00"], ["סכום", "35.00"]])
 
     def test_clip_guard_remaps_boxes_and_rejects_lost_text(self):
-        bitmap = Image.new("L", (180, 80), 255)
-        ImageDraw.Draw(bitmap).rectangle((0, 24, 18, 40), fill=0)
+        bitmap = Image.new("RGB", (180, 80), "white")
+        ImageDraw.Draw(bitmap).rectangle((0, 24, 18, 40), fill="black")
         before = OcrResult([line([word("בית", 1, 25), word("שלום", 50, 25)])])
         reread = mock.Mock(return_value=OcrResult([line([word("ובית", 12, 37), word("שלום", 62, 37)])]))
         engine = mock.Mock(recognize=reread)
@@ -105,6 +105,15 @@ class LayoutTest(unittest.TestCase):
         self.assertEqual(reread.call_args.args[0].size, (204, 104))
         reread.return_value = OcrResult([line([word("בית", 12, 37)])])
         self.assertIsNone(clip_guard(engine, bitmap, 288, before, psm=7))
+
+    def test_clip_guard_without_edge_ink_skips_full_color_conversion(self):
+        bitmap = Image.new("RGB", (180, 80), "white")
+        ImageDraw.Draw(bitmap).rectangle((12, 24, 18, 40), fill="black")
+        engine = mock.Mock()
+        with mock.patch.object(bitmap, "convert") as convert:
+            self.assertIsNone(clip_guard(engine, bitmap, 288, OcrResult([])))
+        convert.assert_not_called()
+        engine.recognize.assert_not_called()
 
     def test_image_route_uses_columns_and_simple_page_retains_record(self):
         interleaved = [prose(side, y) for y in (45, 83, 121, 159, 197)
