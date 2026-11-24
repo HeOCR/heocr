@@ -40,6 +40,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--force-ocr", action="store_true", help="read every PDF page by OCR, ignoring its text layer (a workaround for a text layer heocr reads badly)")
     parser.add_argument("--ocr-line-v6", metavar="MODEL", help="reread Rivok Full prose lines with the pinned local v6 model")
     parser.add_argument("--ocr-line-batch", action="store_true", help="batch Rivok and v6 prose crops within each page (needs --ocr-line-v6)")
+    parser.add_argument("--ocr-number-batch", action="store_true", help="batch full-page OCR number-word rereads")
     parser.add_argument("--crnn-model", metavar="MODEL", help="read OCR page prose with a local CPU ONNX line model")
     parser.add_argument("--crnn-sha256", metavar="HEX", help="expected SHA-256 of the ONNX model")
     parser.add_argument("--handwriting", metavar="MODEL", help="opt into Kraken on scan pages with a local .safetensors recognizer")
@@ -181,6 +182,7 @@ def main(argv: list[str] | None = None) -> int:
             ocr_capture_type=args.ocr_capture_type,
             ocr_line_v6=args.ocr_line_v6,
             ocr_line_batch=args.ocr_line_batch,
+            ocr_number_batch=args.ocr_number_batch,
             photo_preprocess=args.photo_preprocess,
             force_ocr=args.force_ocr,
             crnn_model=args.crnn_model,

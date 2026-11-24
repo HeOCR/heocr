@@ -17,22 +17,25 @@ class ImageBatchTests(TestCase):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "page.png"
             path.write_bytes(png)
-            inputs = [path, jpeg]
             options = {"ocr": False, "repairs": False}
-            expected = [heocr.extract(source, **options).to_json(indent=None) for source in inputs]
-            overlapping = Barrier(2, timeout=5)
+            expected = [heocr.extract(source, **options).to_json(indent=None) for source in (path, jpeg)]
+            for workers in (2, 4, 8):
+                with self.subTest(workers=workers):
+                    inputs = [path, jpeg] * (workers // 2)
+                    overlapping = Barrier(workers, timeout=10)
 
-            def read(source, **kwargs):
-                overlapping.wait()
-                return _extract_image(source, **kwargs)
+                    def read(source, **kwargs):
+                        overlapping.wait()
+                        return _extract_image(source, **kwargs)
 
-            with mock.patch("heocr.api._extract_image", side_effect=read):
-                records = list(heocr.extract_images(iter(inputs), workers=2, **options))
-            self.assertEqual([doc.to_json(indent=None) for doc in records], expected)
+                    with mock.patch("heocr.api._extract_image", side_effect=read):
+                        records = list(heocr.extract_images(iter(inputs), workers=workers, **options))
+                    self.assertEqual([doc.to_json(indent=None) for doc in records], expected * (workers // 2))
 
     def test_empty_inputs_and_invalid_worker_count(self):
         self.assertEqual(list(heocr.extract_images(iter(()), workers=2)), [])
-        for workers in (True, 0, 3, 1.0):
+        self.assertEqual(list(heocr.extract_images(iter(()), workers=8)), [])
+        for workers in (True, 0, 9, 1.0):
             with self.subTest(workers=workers), self.assertRaisesRegex(ValueError, "workers"):
                 list(heocr.extract_images([], workers=workers))
 

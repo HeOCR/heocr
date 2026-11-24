@@ -1436,15 +1436,22 @@ _LABEL_DEEPER = re.compile(r"^\d{1,2}(\.\d{1,2})+\.?$")
 LABEL_SEQUENCE_GUARD = True
 
 
-def _number_reading(numbers, image, bbox, dpi: int, min_confidence: float = NUMBER_WORD_MIN_CONFIDENCE) -> tuple[str, float] | None:
-    """The number model's reading of one word box and its confidence, when it is one number-shaped
-    word with confidence at least ``min_confidence``; else None."""
+def _number_crop(image, bbox) -> tuple[int, int, int, int] | None:
     x0, y0, x1, y1 = bbox
     crop = (max(0, int(x0) - NUMBER_WORD_PAD), max(0, int(y0) - NUMBER_WORD_PAD),
             min(image.size[0], int(x1) + NUMBER_WORD_PAD), min(image.size[1], int(y1) + NUMBER_WORD_PAD))
-    if crop[2] <= crop[0] or crop[3] <= crop[1]:
+    return crop if crop[2] > crop[0] and crop[3] > crop[1] else None
+
+
+def _number_reading(numbers, image, bbox, dpi: int, min_confidence: float = NUMBER_WORD_MIN_CONFIDENCE,
+                    *, batch_results: dict | None = None) -> tuple[str, float] | None:
+    """Return one number-shaped word above the specified confidence floor."""
+    crop = _number_crop(image, bbox)
+    if crop is None:
         return None
-    second = numbers.recognize(image.crop(crop), dpi=dpi, psm=NUMBER_WORD_PSM)
+    second = batch_results.get(crop) if batch_results is not None else None
+    if second is None:
+        second = numbers.recognize(image.crop(crop), dpi=dpi, psm=NUMBER_WORD_PSM)
     words = [w for l in second.lines for w in l.words]
     if len(words) != 1 or words[0].confidence < min_confidence or not _NUMBER_WORD.match(words[0].text):
         return None
@@ -1635,7 +1642,36 @@ def _reread_number_runs(numbers, image, line, dpi: int, skip: set = frozenset())
     return read, replaced, done
 
 
-def _reread_number_words(numbers, image, result, dpi: int) -> tuple[int, int]:
+def _is_number_word_candidate(word) -> bool:
+    return any(ch.isdigit() for ch in word.text) and not _HEBREW_LETTER.search(word.text)
+
+
+def _batch_number_words(numbers, image, result, dpi: int) -> dict[tuple[int, int, int, int], OcrResult]:
+    # Corrections can change word boxes. Only reuse readings for identical padded crops.
+    crops = dict.fromkeys(
+        crop
+        for line in result.lines
+        for word in line.words
+        if _is_number_word_candidate(word) and (crop := _number_crop(image, word.bbox)) is not None
+    )
+    pending = list(crops)
+    readings = {}
+    for offset in range(0, len(pending), 64):
+        group = pending[offset:offset + 64]
+        if len(group) < 2:
+            break
+        try:
+            batch = numbers.recognize_batch((image.crop(crop) for crop in group), dpi, psm=NUMBER_WORD_PSM)
+            if len(batch) != len(group):
+                break
+        except (OcrUnavailable, OSError, ValueError):
+            # Preserve serial retries and their normal failure accounting.
+            break
+        readings.update(zip(group, batch, strict=True))
+    return readings
+
+
+def _reread_number_words(numbers, image, result, dpi: int, *, batch: bool = False) -> tuple[int, int]:
     """A second reading of the words of an OCR result that hold digits and no Hebrew letter, each on
     its own crop, by the number model (``eng``): stock ``heb`` misreads digits, drops the levels of a
     label ("1.1." as "1.") and splits amounts. A word is replaced when the second reading is itself
@@ -1644,6 +1680,7 @@ def _reread_number_words(numbers, image, result, dpi: int) -> tuple[int, int]:
     ``result``'s lines are updated in place. Returns (words read again, words replaced)."""
     reread = replaced = 0
     pending: dict[int, tuple[str, float]] = {}
+    batch_results = _batch_number_words(numbers, image, result, dpi) if batch else None
     for line in result.lines:
         changed = False
         try:
@@ -1658,14 +1695,16 @@ def _reread_number_words(numbers, image, result, dpi: int) -> tuple[int, int]:
         replaced += runs_replaced
         changed = runs_replaced > 0
         for word in line.words:
-            if id(word) in done or not any(ch.isdigit() for ch in word.text) or _HEBREW_LETTER.search(word.text):
+            if id(word) in done or not _is_number_word_candidate(word):
                 continue
             wider = levels = False
             at_start = word is max(line.words, key=lambda w: w.bbox[2])
             # "4." or "1.2." (a label with its stop, not a bare "4"): heb may keep only the last levels.
             label = at_start and bool(_LABEL_ONE_LEVEL.match(word.text) or _LABEL_DEEPER.match(word.text)) and word.text.endswith(".")
             try:
-                found = _number_reading(numbers, image, word.bbox, dpi, min_confidence=0.0 if label else NUMBER_WORD_MIN_CONFIDENCE)
+                found = _number_reading(numbers, image, word.bbox, dpi,
+                                        min_confidence=0.0 if label else NUMBER_WORD_MIN_CONFIDENCE,
+                                        batch_results=batch_results)
                 reread += 1
                 reading, confidence = found if found is not None else (None, None)
                 if reading is not None and confidence < NUMBER_WORD_MIN_CONFIDENCE:
@@ -2400,7 +2439,10 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
             signals["ocr_old_print"] = "phist_v2"
     first = len(doc.blocks)
     numbers = number_engine_for(doc) if doc.options.get("check_numbers", "suspect") else None
-    number_words = _reread_number_words(numbers, page_image, result, round(scale * 72)) if numbers is not None and numbers is not engine else None
+    number_words = None
+    if numbers is not None and numbers is not engine:
+        number_words = _reread_number_words(numbers, page_image, result, dpi,
+                                           batch=settings.get("number_batch", False) and doc._deadline is None)
     page_numbers = None
     english_page = None
     if number_words is not None and PAGE_NUMBER_PASS:

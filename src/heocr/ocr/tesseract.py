@@ -295,7 +295,11 @@ class Tesseract:
         )
 
     def recognize_line_batch(self, images, dpi: int) -> list[OcrResult]:
-        """Read an ordered batch in PSM 7. A failed probe leaves failures to the serial retry."""
+        """Read an ordered batch of single-line crops."""
+        return self.recognize_batch(images, dpi, psm=7)
+
+    def recognize_batch(self, images, dpi: int, *, psm: int) -> list[OcrResult]:
+        """Read ordered crops in one process. The caller can retry a failed batch serially."""
         with tempfile.TemporaryDirectory(prefix="heocr-ocr-") as temp:
             folder = Path(temp)
             if "\n" in temp or "\r" in temp:
@@ -314,7 +318,7 @@ class Tesseract:
             source = folder / "images.txt"
             source.write_text("\n".join(paths) + "\n", encoding="utf-8", newline="\n")
             base = folder / "result"
-            done = self._recognize_call(source, base, dpi, 7)
+            done = self._recognize_call(source, base, dpi, psm)
             tsv = base.with_suffix(".tsv")
             if done.returncode != 0 or not tsv.is_file():
                 raise OcrUnavailable("tesseract line batch failed")

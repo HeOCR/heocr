@@ -14,6 +14,8 @@ from pathlib import Path
 from unittest import mock
 
 import heocr
+from heocr.ocr import OcrUnavailable
+from heocr.ocr.tesseract import Tesseract
 from tests.synth.fake_tesseract import NOTHING
 from tests.synth.pdf import PdfPage, make_pdf
 
@@ -73,6 +75,29 @@ class NumberWordsTest(unittest.TestCase):
         doc = self.read(["סעיף", "2ב", "ו-3"], "23")
         self.assertEqual(doc.blocks[0].text, "סעיף 2ב ו-3")
         self.assertEqual(self.second_readings(), [])
+
+    def test_number_batches_keep_the_same_record_and_retry_failed_probes(self) -> None:
+        words = ["סכום", "20000", "לעומת", "30000"]
+        expected = self.read(words, "256,000").to_json(indent=None)
+
+        def read_batch(engine, images, dpi, *, psm):
+            self.assertEqual(psm, 8)
+            crops = list(images)
+            self.assertEqual(len(crops), 2)
+            return [engine.recognize(crop, dpi, psm=psm) for crop in crops]
+
+        for side_effect in (read_batch, OcrUnavailable("invalid TSV")):
+            with self.subTest(side_effect=side_effect):
+                with mock.patch.object(Tesseract, "recognize_batch", autospec=True, side_effect=side_effect) as batch:
+                    result = self.read(words, "256,000", ocr_number_batch=True)
+                self.assertEqual(result.to_json(indent=None), expected)
+                batch.assert_called_once()
+
+    def test_number_batch_respects_extraction_deadline(self) -> None:
+        words = ["סכום", "20000", "לעומת", "30000"]
+        with mock.patch.object(Tesseract, "recognize_batch", autospec=True) as batch:
+            self.read(words, "256,000", ocr_number_batch=True, time_limit=60)
+        batch.assert_not_called()
 
     def test_an_unsure_or_unlike_second_reading_is_not_used(self) -> None:
         for second, confidence in (("256,000", "20.0"), ("abc", "90.0"), ("256 000", "90.0")):
