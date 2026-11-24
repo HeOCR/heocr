@@ -40,6 +40,30 @@ class OcrRouteTest(unittest.TestCase):
     def calls(self) -> list[list[str]]:
         return [json.loads(line) for line in self.log.read_text(encoding="utf-8").splitlines()] if self.log.exists() else []
 
+    def test_gray_otsu_serializes_grayscale_and_selects_internal_threshold(self) -> None:
+        from PIL import Image
+
+        from heocr.ocr.tesseract import Tesseract
+
+        engine = Tesseract.find(FAKE)
+        raster = Image.new("RGB", (12, 12), (10, 60, 120))
+        sent = []
+        run = engine._recognize_call
+
+        def inspect(source, base, dpi, psm):
+            with Image.open(source) as image:
+                sent.append((image.mode, image.getpixel((0, 0))))
+            return run(source, base, dpi, psm)
+
+        with mock.patch.object(engine, "_recognize_call", inspect):
+            engine.recognize(raster)
+            engine.photo_gray_otsu = True
+            engine.recognize(raster)
+        self.assertEqual(sent, [("RGB", (10, 60, 120)), ("L", raster.convert("L").getpixel((0, 0)))])
+        calls = [call for call in self.calls() if not call[0].startswith("--")]
+        self.assertNotIn("-c", calls[0])
+        self.assertEqual(calls[1][calls[1].index("-c") + 1], "thresholding_method=0")
+
     def test_image_only_page_is_read_by_ocr(self) -> None:
         # A white scan: the fake engine's lines are all there is, so no ink is left unread. Stock heb, so the
         # block's ocr object holds no route.

@@ -55,6 +55,16 @@ class CliTest(unittest.TestCase):
         self.assertEqual(ocr["router"], {"version": "v2", "reason": "no_capture_evidence"})
         self.assertEqual(ocr["model"], "heocr_modern_v1")
 
+    def test_photo_preprocessing_cli_forwards_the_mode(self) -> None:
+        from unittest import mock
+
+        import heocr.cli
+
+        doc = heocr.cli.extract(self.input, ocr=False)
+        with mock.patch.object(heocr.cli, "extract", return_value=doc) as extract, contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(main([str(self.input), "--photo-preprocess", "gray-otsu"]), 0)
+        self.assertEqual(extract.call_args.kwargs["photo_preprocess"], "gray-otsu")
+
     def test_quiet_text_to_stdout(self) -> None:
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):

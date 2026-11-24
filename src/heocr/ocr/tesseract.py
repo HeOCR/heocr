@@ -133,6 +133,7 @@ def check_settings(lang: str, psm: int) -> None:
 @dataclass
 class Tesseract:
     cmd: list[str]
+    photo_gray_otsu: bool = field(default=False, kw_only=True)
     tessdata: Path
     lang: str
     psm: int
@@ -227,6 +228,8 @@ class Tesseract:
         """
         with tempfile.TemporaryDirectory(prefix="heocr-ocr-") as temp:
             source = Path(temp) / "input.png"
+            if self.photo_gray_otsu and image.mode != "L":
+                image = image.convert("L")
             image.save(source, dpi=(dpi, dpi))
             base = Path(temp) / "result"
             try:
@@ -250,6 +253,7 @@ class Tesseract:
                 str(self.tessdata),
                 "-l",
                 self.lang,
+                *(["-c", "thresholding_method=0"] if self.photo_gray_otsu else []),
                 "--psm",
                 str(self.psm if psm is None else psm),
                 "--dpi",

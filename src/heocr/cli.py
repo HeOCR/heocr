@@ -76,6 +76,8 @@ def _parser() -> argparse.ArgumentParser:
                         help="opt into experimental OCR routing for a declared capture")
     parser.add_argument("--ocr-router", choices=("v2",),
                         help="opt into OCR routing by capture type (declaration, PDF render or camera metadata)")
+    parser.add_argument("--photo-preprocess", choices=("gray-otsu",),
+                        help="send grayscale to the main OCR reader with internal Otsu thresholding on photos")
     parser.add_argument("-q", "--quiet", action="store_true", help="do not report unread parts on stderr (a missing OCR model is still reported)")
     parser.add_argument("--version", action="version", version=f"heocr {__version__}")
     return parser
@@ -126,6 +128,7 @@ def main(argv: list[str] | None = None) -> int:
             ocr_router=args.ocr_router,
             ocr_capture_type=args.ocr_capture_type,
             ocr_line_v6=args.ocr_line_v6,
+            photo_preprocess=args.photo_preprocess,
             force_ocr=args.force_ocr,
             crnn_model=args.crnn_model,
             crnn_sha256=args.crnn_sha256,
