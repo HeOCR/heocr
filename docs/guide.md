@@ -82,6 +82,8 @@ Pages/min is the median of three serial batches with Tesseract limited to one th
 
 Use `--photo-preprocess gray-otsu` (Python `photo_preprocess="gray-otsu"`) to send grayscale pixels to the main Tesseract reader and explicitly select its built-in Otsu thresholding. It applies to standalone camera JPEGs recognized by EXIF, or standalone images declared as `phone`, `iphone` or `pixel`. For example, use `heocr photo.jpg --ocr-router v2 --ocr-capture-type phone --photo-preprocess gray-otsu`. The OCR options record the setting on eligible input. Page geometry, DPI, model selection and scan routes use their usual settings.
 
+For internal capture checks, see the [DEV215 triad runbook](dev215-triads.md).
+
 
 ### LibreOffice
 
