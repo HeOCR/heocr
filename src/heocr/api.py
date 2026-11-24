@@ -83,6 +83,7 @@ def extract(
     ocr_line_batch: bool = False,
     ocr_number_batch: bool = False,
     photo_preprocess: str | None = None,
+    ocr_phone_geometry: bool = False,
     force_ocr: bool = False,
     crnn_model: str | os.PathLike[str] | None = None,
     crnn_sha256: str | None = None,
@@ -133,6 +134,8 @@ def extract(
     It sends the selected crops and their local OCR.
     ``ocr_hybrid_max_usd`` caps API list-price spend per document (default USD 1.00).
     The configured local OCR route handles pages where hosted reading is unavailable.
+    ``ocr_phone_geometry=True`` enables perspective-corrected line OCR on phone images with
+    supported page edges. Use a capture declaration or camera JPEG metadata.
     ``photo_preprocess="gray-otsu"`` sends grayscale rasters to the main Tesseract reader
     with internal Otsu thresholding on standalone photos. Use a phone capture declaration
     when camera metadata is unavailable.
@@ -210,6 +213,8 @@ def extract(
         hybrid = HybridReader(cap=parse_cap(ocr_hybrid_max_usd), old_print=ocr_hybrid_old_print, confidence=confidence)
     elif ocr_hybrid_old_print or ocr_hybrid_max_usd is not None or ocr_hybrid_confidence is not None:
         raise ValueError("hybrid options require ocr_hybrid='haiku'")
+    if ocr_phone_geometry and (not ocr or ocr_psm != 3 or ocr_lang != DEFAULT_LANG or crnn_model is not None):
+        raise ValueError("ocr_phone_geometry needs Hebrew Tesseract OCR with page mode 3")
     if photo_preprocess is not None and (photo_preprocess != "gray-otsu" or not ocr):
         raise ValueError("photo_preprocess must be 'gray-otsu' and needs OCR")
     if ocr_router is not None or ocr_capture_type is not None:
@@ -310,15 +315,18 @@ def extract(
         doc.options["ocr"]["line_v6_sha256"] = V6_SHA256
     if ocr_number_batch:
         doc._ocr_settings["number_batch"] = True
-    if photo_preprocess is not None and kind.format in IMAGE_FORMATS:
+    if (photo_preprocess is not None or ocr_phone_geometry) and kind.format in IMAGE_FORMATS:
         from heocr.ocr.routes import PHOTO_CAPTURES, classify_capture
 
         capture = ocr_capture_type
         if capture is None:
             capture, _, _ = classify_capture(body, kind.format)
         if capture in PHOTO_CAPTURES:
-            doc.options["ocr"]["photo_preprocess"] = photo_preprocess
-            doc._ocr_settings["photo_gray_otsu"] = True
+            if photo_preprocess is not None:
+                doc.options["ocr"]["photo_preprocess"] = photo_preprocess
+                doc._ocr_settings["photo_gray_otsu"] = True
+            if ocr_phone_geometry:
+                doc._ocr_settings["phone_geometry"] = True
     if kind.format in CONVERSIONS:
         doc.options["convert"] = {"engine": "libreoffice", "to": CONVERSIONS[kind.format][1]} if convert else False
         doc._convert_settings = {"cmd": soffice, "timeout": convert_timeout or CONVERT_TIMEOUT} if convert else None

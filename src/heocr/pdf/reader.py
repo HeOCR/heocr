@@ -2509,6 +2509,15 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
                 joined_camera_lines = len(result.lines) - len(joined.lines)
                 result = joined
                 flags = flags + ["ocr_camera_line_fragments_joined"]
+    if (page is None and settings.get("phone_geometry") and historical is None
+            and not (page_failed or unruled or grids or rectified or time_up(doc))):
+        from heocr.ocr.phone_geometry import read_lines as read_phone_lines
+
+        corrected = read_phone_lines(engine, gray, result)
+        if corrected is not None:
+            result = corrected
+            short, outside_share = short_for_ink(gray, result)
+            flags = flags + ["ocr_phone_geometry_rectified"]
     columns = None
     if layout and doc._rtl:
         ltr_changes += ocr_layout.normalize_ltr(line for line in result.lines if id(line) not in taken)

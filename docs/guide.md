@@ -108,6 +108,21 @@ Pages/min is the median of three serial batches with Tesseract limited to one th
 
 Use `--photo-preprocess gray-otsu` (Python `photo_preprocess="gray-otsu"`) to send grayscale pixels to the main Tesseract reader and explicitly select its built-in Otsu thresholding. It applies to standalone camera JPEGs recognized by EXIF, or standalone images declared as `phone`, `iphone` or `pixel`. For example, use `heocr photo.jpg --ocr-router v2 --ocr-capture-type phone --photo-preprocess gray-otsu`. The OCR options record the setting on eligible input. Page geometry, DPI, model selection and scan routes use their usual settings.
 
+#### Phone perspective correction
+
+```sh
+heocr photo.jpg --ocr-router v2 --ocr-capture-type phone --ocr-phone-geometry
+```
+
+Use this experimental option for angled phone photos of printed Hebrew prose.
+The reader uses supported paper edges and native OCR word positions to find
+the text plane. It rereads individual straightened lines at a common sampling
+scale and maps their positions back to the source image. The route keeps the
+native reading when the paper or line geometry is uncertain. Declared scanner
+and issuer-render inputs bypass this option. In Python, pass
+`ocr_phone_geometry=True`. A page with an accepted reread records
+`ocr_phone_geometry_rectified` in its flags.
+
 For internal capture checks, see the [DEV215 triad runbook](dev215-triads.md).
 
 ### Geometric OCR layout
