@@ -1,4 +1,4 @@
-"""OCR model routes for print-domain probing and caller-declared captures.
+"""OCR model routes for print-domain probing and capture classification.
 
 Each domain names a released model (``heocr.models.MODELS``) or ``None`` for stock Tesseract ``heb``.
 The table comes from evaluation's default-model study. ``auto`` is opt-in: the default reads every
@@ -8,6 +8,7 @@ document with the modern-print model (``heocr.api.DEFAULT_MODEL``).
 from __future__ import annotations
 
 import re
+from io import BytesIO
 
 DOMAINS = ("modern", "old")  # modern print, and old or rabbinic print (decision 0018)
 DEFAULT_DOMAIN = "modern"  # the fallback when the probe cannot tell (D6 note, cascade step 3)
@@ -31,6 +32,24 @@ def capture_model_for(capture_type: str) -> str:
     if not isinstance(capture_type, str) or capture_type not in CAPTURE_MODELS:
         raise ValueError(f"ocr_capture_type must be one of: {', '.join(CAPTURE_MODELS)}")
     return CAPTURE_MODELS[capture_type]
+
+
+def classify_capture(body: bytes, file_format: str) -> tuple[str | None, str, str | None]:
+    """Return the capture label, evidence and model override for the opt-in reader."""
+    if file_format == "pdf":
+        # The PDF reader already decides if a page or region needs OCR.
+        return "pdf-render", "pdf_container", RIVOK_FULL
+    if file_format == "jpeg":
+        from PIL import ExifTags, Image
+
+        try:
+            with Image.open(BytesIO(body)) as image:
+                photo = image.getexif().get_ifd(ExifTags.IFD.Exif)
+            if photo.get(ExifTags.Base.ExposureTime) or photo.get(ExifTags.Base.FocalLength):
+                return "camera-photo", "camera_exif", CAPTURE_MODELS["phone"]
+        except (OSError, ValueError, Image.DecompressionBombError):
+            pass  # The image reader handles decode errors and unread reporting.
+    return None, "no_capture_evidence", None
 
 
 def model_for(domain: str) -> str | None:

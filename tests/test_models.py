@@ -13,7 +13,7 @@ import heocr
 from heocr import models
 from heocr.cli import main
 from heocr.ocr import routes
-from tests.synth.pdf import PdfPage, make_pdf
+from tests.synth.pdf import PdfPage, lines_block, make_pdf
 
 FAKE = [sys.executable, str(Path(__file__).parent / "synth" / "fake_tesseract.py")]
 SCAN = make_pdf([PdfPage(images=[(0, 0, 595, 842)], image_gray=0xFF)])
@@ -111,7 +111,7 @@ class ModelRouteTest(unittest.TestCase):
         self.assertEqual(doc.to_dict()["options"]["ocr"]["model"], "auto")
         self.assertEqual(doc.blocks[0].ocr["model_route"]["mode"], "auto")
 
-    def test_capture_route_uses_the_declared_model(self) -> None:
+    def capture_models(self) -> dict[str, models.ReleasedModel]:
         self.cache.mkdir()
         desktop = b"fake Rivok Full"
         mobile = b"fake modern v1"
@@ -121,8 +121,12 @@ class ModelRouteTest(unittest.TestCase):
                                       "https://example.invalid/model", "10.0/test", "Apache-2.0", bundled=True)
         rivok = models.ReleasedModel(routes.RIVOK_FULL, hashlib.sha256(desktop).hexdigest(), len(desktop),
                                      "https://example.invalid/rivok", None, "Apache-2.0")
-        with mock.patch.dict(models.MODELS, {modern.name: modern, rivok.name: rivok}):
-            choices = (("phone", modern.name), ("iphone", modern.name), ("pixel", modern.name),
+        return {modern.name: modern, rivok.name: rivok}
+
+    def test_capture_route_uses_the_declared_model(self) -> None:
+        with mock.patch.dict(models.MODELS, self.capture_models()):
+            modern = "heocr_modern_v1"
+            choices = (("phone", modern), ("iphone", modern), ("pixel", modern),
                        ("scanner", "heb_rivok"), ("issuer-render", "heb_rivok"))
             for capture, expected in choices:
                 with self.subTest(capture=capture):
@@ -135,10 +139,68 @@ class ModelRouteTest(unittest.TestCase):
                     self.assertEqual(doc.blocks[0].ocr["model_route"], {
                         "mode": "capture", "capture_type": capture, "model": expected, "reason": "declared_capture",
                     })
-                    if expected == rivok.name:
+                    if expected == routes.RIVOK_FULL:
                         self.assertEqual(doc.components["tesseract:heb_rivok.licence"], "Apache-2.0")
                         self.assertNotIn("tesseract:heb_rivok.doi", doc.components)
                     self.assertNotIn(self.tmp.name, doc.to_json())
+
+    def test_v2_classifies_pdf_and_camera_and_accepts_overrides(self) -> None:
+        from PIL import ExifTags, Image
+        from PIL.TiffImagePlugin import IFDRational
+
+        image = Image.new("RGB", (595, 842), "white")
+        image.paste("black", (80, 80, 250, 100))
+        exif = Image.Exif()
+        exif[ExifTags.IFD.Exif] = {ExifTags.Base.FocalLength: IFDRational(5, 1)}
+        jpeg = io.BytesIO()
+        image.save(jpeg, format="JPEG", exif=exif)
+        png = io.BytesIO()
+        image.save(png, format="PNG")
+        modern, rivok = "heocr_modern_v1", routes.RIVOK_FULL
+        cases = (
+            (SCAN, None, "pdf-render", "pdf_container", rivok),
+            (SCAN, "pixel", "pixel", "declared_capture", modern),
+            (jpeg.getvalue(), None, "camera-photo", "camera_exif", modern),
+            (png.getvalue(), "scanner", "scanner", "declared_capture", rivok),
+            (png.getvalue(), None, None, "no_capture_evidence", modern),
+        )
+        with mock.patch.dict(models.MODELS, self.capture_models()):
+            for body, declared, capture, reason, model in cases:
+                with self.subTest(capture=capture):
+                    self.log.unlink(missing_ok=True)
+                    doc = heocr.extract(body, tesseract=FAKE, ocr_router="v2", ocr_capture_type=declared,
+                                        check_numbers=False)
+                    self.assertEqual(doc.unread, [])
+                    call = self.recognition_call()
+                    self.assertEqual(call[call.index("-l") + 1], model)
+                    self.assertEqual(doc.options["ocr"]["router"], {"version": "v2", "reason": reason})
+                    self.assertEqual(doc.options["ocr"].get("capture_type"), capture)
+                    self.assertEqual(doc.blocks[0].ocr.get("model_route"), None if capture is None else {
+                        "mode": "capture", "capture_type": capture, "reason": reason, "model": model,
+                    })
+                    self.assertEqual(heocr.validate(doc.to_dict()), [])
+
+            self.log.unlink(missing_ok=True)
+            default = heocr.extract(SCAN, tesseract=FAKE, check_numbers=False)
+            call = self.recognition_call()
+            self.assertEqual(call[call.index("-l") + 1], modern)
+            self.assertNotIn("router", default.options["ocr"])
+
+    def test_v2_preserves_text_layers_and_checks_settings(self) -> None:
+        source = make_pdf([PdfPage(lines=lines_block(["שלום עולם"]))])
+        with mock.patch.dict(models.MODELS, self.capture_models()):
+            native = heocr.extract(source, tesseract=FAKE, ocr_router="v2", check_numbers=False)
+            self.assertEqual(native.text, heocr.extract(source, ocr=False).text)
+            self.assertFalse(self.log.exists())
+            forced = heocr.extract(source, tesseract=FAKE, ocr_router="v2", force_ocr=True, check_numbers=False)
+            call = self.recognition_call()
+            self.assertEqual(call[call.index("-l") + 1], routes.RIVOK_FULL)
+            self.assertIn("ocr_forced", forced.pages[0].flags)
+        for kwargs in ({"ocr_model": "auto"}, {"ocr_lang": "heb+eng"}, {"ocr": False}):
+            with self.subTest(kwargs=kwargs), self.assertRaisesRegex(ValueError, "needs Hebrew Tesseract"):
+                heocr.extract(SCAN, ocr_router="v2", **kwargs)
+        with self.assertRaisesRegex(ValueError, "must be 'v2'"):
+            heocr.extract(SCAN, ocr_router="unknown")
 
     def test_line_v6_rereads_prose_and_keeps_layout(self) -> None:
         self.cache.mkdir()
@@ -158,6 +220,14 @@ class ModelRouteTest(unittest.TestCase):
             self.assertFalse(reread.called)
             opted_in = heocr.extract(SCAN, **options, ocr_line_v6=model)
             self.assertTrue(reread.called)
+            routed = heocr.extract(SCAN, tesseract=FAKE, ocr_router="v2", ocr_line_v6=model,
+                                   check_numbers=False, repairs=False)
+            self.assertEqual(routed.blocks[0].ocr["line_router"], opted_in.blocks[0].ocr["line_router"])
+            reread.reset_mock()
+            phone = heocr.extract(SCAN, tesseract=FAKE, ocr_router="v2", ocr_capture_type="phone",
+                                  ocr_line_v6=model, check_numbers=False)
+            self.assertNotIn("line_v6_sha256", phone.options["ocr"])
+            reread.assert_not_called()
             model.write_bytes(b"wrong model")
             fallback = heocr.extract(SCAN, **options, ocr_line_v6=model)
 
@@ -196,6 +266,8 @@ class ModelRouteTest(unittest.TestCase):
         (self.cache / "heb_rivok.traineddata").write_bytes(b"different model")
         doc = heocr.extract(SCAN, tesseract=FAKE, ocr_capture_type="issuer-render")
         self.assertIn("sha256 differs", doc.unread[0].detail)
+        routed = heocr.extract(SCAN, tesseract=FAKE, ocr_router="v2")
+        self.assertIn("sha256 differs", routed.unread[0].detail)
         calls = [json.loads(line) for line in self.log.read_text(encoding="utf-8").splitlines()]
         self.assertTrue(all(call[0].startswith("--") for call in calls))
 
