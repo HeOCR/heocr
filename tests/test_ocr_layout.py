@@ -60,6 +60,16 @@ class LayoutTest(unittest.TestCase):
         self.assertIsNone(column_order([interleaved[0], interleaved[2]], 800))
         self.assertIsNone(column_order([*interleaved, line([word("מעבר", 100, 120, 630)])], 800))
 
+    def test_three_columns_read_each_complete_column_right_to_left(self):
+        lines = [
+            line([word(side, x, y), word("טקסט", x + 70, y), word("תקין", x + 140, y)])
+            for y in range(40, 300, 40)
+            for side, x in (("שמאל", 20), ("אמצע", 310), ("ימין", 600))
+        ]
+        result = column_order(lines, 800)
+        self.assertEqual([value.text.split()[0] for value in result],
+                         ["ימין"] * 7 + ["אמצע"] * 7 + ["שמאל"] * 7)
+
     def test_ltr_run_uses_visual_geometry_and_preserves_hebrew_anchors(self):
         mixed = line([word("גרסה", 200, 20), word("2026", 140, 20),
                       word("build", 110, 20), word("הותקנה", 55, 20)])

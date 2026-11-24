@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from bisect import bisect_right
 from dataclasses import replace
 import re
 from statistics import median
@@ -87,8 +88,23 @@ def _margin_order(lines, prose, page_width, height):
     return ordered if [line.bbox for line in ordered] != [line.bbox for line in lines] else None
 
 
+def _band_columns(body, prose, cuts, height):
+    bands = [[] for _ in range(len(cuts) + 1)]
+    for line in body:
+        bands[bisect_right(cuts, line.bbox[0])].append(line)
+    boxes = []
+    for band in bands:
+        support = [line.bbox for line in band if id(line) in prose]
+        if len(support) < 4:
+            return None
+        boxes.append((min(box[1] for box in support), max(box[3] for box in support)))
+    if any(min(a[1], b[1]) - max(a[0], b[0]) < 5 * height for a, b in zip(boxes, boxes[1:])):
+        return None
+    return bands[::-1]
+
+
 def column_order(lines, page_width: int) -> list | None:
-    """Read two sustained columns right first, retaining spanning headings and footers."""
+    """Read sustained columns right first, retaining spanning headings and footers."""
     if len(lines) < 8:
         return None
     height = median(line.bbox[3] - line.bbox[1] for line in lines)
@@ -100,7 +116,7 @@ def column_order(lines, page_width: int) -> list | None:
     if len(prose) < 8:
         return None
     cuts = {(line.bbox[2] + gutter / 2) for line in prose} | {(line.bbox[0] - gutter / 2) for line in prose}
-    pick = None
+    picks = []
     for cut in sorted(cuts):
         if not page_width * .25 <= cut <= page_width * .75:
             continue
@@ -133,11 +149,23 @@ def column_order(lines, page_width: int) -> list | None:
             if any(line.bbox[1] < max(item.bbox[3] for item in body) for line in sides[3]):
                 continue
             rank = min(len(left), len(right)), -abs(cut - page_width / 2)
-            if pick is None or rank > pick[0]:
-                pick = rank, sides
-    if pick is None:
+            picks.append((rank, cut, sides))
+    if not picks:
         return _margin_order(lines, prose, page_width, height)
-    grouped = [sorted(side, key=lambda line: line.bbox[1]) for side in pick[1]]
+    picks.sort(key=lambda pick: pick[0], reverse=True)
+    _, best_cut, (header, right, left, footer) = picks[0]
+    body = right + left
+    bounds = [best_cut]
+    bands = [right, left]
+    supported = {id(line) for line in prose}
+    for _, cut, sides in picks[1:]:
+        if sides[0] != header or sides[3] != footer:
+            continue
+        next_bounds = sorted([*bounds, cut])
+        refined = _band_columns(body, supported, next_bounds, height)
+        if refined is not None:
+            bounds, bands = next_bounds, refined
+    grouped = [sorted(side, key=lambda line: line.bbox[1]) for side in (header, *bands, footer)]
     if [id(line) for side in grouped for line in side] == [id(line) for line in lines]:
         return None
     return [replace(line, paragraph=(f"{band}:{line.paragraph[0]}", line.paragraph[1]))
