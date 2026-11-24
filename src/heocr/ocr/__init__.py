@@ -51,7 +51,7 @@ def engine_for(doc: "Document") -> Tesseract | None:
             )
             if capture is not None:
                 engine.route = {"mode": "capture", "capture_type": capture, "model": settings["model"],
-                                "reason": "declared_capture"}
+                                "reason": settings["capture_reason"]}
             doc._ocr_engine = engine
             doc.components.update(engine.provenance())
         except OcrUnavailable as exc:

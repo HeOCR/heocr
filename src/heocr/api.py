@@ -51,6 +51,7 @@ def extract(
     ocr_psm: int = DEFAULT_PSM,
     tesseract: str | Sequence[str] | None = None,
     ocr_model: str | None = DEFAULT_MODEL,
+    ocr_router: str | None = None,
     ocr_capture_type: str | None = None,
     ocr_line_v6: str | os.PathLike[str] | None = None,
     force_ocr: bool = False,
@@ -88,10 +89,14 @@ def extract(
     ``ocr_capture_type`` opts into a single model for a declared capture. ``phone``, ``iphone`` and
     ``pixel`` use modern_v1; ``scanner`` and ``issuer-render`` use a pinned local Rivok Full model.
     This route needs Hebrew Tesseract OCR and reports unread OCR when its model is unavailable.
+    ``ocr_router="v2"`` selects the capture route using a declaration when supplied, PDF rendering
+    for document OCR, or exposure/focal-length metadata for JPEG photos. Inputs without a signal
+    use the usual model. The option leaves text-layer handling unchanged.
     ``force_ocr`` reads every PDF page by OCR, its text layer ignored (flag ``ocr_forced``): a workaround
     for a text layer heocr reads badly. It needs ``ocr``.
     ``ocr_line_v6`` opts Rivok Full page prose into a two-model reread of the existing lines.
-    It takes the local pinned v6 ``.traineddata`` file and requires Rivok Full as the page model.
+    It takes a local pinned v6 ``.traineddata`` file. With router v2 it runs only on Rivok Full
+    page OCR prose and can be supplied for a batch with mixed input captures.
 
     ``crnn_model`` and ``crnn_sha256`` opt OCR page prose into a local CPU ONNX line reader.
     Tesseract supplies the ordered boxes and reads tables, form entries and image regions.
@@ -136,17 +141,23 @@ def extract(
     if ocr:
         check_settings(ocr_lang, ocr_psm)
     ocr_model = MODEL_ALIASES.get(ocr_model, ocr_model) if isinstance(ocr_model, str) else ocr_model
-    if ocr_capture_type is not None:
+    if ocr_router is not None and ocr_router != "v2":
+        raise ValueError("ocr_router must be 'v2'")
+    if ocr_router is not None or ocr_capture_type is not None:
         from heocr.ocr.routes import capture_model_for
 
         if not ocr or ocr_lang != DEFAULT_LANG or ocr_model != DEFAULT_MODEL or crnn_model is not None or handwriting is not None:
-            raise ValueError("ocr_capture_type needs Hebrew Tesseract OCR with the default model option")
-        ocr_model = capture_model_for(ocr_capture_type)
+            option = "ocr_router" if ocr_router is not None else "ocr_capture_type"
+            raise ValueError(f"{option} needs Hebrew Tesseract OCR with the default model option")
+        if ocr_capture_type is not None:
+            ocr_model = capture_model_for(ocr_capture_type)
     if ocr_line_v6 is not None:
         from heocr.ocr.routes import RIVOK_FULL
 
-        if (not ocr or ocr_lang != DEFAULT_LANG or ocr_model != RIVOK_FULL
-                or crnn_model is not None or handwriting is not None):
+        if ocr_router is None and (
+            not ocr or ocr_lang != DEFAULT_LANG or ocr_model != RIVOK_FULL
+            or crnn_model is not None or handwriting is not None
+        ):
             raise ValueError("ocr_line_v6 needs Rivok Full page OCR without CRNN or handwriting")
         if Path(ocr_line_v6).suffix != ".traineddata":
             raise ValueError("ocr_line_v6 needs a local .traineddata file")
@@ -172,6 +183,16 @@ def extract(
     if crnn_model is not None and (not ocr or ocr_lang != DEFAULT_LANG):
         raise ValueError("CRNN needs Hebrew OCR (ocr_lang='heb')")
     kind = identify(body)
+    capture_reason = "declared_capture"
+    if ocr_router is not None:
+        from heocr.ocr.routes import RIVOK_FULL, classify_capture
+
+        if ocr_capture_type is None:
+            ocr_capture_type, capture_reason, model_override = classify_capture(body, kind.format)
+            if model_override is not None:
+                ocr_model = model_override
+        if ocr_model != RIVOK_FULL:
+            ocr_line_v6 = None
     doc = Document(
         sha256=hashlib.sha256(body).hexdigest(),
         size=len(body),
@@ -201,9 +222,12 @@ def extract(
         doc.options["time_limit"] = time_limit
         doc._time_limit, doc._deadline = float(time_limit), started + time_limit
     doc._ocr_settings = {"cmd": tesseract, "lang": ocr_lang, "psm": ocr_psm, "model": ocr_model} if ocr else None
+    if ocr_router is not None:
+        doc.options["ocr"]["router"] = {"version": ocr_router, "reason": capture_reason}
     if ocr_capture_type is not None:
         doc.options["ocr"]["capture_type"] = ocr_capture_type
         doc._ocr_settings["capture_type"] = ocr_capture_type
+        doc._ocr_settings["capture_reason"] = capture_reason
     if ocr_line_v6 is not None:
         from heocr.ocr.line_models import V6_SHA256
 

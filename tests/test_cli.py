@@ -47,6 +47,14 @@ class CliTest(unittest.TestCase):
         ocr = json.loads(out.read_text(encoding="utf-8"))["options"]["ocr"]
         self.assertEqual((ocr["capture_type"], ocr["model"]), ("issuer-render", "heb_rivok"))
 
+    def test_opt_in_router_reaches_extract(self) -> None:
+        out = Path(self.tmp.name) / "out.json"
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(main([str(self.input), "--ocr-router", "v2", "-o", str(out)]), 0)
+        ocr = json.loads(out.read_text(encoding="utf-8"))["options"]["ocr"]
+        self.assertEqual(ocr["router"], {"version": "v2", "reason": "no_capture_evidence"})
+        self.assertEqual(ocr["model"], "heocr_modern_v1")
+
     def test_quiet_text_to_stdout(self) -> None:
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):

@@ -49,17 +49,19 @@ export TESSDATA_PREFIX=~/tessdata
 
 To check, run `tesseract --list-langs`: it should list `eng` and `heb`. heocr records the models it used, each with its sha256, in the record's `producer.components`.
 
-### Declared capture OCR prototype
+### Capture router v2
 
-Use `--ocr-capture-type` or `ocr_capture_type=` when every page or image in the input has the same known capture type. `phone`, `iphone` and `pixel` use `heocr_modern_v1`. `scanner` and `issuer-render` use the pinned Rivok Full v2.0 int8 model. For inputs with unknown or mixed captures, omit the option and use the usual model setting.
+Use `heocr scan.pdf --ocr-router v2` or `heocr.extract("scan.pdf", ocr_router="v2")` to enable capture routing. PDF pages and regions that need OCR use the pinned Rivok Full v2.0 int8 model. JPEGs with camera exposure or focal-length EXIF use `heocr_modern_v1`. Inputs without a capture signal use the usual model route.
 
-For example, use `heocr scan.png --ocr-capture-type scanner`. The prototype selects the main reader and uses the existing Hebrew Tesseract pipeline, including text-layer handling, layout and second readings. For an issuer PDF with a text layer, provide the intended raster or use `--force-ocr` to read the rendered page. Keep the model, language and alternate-backend options at their defaults. The OCR record includes the declared capture and chosen model. OCR reports the route as unavailable if the requested model is missing or differs from its pin.
+You can override classification with `--ocr-capture-type` or `ocr_capture_type=`. For example, use `heocr scan.png --ocr-router v2 --ocr-capture-type scanner` for a known scanner image. `phone`, `iphone` and `pixel` pick modern_v1, and `scanner` and `issuer-render` pick Rivok. The capture declaration applies to the whole input and also works on its own. Keep the model, language and alternate-backend options at their defaults. The OCR record includes the capture signal and chosen model. When the classifier or declaration picks a pinned model, a missing or mismatched local file is reported as unavailable.
+
+The PDF reader still uses readable text layers. Use `--force-ocr` to read a rendered PDF page in place of its text layer. Declare phone captures wrapped in PDF to select modern_v1.
 
 Install the optional Rivok Labs model with `heocr --download-model heb_rivok`. HeOCR checks the download before keeping it in the model cache (`HEOCR_MODELS` when set). OCR reads the local file. The router stays opt-in while carrier-matched DEV validation is pending.
 
 See the [HeOCR component model card](../src/heocr/models_data/MODEL_CARD.heb_rivok.md) for the immutable weight pin and upstream credits. The package includes Rivok's [Apache-2.0 licence](../src/heocr/models_data/LICENSE.heb_rivok) and [NOTICE](../src/heocr/models_data/NOTICE.heb_rivok).
 
-For an experimental two-model reread of the prose lines, add `--ocr-line-v6 /path/to/v6.traineddata` or pass `ocr_line_v6=` in Python. Use this with `--ocr-capture-type scanner`, `--ocr-capture-type issuer-render`, or `--ocr-model heb_rivok`. The option only rereads existing prose lines and preserves their geometry and order. It expects the pinned local v6 checkpoint with SHA-256 `52b94ef13eaa3c8d32403ab05e12fc9be74d22a2d1aaa4d2de904b313b0e1609`. HeOCR records the hash of the staged model and the selections on changed lines. It retains the page reading when v6 is unavailable or a reread is inconclusive. Rereading adds two recognition calls per eligible prose line.
+Add `--ocr-line-v6 /path/to/v6.traineddata` or pass `ocr_line_v6=` in Python to enable the two-model reread. With router v2, it applies to prose from Rivok page OCR, so you can pass the same option for a batch with mixed input captures. You can also pair it with `--ocr-capture-type scanner`, `--ocr-capture-type issuer-render`, or `--ocr-model heb_rivok`. The option rereads existing prose lines and preserves their geometry and order. It expects the pinned local v6 checkpoint with SHA-256 `52b94ef13eaa3c8d32403ab05e12fc9be74d22a2d1aaa4d2de904b313b0e1609`. HeOCR records the hash of the staged model and the selections on changed lines. It retains the page reading when v6 is unavailable or a reread is inconclusive. Rereading adds two recognition calls per eligible prose line.
 
 
 ### LibreOffice

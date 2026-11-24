@@ -74,6 +74,8 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--ocr-capture-type", choices=CAPTURE_MODELS,
                         help="opt into experimental OCR routing for a declared capture")
+    parser.add_argument("--ocr-router", choices=("v2",),
+                        help="opt into OCR routing by capture type (declaration, PDF render or camera metadata)")
     parser.add_argument("-q", "--quiet", action="store_true", help="do not report unread parts on stderr (a missing OCR model is still reported)")
     parser.add_argument("--version", action="version", version=f"heocr {__version__}")
     return parser
@@ -121,6 +123,7 @@ def main(argv: list[str] | None = None) -> int:
             ocr_psm=args.psm,
             tesseract=args.tesseract,
             ocr_model=args.ocr_model,
+            ocr_router=args.ocr_router,
             ocr_capture_type=args.ocr_capture_type,
             ocr_line_v6=args.ocr_line_v6,
             force_ocr=args.force_ocr,
