@@ -81,6 +81,7 @@ def extract(
     ocr_capture_type: str | None = None,
     ocr_line_v6: str | os.PathLike[str] | None = None,
     ocr_line_batch: bool = False,
+    ocr_number_batch: bool = False,
     photo_preprocess: str | None = None,
     force_ocr: bool = False,
     crnn_model: str | os.PathLike[str] | None = None,
@@ -141,6 +142,8 @@ def extract(
     It takes a local pinned v6 ``.traineddata`` file. With router v2 it runs only on Rivok Full
     page OCR prose and can be supplied for a batch with mixed input captures.
     ``ocr_line_batch=True`` batches these prose crops per model within the page.
+    ``ocr_number_batch=True`` batches single-word number crops for full-page OCR
+    when the extraction has no time limit.
     It needs ``ocr_line_v6`` and uses individual reads when a batch fails or a
     document time limit is set.
 
@@ -219,6 +222,8 @@ def extract(
             ocr_model = capture_model_for(ocr_capture_type)
     if ocr_line_batch and ocr_line_v6 is None:
         raise ValueError("ocr_line_batch needs ocr_line_v6")
+    if ocr_number_batch and not ocr:
+        raise ValueError("ocr_number_batch needs OCR")
     if ocr_line_v6 is not None:
         from heocr.ocr.routes import RIVOK_FULL
 
@@ -303,6 +308,8 @@ def extract(
         doc._ocr_settings["line_v6"] = ocr_line_v6
         doc._ocr_settings["line_batch"] = ocr_line_batch
         doc.options["ocr"]["line_v6_sha256"] = V6_SHA256
+    if ocr_number_batch:
+        doc._ocr_settings["number_batch"] = True
     if photo_preprocess is not None and kind.format in IMAGE_FORMATS:
         from heocr.ocr.routes import PHOTO_CAPTURES, classify_capture
 
@@ -355,15 +362,15 @@ def _extract_image(source: Source, **options) -> Document:
 
 
 def extract_images(sources: Iterable[Source], *, workers: int = 1, **options) -> Iterator[Document]:
-    """Read standalone images in input order with one or two workers.
+    """Read standalone images in input order with up to eight workers.
 
     Each input uses the same settings and record format as :func:`extract`.
-    Frames of a multi-page image stay in one record. Pass ``workers=2`` to overlap
-    OCR of independent images, with at most two inputs in flight. Exhaust the
+    Frames of a multi-page image stay in one record. Increase ``workers`` to overlap
+    OCR of independent images, with at most that many inputs in flight. Exhaust the
     iterator or close it to join the workers if you stop reading early.
     """
-    if isinstance(workers, bool) or not isinstance(workers, int) or workers not in (1, 2):
-        raise ValueError("workers must be 1 or 2")
+    if isinstance(workers, bool) or not isinstance(workers, int) or not 1 <= workers <= 8:
+        raise ValueError("workers must be an integer from 1 through 8")
     read_image = partial(_extract_image, **options)
     if workers == 1:
         yield from map(read_image, sources)
