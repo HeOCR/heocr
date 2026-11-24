@@ -93,6 +93,8 @@ def _parser() -> argparse.ArgumentParser:
                         help="cap the Anthropic list-price cost per document (default: 1.00)")
     parser.add_argument("--ocr-hybrid-dry-run", action="store_true",
                         help="estimate the document's cost upper bound locally without sending anything")
+    parser.add_argument("--ocr-phone-geometry", action="store_true",
+                        help="reread isolated lines on angled phone images with supported paper edges")
     parser.add_argument("--photo-preprocess", choices=("gray-otsu",),
                         help="send grayscale to the main OCR reader with internal Otsu thresholding on photos")
     parser.add_argument("-q", "--quiet", action="store_true", help="do not report unread parts on stderr (a missing OCR model is still reported)")
@@ -184,6 +186,7 @@ def main(argv: list[str] | None = None) -> int:
             ocr_line_batch=args.ocr_line_batch,
             ocr_number_batch=args.ocr_number_batch,
             photo_preprocess=args.photo_preprocess,
+            ocr_phone_geometry=args.ocr_phone_geometry,
             force_ocr=args.force_ocr,
             crnn_model=args.crnn_model,
             crnn_sha256=args.crnn_sha256,
