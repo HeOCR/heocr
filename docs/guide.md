@@ -49,6 +49,20 @@ export TESSDATA_PREFIX=~/tessdata
 
 To check, run `tesseract --list-langs`: it should list `eng` and `heb`. heocr records the models it used, each with its sha256, in the record's `producer.components`.
 
+### Which OCR route when
+
+| Input or need | Route |
+| --- | --- |
+| Readable text layers, routine scans, or files that must stay local | Start with the default. It reads usable text layers and uses the installed local OCR for image pages. |
+| A known scanner, issuer render, or phone capture | Use [capture router v2](#capture-router-v2). Declare the capture for images without usable metadata or phone photos wrapped in a PDF. |
+| Historical Hebrew print that must stay local | Use [router v2 with the pinned P-hist v2 model](#historical-print-with-router-v2) if you have the weights. |
+| Modern print cleared for sharing, when plain page text is enough | Use [Haiku hybrid OCR](#haiku-hybrid-ocr) with `--ocr-hybrid haiku`. It sends the page image. |
+| Old print cleared for sharing, when plain page text is enough | Add `--ocr-hybrid-old-print` to Haiku. It sends the page image and the local R8b draft. |
+
+Add [geometric layout v1](#geometric-ocr-layout) to local OCR when you need
+line boxes or structured cells. You can pair router v2 with Haiku to
+choose the local fallback.
+
 ### Capture router v2
 
 Use `heocr scan.pdf --ocr-router v2` or `heocr.extract("scan.pdf", ocr_router="v2")` to enable capture routing. PDF pages and regions that need OCR use the pinned Rivok Full v2.0 int8 model. JPEGs with camera exposure or focal-length EXIF use `heocr_modern_v1`. Inputs without a capture signal use the usual model route.
@@ -176,6 +190,25 @@ that document. The JSON record includes the model ID, prompt hash, budget
 usage, and per-page hosted or fallback status. In Python, use
 `heocr.extract("scan.pdf", ocr_hybrid="haiku", ocr_hybrid_max_usd="1.00")`.
 Add `ocr_hybrid_old_print=True` for old print.
+
+#### Example API cost per input
+
+The November 24, 2026 DEV log recorded one request per selected image.
+Repricing its uncached token counts at the logged USD 0.10 per million input
+tokens and USD 0.50 per million output tokens gives these costs.
+
+| Route and input | Inputs | Mean USD per input | Observed USD range |
+| --- | ---: | ---: | ---: |
+| Haiku image only, modern page photos | 10 | 0.00094 | 0.00065–0.00149 |
+| Haiku image plus R8b draft, historical line panels | 8 | 0.00184 | 0.00154–0.00234 |
+| The same mix of photos and panels | 18 | 0.00134 | 0.00065–0.00234 |
+
+The mixed example is $1.34 per 1,000 input images at the same proportions.
+Historical panels contain selected lines. Full books and different page sizes
+can have different costs. Local routes use $0 in API charges and still use CPU
+time. Use the dry run for the conservative reservation and check each
+successful page's `signals.ocr_hybrid_usage.list_price_usd` in the JSON record for its
+reported token cost.
 
 
 ### LibreOffice
