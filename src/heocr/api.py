@@ -76,6 +76,7 @@ def extract(
     ocr_old_print_model: str | os.PathLike[str] | None = None,
     ocr_hybrid: str | None = None,
     ocr_hybrid_old_print: bool = False,
+    ocr_hybrid_confidence: float | None = None,
     ocr_hybrid_max_usd: str | Decimal | None = None,
     ocr_capture_type: str | None = None,
     ocr_line_v6: str | os.PathLike[str] | None = None,
@@ -126,6 +127,9 @@ def extract(
     ``ocr_hybrid="haiku"`` consents to sending whole-page OCR images to Anthropic.
     It requires the ``ANTHROPIC_API_KEY`` environment variable for hosted reading.
     ``ocr_hybrid_old_print=True`` also sends the pinned local R8b OCR draft for correction.
+    ``ocr_hybrid_confidence`` switches to local-first router v2 with hosted correction
+    of only the existing prose lines below the provided local score (0 to 100).
+    It sends the selected crops and their local OCR.
     ``ocr_hybrid_max_usd`` caps API list-price spend per document (default USD 1.00).
     The configured local OCR route handles pages where hosted reading is unavailable.
     ``photo_preprocess="gray-otsu"`` sends grayscale rasters to the main Tesseract reader
@@ -193,12 +197,15 @@ def extract(
         raise ValueError("ocr_old_print_model needs router v2 and a local .traineddata file")
     hybrid = None
     if ocr_hybrid is not None:
-        from heocr.ocr.hybrid import HybridReader, parse_cap
+        from heocr.ocr.hybrid import HybridReader, parse_cap, parse_confidence
 
         if ocr_hybrid != "haiku" or not ocr:
             raise ValueError("ocr_hybrid must be 'haiku' and needs OCR")
-        hybrid = HybridReader(cap=parse_cap(ocr_hybrid_max_usd), old_print=ocr_hybrid_old_print)
-    elif ocr_hybrid_old_print or ocr_hybrid_max_usd is not None:
+        confidence = parse_confidence(
+            ocr_hybrid_confidence, router=ocr_router, old_print=ocr_hybrid_old_print or ocr_old_print_model is not None,
+        )
+        hybrid = HybridReader(cap=parse_cap(ocr_hybrid_max_usd), old_print=ocr_hybrid_old_print, confidence=confidence)
+    elif ocr_hybrid_old_print or ocr_hybrid_max_usd is not None or ocr_hybrid_confidence is not None:
         raise ValueError("hybrid options require ocr_hybrid='haiku'")
     if photo_preprocess is not None and (photo_preprocess != "gray-otsu" or not ocr):
         raise ValueError("photo_preprocess must be 'gray-otsu' and needs OCR")
