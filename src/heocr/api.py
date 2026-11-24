@@ -17,7 +17,7 @@ from heocr.contract import MAX_PAGES, Document, Unread
 from heocr.convert import CONVERSIONS, CONVERT_TIMEOUT
 from heocr.handwriting import HandwritingConfig, HandwritingReader
 from heocr.identify import identify
-from heocr.ocr.tesseract import DEFAULT_LANG, DEFAULT_PSM, check_settings
+from heocr.ocr.tesseract import DEFAULT_LANG, DEFAULT_PSM, _temporary_models, check_settings
 
 # The default OCR model: HeOCR's modern-print model, bundled in the package (``heocr.models``).
 DEFAULT_MODEL = "heocr_modern_v1"
@@ -292,7 +292,8 @@ def _extract_image(source: Source, **options) -> Document:
     body = _source_bytes(source)
     if identify(body).format not in IMAGE_FORMATS:
         raise ValueError("extract_images needs standalone image inputs")
-    return extract(body, **options)
+    with _temporary_models():
+        return extract(body, **options)
 
 
 def extract_images(sources: Iterable[Source], *, workers: int = 1, **options) -> Iterator[Document]:
