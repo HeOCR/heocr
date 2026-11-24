@@ -17,11 +17,11 @@ from heocr.ocr.tesseract import OcrUnavailable, Tesseract
 
 MODEL = "claude-haiku-5-5"
 OLD_PRINT_MODEL = "heocr_r8b"
-OLD_PRINT_DPI = 200
+PAGE_DPI = 200
+PAGE_LONG_EDGE = 2200
 MAX_OUTPUT_TOKENS = 8192
 MAX_INPUT_TOKENS = 1_048_576
 DEFAULT_CAP_USD = Decimal("1.00")
-MAX_IMAGE_EDGE = 8000
 MAX_IMAGE_BASE64_BYTES = 10_000_000
 MAX_REQUEST_BYTES = 32_000_000
 MAX_RESPONSE_BYTES = 2_000_000
@@ -194,13 +194,12 @@ class HybridReader:
 
     def read(self, doc, index, image, width, height, page_class, signals, layer_chars, flags) -> bool:
         """Record one hosted transcript, or leave the whole-page local OCR route in control."""
-        if max(image.size) > MAX_IMAGE_EDGE:
-            return self._fallback(doc, signals, "page_image_too_large")
-        # A new RGB image drops source metadata entirely. Keep the oriented page pixels.
+        # Match the DEV preparation of the oriented page and discard its source metadata.
         rgb = image.convert("RGB")
+        rgb.thumbnail((PAGE_LONG_EDGE, PAGE_LONG_EDGE))
         rgb.info.clear()
         png = io.BytesIO()
-        rgb.save(png, format="PNG")
+        rgb.save(png, format="PNG", dpi=(PAGE_DPI, PAGE_DPI))
         if 4 * ((png.tell() + 2) // 3) > MAX_IMAGE_BASE64_BYTES:
             return self._fallback(doc, signals, "page_image_too_large")
 
@@ -210,10 +209,10 @@ class HybridReader:
             try:
                 if self.seed_reader is None:
                     self.seed_reader = Tesseract.find(doc._ocr_settings["cmd"], model=OLD_PRINT_MODEL, psm=3)
-                seed = "\n".join(line.text for line in self.seed_reader.recognize(rgb, dpi=OLD_PRINT_DPI).lines)
+                seed = "\n".join(line.text for line in self.seed_reader.recognize(rgb, dpi=PAGE_DPI).lines)
                 seed_ocr = {
                     "seed_model": OLD_PRINT_MODEL, "seed_model_sha256": self.seed_reader.models[OLD_PRINT_MODEL],
-                    "seed_dpi": OLD_PRINT_DPI, "seed_psm": 3,
+                    "seed_dpi": PAGE_DPI, "seed_psm": 3,
                 }
                 doc.components["hybrid:tesseract"] = self.seed_reader.version
                 doc.components["hybrid:tesseract:executable_sha256"] = self.seed_reader.executable_sha256

@@ -97,7 +97,8 @@ class HybridTest(unittest.TestCase):
         self.assertEqual(image["source"]["media_type"], "image/png")
         with Image.open(io.BytesIO(base64.b64decode(image["source"]["data"]))) as decoded:
             self.assertEqual(decoded.getpixel((25, 25)), (10, 20, 130))
-            self.assertEqual(decoded.info, {})
+            self.assertEqual(set(decoded.info), {"dpi"})
+            self.assertEqual(tuple(round(dpi) for dpi in decoded.info["dpi"]), (200, 200))
         self.assertEqual(doc.text, HOSTED + "\n")
         self.assertEqual(doc.blocks[0].ocr["status"], "unverified")
         self.assertIsNone(doc.blocks[0].bbox)
@@ -109,6 +110,16 @@ class HybridTest(unittest.TestCase):
         self.assertEqual(Decimal(doc.options["ocr"]["hybrid"]["budget_used_usd"]), Decimal("0.0002"))
         self.assertIsNone(doc._hybrid)
         self.assertNotIn(KEY, doc.to_json())
+
+    def test_large_pages_use_dev_long_edge_limit(self):
+        image = Image.new("RGB", (3300, 900), "white")
+        ImageDraw.Draw(image).rectangle((20, 20, 210, 50), fill="black")
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        self.extract(buffer.getvalue(), ocr_hybrid="haiku")
+        _, page = self.request_content()
+        with Image.open(io.BytesIO(base64.b64decode(page["source"]["data"]))) as decoded:
+            self.assertEqual(decoded.size, (2200, 600))
 
     def test_old_print_sends_exact_prompt_and_pinned_local_draft(self):
         self.local.models = {"heocr_r8b": "a" * 64}
