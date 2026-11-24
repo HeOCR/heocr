@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from heocr import repairs
 from heocr.contract import Block, Cell, Document, Line, Page, Unread, page_limit, pages_left_unread, time_up
 from heocr.ocr import OcrUnavailable, block_ocr, call_failures, engine_for, latin_reviewer_for, number_engine_for, routes, unavailable_reason
+from heocr.ocr import layout as ocr_layout
 from heocr.ocr.tesseract import OcrLine, OcrResult, OcrWord
 from heocr.ocr.regions import (  # noqa: F401  (re-exported for callers of the PDF route)
     INK_LEVEL,
@@ -2381,6 +2382,12 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
         page_failed = True
     historical = None
     settings = doc._ocr_settings or {}
+    layout = settings.get("layout") == "v1"
+    if layout and not (grids or rectified or page_failed or time_up(doc)):
+        padded = ocr_layout.clip_guard(engine, page_image, dpi, result)
+        if padded is not None:
+            result = padded
+            flags = flags + ["ocr_layout_clip_guard"]
     if (settings.get("old_print_model") is not None and not (grids or rectified or page_failed)
             and settings.get("capture_type") != "issuer-render"):
         from heocr.ocr.old_print import read_page as read_old_print
@@ -2400,7 +2407,8 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
         except OcrUnavailable:
             page_numbers = None
     # An unruled table is read by Tesseract column by column; its cells are given back in rows.
-    unruled = table_rows(result.lines, scale, doc._rtl) if OCR_TABLE_ROWS else []
+    ltr_changes = ocr_layout.normalize_ltr(result.lines) if layout and doc._rtl else 0
+    unruled = table_rows(result.lines, scale, doc._rtl, layout=layout) if OCR_TABLE_ROWS else []
     taken = {id(line) for table in unruled for line in table.lines}
     if english_page is not None and numbers.lang == "eng":
         english, english_size = english_page
@@ -2457,15 +2465,25 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
                 joined_camera_lines = len(result.lines) - len(joined.lines)
                 result = joined
                 flags = flags + ["ocr_camera_line_fragments_joined"]
+    columns = None
+    if layout and doc._rtl:
+        ltr_changes += ocr_layout.normalize_ltr(line for line in result.lines if id(line) not in taken)
+        if ltr_changes:
+            signals["ocr_layout_ltr_runs"] = ltr_changes
+        if not (unruled or grids or rectified):
+            columns = ocr_layout.column_order(result.lines, page_image.width)
+            if columns is not None:
+                result = OcrResult(columns)
+                flags = flags + ["ocr_layout_rtl_columns"]
     form_tables = [t.bbox for t in grids if "table_open_sides_inferred" in t.flags]
     margin_page = image.size if doc._rtl and not unruled and not (grids or rectified) else None
     record_lines = page is not None and page_class == "T5" and margin_page is not None
     line_records = _OcrLineRecords() if record_lines else None
     read = _ocr_blocks(doc, index, engine, OcrResult([line for line in result.lines if id(line) not in taken]), scale,
                        form_tables=form_tables, margin_page=margin_page, line_records=line_records)
-    if _order_ocr_paragraphs(doc.blocks, first):
+    if columns is None and _order_ocr_paragraphs(doc.blocks, first):
         flags = flags + ["reading_order_ocr_adjusted_unverified"]
-    if not (unruled or grids or rectified):
+    if columns is None and not (unruled or grids or rectified):
         if _order_ocr_bands(doc.blocks, first, image, scale):
             flags = flags + ["reading_order_ocr_bands_unverified"]
         elif line_records is not None and _order_ocr_gaps(doc.blocks, first, index, engine, scale, line_records):
@@ -2636,6 +2654,7 @@ def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids, n
     ``text_scale`` enables tight, padded text crops inside rectified cells.
     """
     ox, oy = offset
+    layout = (doc._ocr_settings or {}).get("layout") == "v1"
     dpi = round(scale * 72)
     blocks: list[Block] = []
     read = 0
@@ -2688,6 +2707,15 @@ def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids, n
                                 and any(ch.isalnum() for ch in native_text)):
                             crop, psm, result, text = native_crop, native_psm, native, native_text
                             cell_flags.append("ocr_cell_native_scale_retry")
+                if layout and result is not None:
+                    if not time_up(doc):
+                        padded = ocr_layout.clip_guard(engine, crop, dpi, result, psm=psm)
+                        if padded is not None:
+                            result = padded
+                            cell_flags.append("ocr_layout_clip_guard")
+                    if doc._rtl and ocr_layout.normalize_ltr(result.lines):
+                        cell_flags.append("ocr_layout_ltr_runs")
+                    text = "\n".join(line.text for line in result.lines if line.text.strip())
                 psms[psm] += 1
                 if result is not None:
                     lines_all.extend(result.lines)
