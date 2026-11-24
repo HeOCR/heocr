@@ -2379,6 +2379,16 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
         # The isolated table is already read. Keep it even if OCR outside it failed.
         result = OcrResult([])
         page_failed = True
+    historical = None
+    settings = doc._ocr_settings or {}
+    if (settings.get("old_print_model") is not None and not (grids or rectified or page_failed)
+            and settings.get("capture_type") != "issuer-render"):
+        from heocr.ocr.old_print import read_page as read_old_print
+
+        historical = read_old_print(doc, page_image, dpi, result)
+        if historical is not None:
+            engine, result = historical
+            signals["ocr_old_print"] = "phist_v2"
     first = len(doc.blocks)
     numbers = number_engine_for(doc) if doc.options.get("check_numbers", "suspect") else None
     number_words = _reread_number_words(numbers, page_image, result, round(scale * 72)) if numbers is not None and numbers is not engine else None
@@ -2494,7 +2504,7 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
         flags = flags + ["ocr_tables"]
         if any("table_cells_ink_unread" in t.flags for t in t_blocks):
             flags = flags + ["table_cells_ink_unread"]
-    if (doc._ocr_settings or {}).get("line_v6") is not None:
+    if historical is None and settings.get("line_v6") is not None:
         from heocr.ocr.line_models import read_page_lines as route_page_lines
 
         read += route_page_lines(doc, doc.blocks[first:], page_image, scale, engine)

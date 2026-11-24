@@ -90,6 +90,26 @@ Use `--photo-preprocess gray-otsu` (Python `photo_preprocess="gray-otsu"`) to se
 
 For internal capture checks, see the [DEV215 triad runbook](dev215-triads.md).
 
+### Historical print with router v2
+
+```sh
+heocr book.pdf --ocr-router v2 --ocr-old-print-model /private/phist_v2.traineddata
+```
+
+The optional branch probes whole-page OCR for historical Hebrew print. It
+looks for distinct classical-print terms on multiple lines of the local
+reading. It requires the P-hist v2 reread to corroborate the terms, text
+coverage and confidence. Digit-heavy pages, ruled tables, declared native
+issuer renders and pages with weak evidence keep the usual router v2
+reading. Readable PDF text layers keep their existing route.
+
+Provide the local Apache-licensed P-hist v2 file with SHA-256
+`240716ac4c253d264c1fa62d81c207e1313fda59a99ae79c1e21f7f0509feded`.
+The package contains no copy of these weights. It verifies the staged
+file and keeps the router v2 reading when the file or reread is unavailable.
+Selected pages record the stable `phist_v2` model label and digest. In Python
+pass `ocr_router="v2"` and `ocr_old_print_model=path`.
+
 ### Haiku hybrid OCR
 
 `--ocr-hybrid haiku` explicitly authorizes HeOCR to send whole-page OCR images to
