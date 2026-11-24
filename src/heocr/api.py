@@ -72,6 +72,7 @@ def extract(
     tesseract: str | Sequence[str] | None = None,
     ocr_model: str | None = DEFAULT_MODEL,
     ocr_router: str | None = None,
+    ocr_old_print_model: str | os.PathLike[str] | None = None,
     ocr_hybrid: str | None = None,
     ocr_hybrid_old_print: bool = False,
     ocr_hybrid_max_usd: str | Decimal | None = None,
@@ -117,6 +118,8 @@ def extract(
     ``ocr_router="v2"`` selects the capture route using a declaration when supplied, PDF rendering
     for document OCR, or exposure/focal-length metadata for JPEG photos. Inputs without a signal
     use the usual model. The option leaves text-layer handling unchanged.
+    ``ocr_old_print_model`` adds a historical-print probe to router v2. It takes the local
+    pinned P-hist v2 ``.traineddata`` file and uses it only on OCR pages with historical evidence.
     ``ocr_hybrid="haiku"`` consents to sending whole-page OCR images to Anthropic.
     It requires the ``ANTHROPIC_API_KEY`` environment variable for hosted reading.
     ``ocr_hybrid_old_print=True`` also sends the pinned local R8b OCR draft for correction.
@@ -179,6 +182,10 @@ def extract(
     ocr_model = MODEL_ALIASES.get(ocr_model, ocr_model) if isinstance(ocr_model, str) else ocr_model
     if ocr_router is not None and ocr_router != "v2":
         raise ValueError("ocr_router must be 'v2'")
+    if ocr_old_print_model is not None and (
+        ocr_router != "v2" or Path(ocr_old_print_model).suffix != ".traineddata"
+    ):
+        raise ValueError("ocr_old_print_model needs router v2 and a local .traineddata file")
     hybrid = None
     if ocr_hybrid is not None:
         from heocr.ocr.hybrid import HybridReader, parse_cap
@@ -270,6 +277,11 @@ def extract(
         doc.options["ocr"]["capture_type"] = ocr_capture_type
         doc._ocr_settings["capture_type"] = ocr_capture_type
         doc._ocr_settings["capture_reason"] = capture_reason
+    if ocr_old_print_model is not None:
+        from heocr.ocr.old_print import PHIST_V2_SHA256
+
+        doc._ocr_settings["old_print_model"] = Path(ocr_old_print_model)
+        doc.options["ocr"]["old_print_model_sha256"] = PHIST_V2_SHA256
     if ocr_line_v6 is not None:
         from heocr.ocr.line_models import V6_SHA256
 

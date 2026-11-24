@@ -78,6 +78,8 @@ def _parser() -> argparse.ArgumentParser:
                         help="opt into experimental OCR routing for a declared capture")
     parser.add_argument("--ocr-router", choices=("v2",),
                         help="opt into OCR routing by capture type (declaration, PDF render or camera metadata)")
+    parser.add_argument("--ocr-old-print-model", metavar="MODEL",
+                        help="enable historical-print detection with router v2 and a pinned local P-hist v2 model")
     parser.add_argument("--ocr-hybrid", choices=("haiku",),
                         help="consent to sending whole-page OCR images to Anthropic (uses ANTHROPIC_API_KEY)")
     parser.add_argument("--ocr-hybrid-old-print", action="store_true",
@@ -157,6 +159,7 @@ def main(argv: list[str] | None = None) -> int:
             tesseract=args.tesseract,
             ocr_model=args.ocr_model,
             ocr_router=args.ocr_router,
+            ocr_old_print_model=args.ocr_old_print_model,
             ocr_hybrid=args.ocr_hybrid,
             ocr_hybrid_old_print=args.ocr_hybrid_old_print,
             ocr_hybrid_max_usd=args.ocr_hybrid_max_usd,
@@ -200,6 +203,8 @@ def main(argv: list[str] | None = None) -> int:
     # A missing OCR model changes the results, so it is reported even with --quiet.
     for line in _model_warnings(doc):
         print(line, file=sys.stderr)
+    if "ocr_old_print_model_unavailable" in doc.flags:
+        print("heocr: warning: the local P-hist v2 model is missing or failed its pin. Using router v2.", file=sys.stderr)
     if "ocr_hybrid_local_fallback" in doc.flags:
         reasons = sorted({p.signals["ocr_hybrid"] for p in doc.pages
                           if p.signals.get("ocr_hybrid") not in (None, "hosted")})

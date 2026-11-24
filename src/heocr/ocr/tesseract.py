@@ -175,6 +175,7 @@ class Tesseract:
         tessdata: str | os.PathLike[str] | None = None,
         timeout: float = TIMEOUT,
         model: str | None = None,
+        local_pin: tuple[Path, str, str] | None = None,
     ) -> "Tesseract":
         """Find Tesseract, and the models for ``lang``.
 
@@ -204,7 +205,15 @@ class Tesseract:
             tessdata = match.group(1)
         folder = Path(tessdata)
         released = None
-        if model is not None:
+        expected_sha256 = None
+        if local_pin is not None:
+            model_path, lang, expected_sha256 = local_pin
+            check_settings(lang, psm)
+            try:
+                folder = _private_tessdata(folder, model_path, lang)
+            except OSError:
+                raise OcrUnavailable("pinned local model is unavailable") from None
+        elif model is not None:
             from heocr.models import ModelError, resolve
 
             try:
@@ -212,14 +221,16 @@ class Tesseract:
             except ModelError as exc:
                 raise OcrUnavailable(str(exc)) from exc
             folder = _private_tessdata(folder, model_path, lang)
+            if released is not None:
+                expected_sha256 = released.sha256
         models = {}
         for language in lang.split("+"):
             model = folder / f"{language}.traineddata"
             if not model.is_file():
                 raise OcrUnavailable(f"no {language}.traineddata installed for tesseract")
             models[language] = _sha256(model)
-        if released is not None and models.get(lang) != released.sha256:
-            raise OcrUnavailable(f"{lang}.traineddata changed while staging the pinned model")
+        if expected_sha256 is not None and models.get(lang) != expected_sha256:
+            raise OcrUnavailable(f"{lang}.traineddata changed or does not match the staged model pin")
         executable = shutil.which(argv[0]) or argv[0]
         executable_sha256 = _sha256(Path(executable)) if Path(executable).is_file() else "unknown"
         return cls(argv, folder, lang, psm, version, executable_sha256, models, timeout, released)
