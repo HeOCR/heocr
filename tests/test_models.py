@@ -186,6 +186,40 @@ class ModelRouteTest(unittest.TestCase):
             self.assertEqual(call[call.index("-l") + 1], modern)
             self.assertNotIn("router", default.options["ocr"])
 
+    def test_photo_preprocess_with_router_is_scoped_to_standalone_photos(self) -> None:
+        from PIL import ExifTags, Image
+        from PIL.TiffImagePlugin import IFDRational
+
+        image = Image.new("RGB", (595, 842), "white")
+        image.paste("black", (80, 80, 250, 100))
+        exif = Image.Exif()
+        exif[ExifTags.IFD.Exif] = {ExifTags.Base.ExposureTime: IFDRational(1, 10)}
+        jpg, png = io.BytesIO(), io.BytesIO()
+        image.save(jpg, format="JPEG", exif=exif)
+        image.save(png, format="PNG")
+        cases = (
+            (jpg.getvalue(), None, True),
+            (png.getvalue(), "phone", True),
+            (jpg.getvalue(), "scanner", False),
+            (png.getvalue(), None, False),
+            (SCAN, None, False),
+            (SCAN, "phone", False),
+        )
+        with mock.patch.dict(models.MODELS, self.capture_models()):
+            for source, capture, active in cases:
+                with self.subTest(capture=capture, active=active):
+                    options = dict(tesseract=FAKE, ocr_router="v2", ocr_capture_type=capture, check_numbers=False)
+                    base = heocr.extract(source, **options).to_dict()
+                    self.assertNotIn("thresholding_method=0", self.recognition_call())
+                    self.log.unlink()
+                    new = heocr.extract(source, photo_preprocess="gray-otsu", **options).to_dict()
+                    self.assertEqual("thresholding_method=0" in self.recognition_call(), active)
+                    self.log.unlink()
+                    self.assertEqual(new["options"]["ocr"].pop("photo_preprocess", None), "gray-otsu" if active else None)
+                    self.assertEqual(base, new)
+        with self.assertRaisesRegex(ValueError, "needs OCR"):
+            heocr.extract(SCAN, photo_preprocess="gray-otsu", ocr=False)
+
     def test_v2_preserves_text_layers_and_checks_settings(self) -> None:
         source = make_pdf([PdfPage(lines=lines_block(["שלום עולם"]))])
         with mock.patch.dict(models.MODELS, self.capture_models()):

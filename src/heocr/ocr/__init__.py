@@ -52,6 +52,7 @@ def engine_for(doc: "Document") -> Tesseract | None:
             if capture is not None:
                 engine.route = {"mode": "capture", "capture_type": capture, "model": settings["model"],
                                 "reason": settings["capture_reason"]}
+            engine.photo_gray_otsu = settings.get("photo_gray_otsu", False)
             doc._ocr_engine = engine
             doc.components.update(engine.provenance())
         except OcrUnavailable as exc:
@@ -81,6 +82,7 @@ def engine_for_model(doc: "Document", model: str | None) -> Tesseract | None:
     try:
         engine = Tesseract.find(settings["cmd"], lang=settings["lang"], psm=settings["psm"], model=model)
         doc.components.update(engine.provenance())
+        engine.photo_gray_otsu = settings.get("photo_gray_otsu", False)
     except OcrUnavailable as exc:
         doc._ocr_error = doc._ocr_error or str(exc)
         engine = None

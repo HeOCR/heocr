@@ -54,6 +54,7 @@ def extract(
     ocr_router: str | None = None,
     ocr_capture_type: str | None = None,
     ocr_line_v6: str | os.PathLike[str] | None = None,
+    photo_preprocess: str | None = None,
     force_ocr: bool = False,
     crnn_model: str | os.PathLike[str] | None = None,
     crnn_sha256: str | None = None,
@@ -92,6 +93,9 @@ def extract(
     ``ocr_router="v2"`` selects the capture route using a declaration when supplied, PDF rendering
     for document OCR, or exposure/focal-length metadata for JPEG photos. Inputs without a signal
     use the usual model. The option leaves text-layer handling unchanged.
+    ``photo_preprocess="gray-otsu"`` sends grayscale rasters to the main Tesseract reader
+    with internal Otsu thresholding on standalone photos. Use a phone capture declaration
+    when camera metadata is unavailable.
     ``force_ocr`` reads every PDF page by OCR, its text layer ignored (flag ``ocr_forced``): a workaround
     for a text layer heocr reads badly. It needs ``ocr``.
     ``ocr_line_v6`` opts Rivok Full page prose into a two-model reread of the existing lines.
@@ -143,6 +147,8 @@ def extract(
     ocr_model = MODEL_ALIASES.get(ocr_model, ocr_model) if isinstance(ocr_model, str) else ocr_model
     if ocr_router is not None and ocr_router != "v2":
         raise ValueError("ocr_router must be 'v2'")
+    if photo_preprocess is not None and (photo_preprocess != "gray-otsu" or not ocr):
+        raise ValueError("photo_preprocess must be 'gray-otsu' and needs OCR")
     if ocr_router is not None or ocr_capture_type is not None:
         from heocr.ocr.routes import capture_model_for
 
@@ -233,6 +239,15 @@ def extract(
 
         doc._ocr_settings["line_v6"] = ocr_line_v6
         doc.options["ocr"]["line_v6_sha256"] = V6_SHA256
+    if photo_preprocess is not None and kind.format in IMAGE_FORMATS:
+        from heocr.ocr.routes import PHOTO_CAPTURES, classify_capture
+
+        capture = ocr_capture_type
+        if capture is None:
+            capture, _, _ = classify_capture(body, kind.format)
+        if capture in PHOTO_CAPTURES:
+            doc.options["ocr"]["photo_preprocess"] = photo_preprocess
+            doc._ocr_settings["photo_gray_otsu"] = True
     if kind.format in CONVERSIONS:
         doc.options["convert"] = {"engine": "libreoffice", "to": CONVERSIONS[kind.format][1]} if convert else False
         doc._convert_settings = {"cmd": soffice, "timeout": convert_timeout or CONVERT_TIMEOUT} if convert else None
