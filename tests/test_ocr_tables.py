@@ -85,6 +85,14 @@ class OcrTableTest(unittest.TestCase):
         lines = self.log.read_text(encoding="utf-8").splitlines() if self.log.exists() else []
         return sum(1 for line in lines if "--psm" in (a := json.loads(line)) and a[a.index("--psm") + 1] in psm.split("|"))
 
+    def test_periodical_mode_preserves_ruled_table_records(self) -> None:
+        source = scanned_pdf(scan(LEVELS))
+        baseline = heocr.extract(source, tesseract=FAKE, ocr_layout="v1").to_dict()
+        candidate = heocr.extract(source, tesseract=FAKE, ocr_layout="periodical").to_dict()
+        self.assertTrue(any(block["kind"] == "table" for block in baseline["blocks"]))
+        candidate["options"]["ocr"]["layout"] = "v1"
+        self.assertEqual(baseline, candidate)
+
     def test_table_in_a_scan_is_read_cell_by_cell(self) -> None:
         doc = heocr.extract(scanned_pdf(scan(LEVELS)), tesseract=FAKE)
         page = doc.pages[0]
