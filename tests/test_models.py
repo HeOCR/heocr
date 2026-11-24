@@ -3,6 +3,7 @@ import hashlib
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -285,11 +286,63 @@ class ModelRouteTest(unittest.TestCase):
         self.assertIsNone(choose_line("שלום עולם", ("שלום", 98), ("שלום", 98)))
         self.assertIsNone(choose_line("שלום עולם", ("שלום כולם", 97), ("שלום כולם", 50)))
 
+    def test_batched_line_route_preserves_complete_records_and_retries_invalid_output(self) -> None:
+        from PIL import Image
+
+        from heocr.ocr.tesseract import Tesseract
+        from tests.synth.fake_tesseract import DEFAULT_TSV
+
+        capture_models = self.capture_models()
+        v6 = Path(self.tmp.name) / "v6.traineddata"
+        v6.write_bytes(b"v6 fixture")
+        v6_hash = hashlib.sha256(v6.read_bytes()).hexdigest()
+        options = dict(tesseract=FAKE, ocr_router="v2", ocr_capture_type="scanner",
+                       ocr_line_v6=v6, check_numbers=False, repairs=False)
+        original = Tesseract._recognize_call
+        batches = []
+
+        def call(engine, source, base, dpi, psm):
+            if source.suffix != ".txt":
+                return original(engine, source, base, dpi, psm)
+            batches.append(engine.lang)
+            self.assertEqual(psm, 7)
+            paths = source.read_text(encoding="utf-8").splitlines()
+            self.assertGreaterEqual(len(paths), 2)
+            rows = [DEFAULT_TSV.splitlines()[0]]
+            for page, path in enumerate(paths, start=1):
+                with Image.open(path) as crop:
+                    width, height = crop.size
+                rows.append(f"1\t{page}\t0\t0\t0\t0\t0\t0\t{width}\t{height}\t-1\t")
+                for index, word in enumerate(("שלום", "כולם"), start=1):
+                    rows.append(f"5\t{page}\t1\t1\t1\t{index}\t0\t0\t30\t10\t95\t{word}")
+            if corrupt and engine.lang == "v6":
+                rows.pop(1)
+            base.with_suffix(".tsv").write_text("\n".join(rows), encoding="utf-8")
+            return subprocess.CompletedProcess([], 0)
+
+        with mock.patch.dict(models.MODELS, capture_models), mock.patch.dict(os.environ, {"FAKE_LINE": "שלום כולם"}), mock.patch(
+            "heocr.ocr.line_models.V6_SHA256", v6_hash
+        ), mock.patch.object(Tesseract, "_recognize_call", call):
+            baseline = heocr.extract(SCAN, **options).to_json(indent=None)
+            for corrupt in (False, True):
+                with self.subTest(corrupt=corrupt):
+                    result = heocr.extract(SCAN, **options, ocr_line_batch=True)
+                    self.assertEqual(result.to_json(indent=None), baseline)
+                    self.assertEqual(batches, ["heb_rivok", "v6"])
+                    self.assertIn("שלום כולם", result.text)
+                    batches.clear()
+            deadline = heocr.extract(SCAN, **options, time_limit=60)
+            deadline_batched = heocr.extract(SCAN, **options, time_limit=60, ocr_line_batch=True)
+            self.assertEqual(deadline_batched.to_json(indent=None), deadline.to_json(indent=None))
+            self.assertEqual(batches, [])
+
     def test_line_v6_needs_explicit_rivok_and_a_traineddata_path(self) -> None:
         with self.assertRaisesRegex(ValueError, "needs Rivok Full"):
             heocr.extract(SCAN, ocr_capture_type="phone", ocr_line_v6="v6.traineddata")
         with self.assertRaisesRegex(ValueError, "needs a local"):
             heocr.extract(SCAN, ocr_model="heb_rivok", ocr_line_v6="v6")
+        with self.assertRaisesRegex(ValueError, "needs ocr_line_v6"):
+            heocr.extract(SCAN, ocr_line_batch=True)
 
     def test_capture_route_reports_missing_or_mismatched_models_without_ocr(self) -> None:
         for capture in ("phone", "scanner"):

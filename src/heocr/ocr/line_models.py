@@ -3,26 +3,31 @@
 from __future__ import annotations
 
 import re
+from itertools import islice
 
 from heocr.contract import time_up
 from heocr.ocr.crnn import line_box
-from heocr.ocr.tesseract import OcrUnavailable, Tesseract
+from heocr.ocr.tesseract import OcrResult, OcrUnavailable, Tesseract
 from heocr.textflags import text_flags
 
 V6_SHA256 = "52b94ef13eaa3c8d32403ab05e12fc9be74d22a2d1aaa4d2de904b313b0e1609"
 MIN_CONFIDENCE = 80
 V6_MARGIN = 10
+_MAX_BATCH_LINES = 64
 
 
-def _read_line(engine: Tesseract, crop, dpi: int) -> tuple[str, float] | None:
-    try:
-        result = engine.recognize(crop, dpi=dpi, psm=7)
-    except OcrUnavailable:
-        return None
+def _line_reading(result: OcrResult) -> tuple[str, float] | None:
     confidence = result.mean_confidence
     if len(result.lines) != 1 or confidence is None:
         return None
     return result.lines[0].text, confidence
+
+
+def _read_line(engine: Tesseract, crop, dpi: int) -> tuple[str, float] | None:
+    try:
+        return _line_reading(engine.recognize(crop, dpi=dpi, psm=7))
+    except OcrUnavailable:
+        return None
 
 
 def choose_line(original: str, rivok: tuple[str, float], v6: tuple[str, float]) -> tuple[str, str] | None:
@@ -61,10 +66,38 @@ def _v6_engine(doc) -> Tesseract | None:
     return engine
 
 
-def read_page_lines(doc, blocks, image, scale: float, rivok: Tesseract) -> int:
-    """Reread the already assembled prose slots without changing their geometry or order."""
+def _crop_line(image, box):
     from PIL import ImageOps
 
+    return ImageOps.expand(image.crop(box).convert("L"), 10, 255)
+
+
+def _batched_readings(prose, image, scale, dpi, rivok, v6):
+    """Read bounded groups and leave failed groups for the existing serial path."""
+    boxes = (
+        ((block_index, line_index), line_box(image, line.bbox, scale))
+        for block_index, block in enumerate(prose)
+        for line_index, line in enumerate(block.lines, start=1)
+    )
+    slots = ((key, box) for key, box in boxes if box[0] < box[2] and box[1] < box[3])
+    readings = {}
+    while chunk := list(islice(slots, _MAX_BATCH_LINES)):
+        if len(chunk) == 1:
+            break
+        try:
+            first = rivok.recognize_line_batch((_crop_line(image, box) for _, box in chunk), dpi)
+            primary = {key: _line_reading(result) for (key, _), result in zip(chunk, first, strict=True)}
+            eligible = [(key, box) for key, box in chunk if primary[key] is not None]
+            second = v6.recognize_line_batch((_crop_line(image, box) for _, box in eligible), dpi)
+            secondary = {key: _line_reading(result) for (key, _), result in zip(eligible, second, strict=True)}
+        except (OcrUnavailable, OSError, ValueError):
+            continue
+        readings.update((key, (reading, secondary.get(key))) for key, reading in primary.items())
+    return readings
+
+
+def read_page_lines(doc, blocks, image, scale: float, rivok: Tesseract) -> int:
+    """Reread the already assembled prose slots without changing their geometry or order."""
     prose = [block for block in blocks if block.kind == "text" and block.source == "ocr" and block.lines]
     if not prose or time_up(doc):
         return 0
@@ -72,8 +105,11 @@ def read_page_lines(doc, blocks, image, scale: float, rivok: Tesseract) -> int:
     if v6 is None:
         return 0
     dpi = round(scale * 72)
+    batched = _batched_readings(prose, image, scale, dpi, rivok, v6) if (
+        doc._ocr_settings.get("line_batch") and doc._time_limit is None
+    ) else {}
     difference = 0
-    for block in prose:
+    for block_index, block in enumerate(prose):
         original = block.text
         changes = []
         fallback = False
@@ -81,13 +117,17 @@ def read_page_lines(doc, blocks, image, scale: float, rivok: Tesseract) -> int:
             if time_up(doc):
                 fallback = True
                 break
-            x0, y0, x1, y1 = line_box(image, line.bbox, scale)
-            if x0 >= x1 or y0 >= y1:
-                fallback = True
-                continue
-            crop = ImageOps.expand(image.crop((x0, y0, x1, y1)).convert("L"), 10, 255)
-            first = _read_line(rivok, crop, dpi)
-            second = _read_line(v6, crop, dpi) if first is not None and not time_up(doc) else None
+            pair = batched.get((block_index, index))
+            if pair is None:
+                x0, y0, x1, y1 = line_box(image, line.bbox, scale)
+                if x0 >= x1 or y0 >= y1:
+                    fallback = True
+                    continue
+                crop = _crop_line(image, (x0, y0, x1, y1))
+                first = _read_line(rivok, crop, dpi)
+                second = _read_line(v6, crop, dpi) if first is not None and not time_up(doc) else None
+            else:
+                first, second = pair
             if first is None or second is None:
                 fallback = True
                 continue
