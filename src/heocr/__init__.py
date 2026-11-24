@@ -2,7 +2,7 @@
 
 __version__ = "0.3.0a2"
 
-from heocr.api import extract  # noqa: E402
+from heocr.api import extract, extract_images  # noqa: E402
 from heocr.contract import SCHEMA_ID, ContractError, Document, validate  # noqa: E402
 from heocr.handwriting import HandwritingConfig  # noqa: E402
 
@@ -16,4 +16,4 @@ def write_docx(doc: Document, path) -> None:
     Path(path).write_bytes(doc.to_docx())
 
 
-__all__ = ["SCHEMA_ID", "ContractError", "Document", "HandwritingConfig", "__version__", "extract", "validate", "write_docx"]
+__all__ = ["SCHEMA_ID", "ContractError", "Document", "HandwritingConfig", "__version__", "extract", "extract_images", "validate", "write_docx"]
