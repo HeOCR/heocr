@@ -63,6 +63,12 @@ See the [HeOCR component model card](../src/heocr/models_data/MODEL_CARD.heb_riv
 
 Add `--ocr-line-v6 /path/to/v6.traineddata` or pass `ocr_line_v6=` in Python to enable the two-model reread. With router v2, it applies to prose from Rivok page OCR, so you can pass the same option for a batch with mixed input captures. You can also pair it with `--ocr-capture-type scanner`, `--ocr-capture-type issuer-render`, or `--ocr-model heb_rivok`. The option rereads existing prose lines and preserves their geometry and order. It expects the pinned local v6 checkpoint with SHA-256 `52b94ef13eaa3c8d32403ab05e12fc9be74d22a2d1aaa4d2de904b313b0e1609`. HeOCR records the hash of the staged model and the selections on changed lines. It retains the page reading when v6 is unavailable or a reread is inconclusive. Rereading adds two recognition calls per eligible prose line.
 
+Add `--ocr-line-batch` or pass `ocr_line_batch=True` to send the same Rivok
+and v6 crops in groups of up to 64 per page. This uses the same chooser and
+document record as individual reads. HeOCR retries a group individually if
+Tesseract fails or its TSV cannot be matched to the input crops. An explicit
+document time limit keeps individual reads so it can be checked between crops.
+
 #### CPU cost
 
 Timing used the same ten DEV raster pages on each system, five phone photos and five issuer renders. Router v2 used declared captures and the pinned v6 reread on the five Rivok pages. The default reader used modern_v1. Standalone Rivok ran Tesseract once per raster with the same Rivok int8 weights and page segmentation mode 3. HeOCR's number rereads were disabled for the timing.

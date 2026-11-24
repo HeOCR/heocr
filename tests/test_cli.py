@@ -65,6 +65,17 @@ class CliTest(unittest.TestCase):
             self.assertEqual(main([str(self.input), "--photo-preprocess", "gray-otsu"]), 0)
         self.assertEqual(extract.call_args.kwargs["photo_preprocess"], "gray-otsu")
 
+    def test_line_batch_cli_forwards_the_switch(self) -> None:
+        from unittest import mock
+
+        import heocr.cli
+
+        doc = heocr.cli.extract(self.input, ocr=False)
+        with mock.patch.object(heocr.cli, "extract", return_value=doc) as extract, contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(main([str(self.input), "--ocr-line-v6", "v6.traineddata", "--ocr-line-batch"]), 0)
+        self.assertTrue(extract.call_args.kwargs["ocr_line_batch"])
+        self.assertEqual(extract.call_args.kwargs["ocr_line_v6"], "v6.traineddata")
+
     def test_quiet_text_to_stdout(self) -> None:
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):

@@ -283,6 +283,58 @@ class Tesseract:
             self.timeout,
         )
 
+    def recognize_line_batch(self, images, dpi: int) -> list[OcrResult]:
+        """Read an ordered batch in PSM 7. A failed probe leaves failures to the serial retry."""
+        with tempfile.TemporaryDirectory(prefix="heocr-ocr-") as temp:
+            folder = Path(temp)
+            if "\n" in temp or "\r" in temp:
+                raise OcrUnavailable("tesseract cannot frame this path in an image list")
+            paths = []
+            sizes = []
+            for index, image in enumerate(images):
+                if self.photo_gray_otsu and image.mode != "L":
+                    image = image.convert("L")
+                path = folder / f"{index:03d}.png"
+                image.save(path, dpi=(dpi, dpi))
+                paths.append(str(path))
+                sizes.append(image.size)
+            if not paths:
+                return []
+            source = folder / "images.txt"
+            source.write_text("\n".join(paths) + "\n", encoding="utf-8", newline="\n")
+            base = folder / "result"
+            done = self._recognize_call(source, base, dpi, 7)
+            tsv = base.with_suffix(".tsv")
+            if done.returncode != 0 or not tsv.is_file():
+                raise OcrUnavailable("tesseract line batch failed")
+            return _parse_line_batch(tsv.read_text(encoding="utf-8", errors="replace"), sizes)
+
+
+def _parse_line_batch(tsv: str, sizes: Sequence[tuple[int, int]]) -> list[OcrResult]:
+    """Split a TSV only when its page headers bind every slot in order."""
+    rows = tsv.splitlines()
+    if not rows or rows[0].split("\t")[:2] != ["level", "page_num"]:
+        raise OcrUnavailable("tesseract line batch has no TSV header")
+    header = rows[0]
+    pages: list[list[str]] = []
+    for row in rows[1:]:
+        columns = row.split("\t")
+        if len(columns) < 12:
+            raise OcrUnavailable("tesseract line batch has a malformed TSV row")
+        if columns[0] == "1":
+            if len(pages) == len(sizes) or columns[8:10] != list(map(str, sizes[len(pages)])):
+                raise OcrUnavailable("tesseract line batch has an unexpected page size")
+            pages.append([header])
+        if not pages or columns[1] != str(len(pages)):
+            raise OcrUnavailable("tesseract line batch pages are out of order")
+        pages[-1].append(row)
+    if len(pages) != len(sizes):
+        raise OcrUnavailable("tesseract line batch has missing pages")
+    try:
+        return [parse_tsv("\n".join(page)) for page in pages]
+    except ValueError as error:
+        raise OcrUnavailable("tesseract line batch has invalid coordinates") from error
+
 
 def parse_tsv(tsv: str) -> OcrResult:
     """Lines from Tesseract's TSV: words grouped by block, paragraph and line, in output order."""

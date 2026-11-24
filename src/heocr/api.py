@@ -73,6 +73,7 @@ def extract(
     ocr_router: str | None = None,
     ocr_capture_type: str | None = None,
     ocr_line_v6: str | os.PathLike[str] | None = None,
+    ocr_line_batch: bool = False,
     photo_preprocess: str | None = None,
     force_ocr: bool = False,
     crnn_model: str | os.PathLike[str] | None = None,
@@ -120,6 +121,9 @@ def extract(
     ``ocr_line_v6`` opts Rivok Full page prose into a two-model reread of the existing lines.
     It takes a local pinned v6 ``.traineddata`` file. With router v2 it runs only on Rivok Full
     page OCR prose and can be supplied for a batch with mixed input captures.
+    ``ocr_line_batch=True`` batches these prose crops per model within the page.
+    It needs ``ocr_line_v6`` and uses individual reads when a batch fails or a
+    document time limit is set.
 
     ``crnn_model`` and ``crnn_sha256`` opt OCR page prose into a local CPU ONNX line reader.
     Tesseract supplies the ordered boxes and reads tables, form entries and image regions.
@@ -176,6 +180,8 @@ def extract(
             raise ValueError(f"{option} needs Hebrew Tesseract OCR with the default model option")
         if ocr_capture_type is not None:
             ocr_model = capture_model_for(ocr_capture_type)
+    if ocr_line_batch and ocr_line_v6 is None:
+        raise ValueError("ocr_line_batch needs ocr_line_v6")
     if ocr_line_v6 is not None:
         from heocr.ocr.routes import RIVOK_FULL
 
@@ -248,6 +254,7 @@ def extract(
         from heocr.ocr.line_models import V6_SHA256
 
         doc._ocr_settings["line_v6"] = ocr_line_v6
+        doc._ocr_settings["line_batch"] = ocr_line_batch
         doc.options["ocr"]["line_v6_sha256"] = V6_SHA256
     if photo_preprocess is not None and kind.format in IMAGE_FORMATS:
         from heocr.ocr.routes import PHOTO_CAPTURES, classify_capture
