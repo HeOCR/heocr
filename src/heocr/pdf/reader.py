@@ -2243,7 +2243,9 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
               rendered=None, *, camera_jpeg: bool = False, form_image=None, hybrid_image=None) -> None:
     """Read a page by OCR. ``rendered`` is (image, pixels per point) when the page is already an
     image (an image file, D4b); otherwise the PDF page is rendered."""
-    if doc._hybrid is not None and doc._hybrid.eligible(doc, signals):
+    hybrid = doc._hybrid
+    gated = hybrid is not None and hybrid.confidence is not None
+    if hybrid is not None and not gated and hybrid.eligible(doc, signals):
         image, scale = rendered if rendered is not None else _render(page)
         if rendered is None and scale * 72 < RENDER_DPI:
             flags = flags + ["render_dpi_reduced"]
@@ -2478,7 +2480,7 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
     form_tables = [t.bbox for t in grids if "table_open_sides_inferred" in t.flags]
     margin_page = image.size if doc._rtl and not unruled and not (grids or rectified) else None
     record_lines = page is not None and page_class == "T5" and margin_page is not None
-    line_records = _OcrLineRecords() if record_lines else None
+    line_records = _OcrLineRecords() if record_lines or gated else None
     read = _ocr_blocks(doc, index, engine, OcrResult([line for line in result.lines if id(line) not in taken]), scale,
                        form_tables=form_tables, margin_page=margin_page, line_records=line_records)
     if columns is None and _order_ocr_paragraphs(doc.blocks, first):
@@ -2486,7 +2488,7 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
     if columns is None and not (unruled or grids or rectified):
         if _order_ocr_bands(doc.blocks, first, image, scale):
             flags = flags + ["reading_order_ocr_bands_unverified"]
-        elif line_records is not None and _order_ocr_gaps(doc.blocks, first, index, engine, scale, line_records):
+        elif record_lines and _order_ocr_gaps(doc.blocks, first, index, engine, scale, line_records):
             flags = flags + ["reading_order_ocr_disjoint_gaps_unverified"]
     if unruled:
         row_blocks, in_rows = _ocr_row_tables(doc, index, engine, unruled, scale)
@@ -2539,6 +2541,10 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
         if entries:
             read += _ocr_blocks(doc, index, engine, OcrResult(entries), scale, flags=["ocr_form_entry"])
             flags = flags + ["ocr_form_entries_recovered"]
+    if gated:
+        read += hybrid.read_lines(doc, doc.blocks[first:], page_image, line_records, signals)
+        if signals["ocr_hybrid_lines"]["changed"]:
+            flags = flags + ["ocr_hybrid_unverified"]
     if page_class == "T4":
         flags = flags + ["text_layer_ignored"]
     elif page_class == "T3":

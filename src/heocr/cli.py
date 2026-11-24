@@ -83,9 +83,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--ocr-old-print-model", metavar="MODEL",
                         help="enable historical-print detection with router v2 and a pinned local P-hist v2 model")
     parser.add_argument("--ocr-hybrid", choices=("haiku",),
-                        help="consent to sending whole-page OCR images to Anthropic (uses ANTHROPIC_API_KEY)")
+                        help="consent to sending selected OCR images to Anthropic (uses ANTHROPIC_API_KEY)")
     parser.add_argument("--ocr-hybrid-old-print", action="store_true",
                         help="declare old print and also send a local R8b OCR draft for correction")
+    parser.add_argument("--ocr-hybrid-confidence", type=float, metavar="SCORE",
+                        help="with router v2, send only line crops and local OCR below this score (0 to 100)")
     parser.add_argument("--ocr-hybrid-max-usd", metavar="USD",
                         help="cap the Anthropic list-price cost per document (default: 1.00)")
     parser.add_argument("--ocr-hybrid-dry-run", action="store_true",
@@ -122,10 +124,16 @@ def main(argv: list[str] | None = None) -> int:
     if args.ocr_hybrid_dry_run:
         if args.ocr_hybrid is None or args.no_ocr:
             parser.error("--ocr-hybrid-dry-run requires --ocr-hybrid haiku and OCR")
-        from heocr.ocr.hybrid import estimate_cost, parse_cap
+        from heocr.ocr.hybrid import estimate_cost, parse_cap, parse_confidence
 
         try:
+            confidence = parse_confidence(args.ocr_hybrid_confidence, router=args.ocr_router,
+                                          old_print=args.ocr_hybrid_old_print or args.ocr_old_print_model is not None)
             estimate = estimate_cost(args.file, max_pages=args.max_pages, cap=parse_cap(args.ocr_hybrid_max_usd))
+            if confidence is not None:
+                estimate["confidence_below"] = confidence
+                if confidence == 0:
+                    estimate["estimated_max_usd"] = "0"
             report = json.dumps(estimate, indent=2) + "\n"
             if args.output:
                 args.output.write_text(report, encoding="utf-8")
@@ -150,7 +158,10 @@ def main(argv: list[str] | None = None) -> int:
                   args.handwriting_segmenter_sha256, args.handwriting_detector)):
             raise ValueError("handwriting options require --handwriting MODEL")
         if args.ocr_hybrid and not args.no_ocr:
-            content = "Page images and local OCR drafts" if args.ocr_hybrid_old_print else "Page images"
+            if args.ocr_hybrid_confidence is not None:
+                content = "Selected line images and their local OCR drafts"
+            else:
+                content = "Page images and local OCR drafts" if args.ocr_hybrid_old_print else "Page images"
             print(f"heocr: {content} may be sent to Anthropic when ANTHROPIC_API_KEY is set.", file=sys.stderr)
         doc = extract(
             args.file,
@@ -165,6 +176,7 @@ def main(argv: list[str] | None = None) -> int:
             ocr_old_print_model=args.ocr_old_print_model,
             ocr_hybrid=args.ocr_hybrid,
             ocr_hybrid_old_print=args.ocr_hybrid_old_print,
+            ocr_hybrid_confidence=args.ocr_hybrid_confidence,
             ocr_hybrid_max_usd=args.ocr_hybrid_max_usd,
             ocr_capture_type=args.ocr_capture_type,
             ocr_line_v6=args.ocr_line_v6,

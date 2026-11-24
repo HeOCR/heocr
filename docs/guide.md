@@ -151,7 +151,7 @@ pass `ocr_router="v2"` and `ocr_old_print_model=path`.
 
 ### Haiku hybrid OCR
 
-`--ocr-hybrid haiku` explicitly authorizes HeOCR to send whole-page OCR images to
+`--ocr-hybrid haiku` explicitly authorizes HeOCR to send OCR images to
 Anthropic using `ANTHROPIC_API_KEY`. The feature is off by default. Use it only for
 documents you are authorized to share.
 
@@ -190,6 +190,29 @@ that document. The JSON record includes the model ID, prompt hash, budget
 usage, and per-page hosted or fallback status. In Python, use
 `heocr.extract("scan.pdf", ocr_hybrid="haiku", ocr_hybrid_max_usd="1.00")`.
 Add `ocr_hybrid_old_print=True` for old print.
+
+#### Confidence-gated line correction
+
+With router v2, add `--ocr-hybrid-confidence SCORE` to read locally first and
+send only selected prose line images and their OCR drafts to Anthropic. This
+option requires a score from 0 to 100. The score is the arithmetic mean of
+the local OCR word confidences for that reading. It is not a probability.
+Lines below the threshold are eligible. A score of 0 sends nothing.
+
+```sh
+heocr scan.pdf --ocr-router v2 --ocr-layout v1 --ocr-hybrid haiku --ocr-hybrid-confidence 70
+```
+
+The example score is illustrative. Supply the same options with
+`--ocr-hybrid-dry-run` for a budget upper bound. The reader sends up to 32
+of the lowest-scoring line crops in one request per OCR page, preserving
+local reading order, boxes and digit sequences. Table cells, lines lacking
+a compatible local confidence, and readable text layers stay local. The
+document cap and fallback apply to the whole batch. JSON records include
+eligible, below-threshold, submitted, accepted and changed line counts.
+In Python, pass `ocr_router="v2"`, `ocr_hybrid="haiku"` and
+`ocr_hybrid_confidence=70`. This route is separate from Haiku old-print
+dispatch and the local historical-model route.
 
 #### Example API cost per input
 

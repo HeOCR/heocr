@@ -48,7 +48,7 @@ def ok_reply(**overrides):
     }
 
 
-class HybridTest(unittest.TestCase):
+class HybridFixture(unittest.TestCase):
     def setUp(self):
         env = mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": KEY})
         env.start()
@@ -81,6 +81,8 @@ class HybridTest(unittest.TestCase):
             request, None, 307, "", {}, "https://example.invalid"))
         return payload["messages"][0]["content"]
 
+
+class HybridTest(HybridFixture):
     def test_default_has_no_egress_even_with_key(self):
         with mock.patch.object(hybrid.Tesseract, "find", return_value=self.local):
             doc = self.extract()
@@ -255,3 +257,81 @@ class HybridTest(unittest.TestCase):
             with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
                 self.extract(**kwargs)
         self.build_opener.assert_not_called()
+
+
+class ConfidenceHybridTest(HybridFixture):
+    def gated(self, **kwargs):
+        options = dict(ocr_router="v2", ocr_capture_type="scanner", check_numbers=False,
+                       repairs=False, ocr_hybrid="haiku", ocr_hybrid_confidence=70)
+        options.update(kwargs)
+        return extract(self.body, **options)
+
+    def setUp(self):
+        super().setUp()
+        self.local.lang = "heb_rivok"
+        self.local.recognize.side_effect = lambda *args, **kwargs: OcrResult([
+            OcrLine(LOCAL, [20, 20, 211, 51], [40, 60]),
+            OcrLine("קריאה בטוחה 123", [20, 95, 211, 120], [70, 70]),
+            OcrLine("קריאה ללא ציון", [20, 155, 211, 180]),
+        ])
+        self.find = self.enterContext(mock.patch.object(hybrid.Tesseract, "find", return_value=self.local))
+
+    def set_transcript(self, text):
+        self.open.side_effect = lambda *args, **kwargs: io.BytesIO(json.dumps(ok_reply(
+            content=[{"type": "text", "text": text}],
+        )).encode())
+
+    def test_confidence_sends_only_selected_line_after_local_read(self):
+        self.set_transcript(json.dumps({"1": "טקסט מתוקן"}))
+        baseline = self.gated(ocr_hybrid=None, ocr_hybrid_confidence=None)
+        doc = self.gated()
+        self.assertTrue(self.local.recognize.called)
+        self.open.assert_called_once()
+        prompt, draft, image = self.request_content()
+        self.assertEqual(prompt["text"], hybrid.LINE_PROMPT)
+        self.assertEqual(draft["text"], "Line 1 local OCR:\n" + LOCAL)
+        with Image.open(io.BytesIO(base64.b64decode(image["source"]["data"]))) as decoded:
+            self.assertEqual(decoded.size, (207, 47))
+            self.assertEqual(decoded.getpixel((0, 0)), (255, 255, 255))
+            self.assertLess(max(decoded.getpixel((9, 9))), 100)
+            self.assertFalse(decoded.info)
+        self.assertIn("טקסט מתוקן", doc.text)
+        self.assertIn("קריאה בטוחה 123", doc.text)
+        self.assertEqual([b.bbox for b in doc.blocks], [b.bbox for b in baseline.blocks])
+        self.assertEqual(doc.pages[0].signals["ocr_hybrid_lines"], {
+            "eligible": 2, "below_threshold": 1, "submitted": 1, "accepted": 1, "changed": 1,
+        })
+        self.assertEqual(doc.blocks[0].checks["hybrid_lines"][0]["line"], 1)
+
+    def test_missing_key_and_zero_threshold_keep_exact_local_text(self):
+        local = self.gated(ocr_hybrid=None, ocr_hybrid_confidence=None)
+        with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": ""}):
+            no_key = self.gated()
+        zero = self.gated(ocr_hybrid_confidence=0)
+        self.open.assert_not_called()
+        self.assertEqual(local.text, no_key.text)
+        self.assertEqual(local.text, zero.text)
+        self.assertEqual(no_key.pages[0].signals["ocr_hybrid"], "missing_api_key")
+        self.assertEqual(zero.pages[0].signals["ocr_hybrid_lines"]["below_threshold"], 0)
+
+    def test_invalid_batch_and_changed_digits_fall_back(self):
+        self.set_transcript('{"1":"first","1":"second"}')
+        doc = self.gated()
+        self.assertEqual(doc.pages[0].signals["ocr_hybrid"], "invalid_line_response")
+        self.assertIn(LOCAL, doc.text)
+        self.set_transcript(json.dumps({"1": "", "2": "קריאה בטוחה 321"}))
+        doc = self.gated(ocr_hybrid_confidence=100)
+        self.assertEqual(doc.pages[0].signals["ocr_hybrid"], "no_complete_line_transcripts")
+        self.assertNotIn("321", doc.text)
+
+    def test_router_consent_and_cap_are_enforced(self):
+        for kwargs in (
+            {"ocr_router": None}, {"ocr_hybrid_confidence": float("nan")},
+            {"ocr_hybrid_confidence": True}, {"ocr_hybrid": None},
+            {"ocr_hybrid_old_print": True},
+        ):
+            with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
+                self.gated(**kwargs)
+        doc = self.gated(ocr_hybrid_max_usd="0")
+        self.assertEqual(doc.pages[0].signals["ocr_hybrid"], "cost_cap")
+        self.open.assert_not_called()
