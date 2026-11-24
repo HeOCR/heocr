@@ -121,6 +121,7 @@ def extract(
     use the usual model. The option leaves text-layer handling unchanged.
     ``ocr_layout="v1"`` enables whole-page OCR column ordering, additional table
     evidence, logical mixed-script runs and guarded padding of inked crop edges.
+    ``ocr_layout="periodical"`` adds RTL article and page-furniture detection on scanned pages.
     ``ocr_old_print_model`` adds a historical-print probe to router v2. It takes the local
     pinned P-hist v2 ``.traineddata`` file and uses it only on OCR pages with historical evidence.
     ``ocr_hybrid="haiku"`` consents to sending whole-page OCR images to Anthropic.
@@ -185,8 +186,8 @@ def extract(
     ocr_model = MODEL_ALIASES.get(ocr_model, ocr_model) if isinstance(ocr_model, str) else ocr_model
     if ocr_router is not None and ocr_router != "v2":
         raise ValueError("ocr_router must be 'v2'")
-    if ocr_layout is not None and (ocr_layout != "v1" or not ocr):
-        raise ValueError("ocr_layout must be 'v1' and needs OCR")
+    if ocr_layout is not None and (ocr_layout not in ("v1", "periodical") or not ocr):
+        raise ValueError("ocr_layout must be 'v1' or 'periodical' and needs OCR")
     if ocr_old_print_model is not None and (
         ocr_router != "v2" or Path(ocr_old_print_model).suffix != ".traineddata"
     ):
@@ -320,6 +321,10 @@ def extract(
         reader(body, doc)
     finally:
         doc._hybrid = None
+    if ocr_layout == "periodical":
+        from heocr.ocr.periodicals import mark_running
+
+        mark_running(doc)
     if repairs:
         from heocr.repairs import repair_hebrew_commas, repair_ocr_date_brackets, repair_ocr_ellipses
 

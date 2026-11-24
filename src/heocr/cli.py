@@ -78,8 +78,8 @@ def _parser() -> argparse.ArgumentParser:
                         help="opt into experimental OCR routing for a declared capture")
     parser.add_argument("--ocr-router", choices=("v2",),
                         help="opt into OCR routing by capture type (declaration, PDF render or camera metadata)")
-    parser.add_argument("--ocr-layout", choices=("v1",),
-                        help="enable geometric OCR layout for columns, cells, mixed runs and clipped edges")
+    parser.add_argument("--ocr-layout", choices=("v1", "periodical"),
+                        help="enable geometric OCR layout, with optional periodical article detection")
     parser.add_argument("--ocr-old-print-model", metavar="MODEL",
                         help="enable historical-print detection with router v2 and a pinned local P-hist v2 model")
     parser.add_argument("--ocr-hybrid", choices=("haiku",),

@@ -103,6 +103,19 @@ Ruled tables use isolated cell reads. Stable unruled tables with an amount
 or ID column can also produce explicit cells in top-to-bottom rows, with
 cells ordered from the right in Hebrew.
 
+For newspapers and journals, use `--ocr-layout periodical` or
+`ocr_layout="periodical"`. The extension looks for sustained RTL text columns
+and larger headlines followed by body text. A headline covering adjacent
+columns joins those columns in one article. Each such article reads from
+right to left, with top-to-bottom order within its columns. Where the OCR
+boxes do not support a clear partition, the page uses the `v1` layout.
+
+JSON marks headlines as `heading` blocks. The OCR fields `periodical_article`
+and `periodical_columns` identify page-local groups and one-based columns
+counted from the right. Isolated page-margin text and corroborated running
+text stay in the record as `header` and `footer` blocks. This option uses
+existing OCR lines and leaves ordinary PDF text-layer extraction as before.
+
 For mixed Hebrew lines, the stage uses the word boxes to keep a bounded
 Latin or numeric expression in logical left-to-right order between Hebrew
 anchors. It leaves the characters within each recognized word intact.

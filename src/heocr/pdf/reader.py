@@ -2110,6 +2110,26 @@ def _ocr_blocks(
     return read
 
 
+def _ocr_periodical(doc, index, engine, layout, scale: float) -> int:
+    """Project article groups through the ordinary OCR line/block path."""
+    read = 0
+    for region in layout.regions:
+        first = len(doc.blocks)
+        read += _ocr_blocks(doc, index, engine, OcrResult(region.lines), scale)
+        for block in doc.blocks[first:]:
+            block.role = region.role
+            if region.heading:
+                block.kind = "heading"
+                block.level = 1
+            if region.article is not None:
+                block.ocr["periodical_article"] = region.article
+                # Number columns from the right, using one-based page-local indexes.
+                block.ocr["periodical_columns"] = [layout.columns - i for i in reversed(region.columns)]
+            else:
+                block.flags.append("ocr_periodical_margin")
+    return read
+
+
 def _order_ocr_gaps(blocks, first, index, engine, scale, records) -> bool:
     # The margin pass deliberately puts detached clause numbers beside their targets.
     if records.attached:
@@ -2382,7 +2402,8 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
         page_failed = True
     historical = None
     settings = doc._ocr_settings or {}
-    layout = settings.get("layout") == "v1"
+    layout_mode = settings.get("layout")
+    layout = layout_mode in ("v1", "periodical")
     if layout and not (grids or rectified or page_failed or time_up(doc)):
         padded = ocr_layout.clip_guard(engine, page_image, dpi, result)
         if padded is not None:
@@ -2465,29 +2486,40 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
                 joined_camera_lines = len(result.lines) - len(joined.lines)
                 result = joined
                 flags = flags + ["ocr_camera_line_fragments_joined"]
-    columns = None
+    columns = periodical = None
     if layout and doc._rtl:
         ltr_changes += ocr_layout.normalize_ltr(line for line in result.lines if id(line) not in taken)
         if ltr_changes:
             signals["ocr_layout_ltr_runs"] = ltr_changes
         if not (unruled or grids or rectified):
-            columns = ocr_layout.column_order(result.lines, page_image.width)
-            if columns is not None:
-                result = OcrResult(columns)
-                flags = flags + ["ocr_layout_rtl_columns"]
+            if layout_mode == "periodical":
+                from heocr.ocr.periodicals import plan_page
+
+                periodical = plan_page(result.lines, page_image.size)
+            if periodical is not None:
+                signals["ocr_periodical_columns"] = periodical.columns
+                flags = flags + ["ocr_layout_periodical"]
+            else:
+                columns = ocr_layout.column_order(result.lines, page_image.width)
+                if columns is not None:
+                    result = OcrResult(columns)
+                    flags = flags + ["ocr_layout_rtl_columns"]
     form_tables = [t.bbox for t in grids if "table_open_sides_inferred" in t.flags]
     margin_page = image.size if doc._rtl and not unruled and not (grids or rectified) else None
     record_lines = page is not None and page_class == "T5" and margin_page is not None
     line_records = _OcrLineRecords() if record_lines else None
-    read = _ocr_blocks(doc, index, engine, OcrResult([line for line in result.lines if id(line) not in taken]), scale,
-                       form_tables=form_tables, margin_page=margin_page, line_records=line_records)
-    if columns is None and _order_ocr_paragraphs(doc.blocks, first):
-        flags = flags + ["reading_order_ocr_adjusted_unverified"]
-    if columns is None and not (unruled or grids or rectified):
-        if _order_ocr_bands(doc.blocks, first, image, scale):
-            flags = flags + ["reading_order_ocr_bands_unverified"]
-        elif line_records is not None and _order_ocr_gaps(doc.blocks, first, index, engine, scale, line_records):
-            flags = flags + ["reading_order_ocr_disjoint_gaps_unverified"]
+    if periodical is not None:
+        read = _ocr_periodical(doc, index, engine, periodical, scale)
+    else:
+        read = _ocr_blocks(doc, index, engine, OcrResult([line for line in result.lines if id(line) not in taken]), scale,
+                           form_tables=form_tables, margin_page=margin_page, line_records=line_records)
+        if columns is None and _order_ocr_paragraphs(doc.blocks, first):
+            flags = flags + ["reading_order_ocr_adjusted_unverified"]
+        if columns is None and not (unruled or grids or rectified):
+            if _order_ocr_bands(doc.blocks, first, image, scale):
+                flags = flags + ["reading_order_ocr_bands_unverified"]
+            elif line_records is not None and _order_ocr_gaps(doc.blocks, first, index, engine, scale, line_records):
+                flags = flags + ["reading_order_ocr_disjoint_gaps_unverified"]
     if unruled:
         row_blocks, in_rows = _ocr_row_tables(doc, index, engine, unruled, scale)
         _place_tables(doc, first, row_blocks)
@@ -2654,7 +2686,7 @@ def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids, n
     ``text_scale`` enables tight, padded text crops inside rectified cells.
     """
     ox, oy = offset
-    layout = (doc._ocr_settings or {}).get("layout") == "v1"
+    layout = (doc._ocr_settings or {}).get("layout") in ("v1", "periodical")
     dpi = round(scale * 72)
     blocks: list[Block] = []
     read = 0
