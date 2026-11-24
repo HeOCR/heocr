@@ -72,6 +72,7 @@ def extract(
     tesseract: str | Sequence[str] | None = None,
     ocr_model: str | None = DEFAULT_MODEL,
     ocr_router: str | None = None,
+    ocr_layout: str | None = None,
     ocr_old_print_model: str | os.PathLike[str] | None = None,
     ocr_hybrid: str | None = None,
     ocr_hybrid_old_print: bool = False,
@@ -118,6 +119,8 @@ def extract(
     ``ocr_router="v2"`` selects the capture route using a declaration when supplied, PDF rendering
     for document OCR, or exposure/focal-length metadata for JPEG photos. Inputs without a signal
     use the usual model. The option leaves text-layer handling unchanged.
+    ``ocr_layout="v1"`` enables whole-page OCR column ordering, additional table
+    evidence, logical mixed-script runs and guarded padding of inked crop edges.
     ``ocr_old_print_model`` adds a historical-print probe to router v2. It takes the local
     pinned P-hist v2 ``.traineddata`` file and uses it only on OCR pages with historical evidence.
     ``ocr_hybrid="haiku"`` consents to sending whole-page OCR images to Anthropic.
@@ -182,6 +185,8 @@ def extract(
     ocr_model = MODEL_ALIASES.get(ocr_model, ocr_model) if isinstance(ocr_model, str) else ocr_model
     if ocr_router is not None and ocr_router != "v2":
         raise ValueError("ocr_router must be 'v2'")
+    if ocr_layout is not None and (ocr_layout != "v1" or not ocr):
+        raise ValueError("ocr_layout must be 'v1' and needs OCR")
     if ocr_old_print_model is not None and (
         ocr_router != "v2" or Path(ocr_old_print_model).suffix != ".traineddata"
     ):
@@ -271,6 +276,9 @@ def extract(
         doc.options["time_limit"] = time_limit
         doc._time_limit, doc._deadline = float(time_limit), started + time_limit
     doc._ocr_settings = {"cmd": tesseract, "lang": ocr_lang, "psm": ocr_psm, "model": ocr_model} if ocr else None
+    if ocr_layout is not None:
+        doc._ocr_settings["layout"] = ocr_layout
+        doc.options["ocr"]["layout"] = ocr_layout
     if ocr_router is not None:
         doc.options["ocr"]["router"] = {"version": ocr_router, "reason": capture_reason}
     if ocr_capture_type is not None:

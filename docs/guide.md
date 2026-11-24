@@ -90,6 +90,31 @@ Use `--photo-preprocess gray-otsu` (Python `photo_preprocess="gray-otsu"`) to se
 
 For internal capture checks, see the [DEV215 triad runbook](dev215-triads.md).
 
+### Geometric OCR layout
+
+```sh
+heocr scan.pdf --ocr-router v2 --ocr-layout v1
+```
+
+The optional layout stage uses OCR boxes to read sustained prose columns
+right to left and attach recurring narrow margin notes at adjacent rows.
+It preserves spanning headings and footers when their placement is clear.
+Ruled tables use isolated cell reads. Stable unruled tables with an amount
+or ID column can also produce explicit cells in top-to-bottom rows, with
+cells ordered from the right in Hebrew.
+
+For mixed Hebrew lines, the stage uses the word boxes to keep a bounded
+Latin or numeric expression in logical left-to-right order between Hebrew
+anchors. It leaves the characters within each recognized word intact.
+When visible ink reaches an image or cell-crop edge, it may retry with a
+paper-colored border. The retry must preserve the existing text and numeric
+runs and add glyphs at an edge. Its boxes map back to the source coordinates.
+The stage can help recognize strokes that remain visible at the boundary.
+
+The Python option is `ocr_layout="v1"`. It applies to OCR, and readable
+text layers use their usual route. The record flags accepted ordering and
+padding changes.
+
 ### Historical print with router v2
 
 ```sh

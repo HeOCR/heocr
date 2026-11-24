@@ -27,6 +27,7 @@ rows:
 
 from __future__ import annotations
 
+import re
 import statistics
 from dataclasses import dataclass, field
 
@@ -45,6 +46,7 @@ GUTTER_HEIGHTS = 0.8
 SPLIT_ROWS = 0.5  # at least this share of a run's rows is made of two Tesseract lines or more
 LEFTOVER_CHARS = 3  # at most this many characters left over inside a number's box
 DUPLICATE_OVERLAP = 0.9  # a piece whose text is in another's, with this share of its box inside the other's, is that piece again
+_AMOUNT = re.compile(r"[₪$€+−-]?\s*\d[\d.,:/−–-]*\s*[%₪$€]?")
 
 
 @dataclass
@@ -164,11 +166,12 @@ def _band(piece: Piece, gutters) -> int:
     return sum(1 for g in gutters if (g[0] + g[1]) / 2 < centre)
 
 
-def _table(run: list[list[Piece]], width: float, rtl: bool) -> TableRows | None:
+def _table(run: list[list[Piece]], width: float, rtl: bool, layout: bool = False) -> TableRows | None:
     # Tesseract's order is wrong only where it read the columns apart: a row put together from lines of
     # its own. When most rows are one line each (cut at a wide gap), Tesseract read the table row by row,
     # and its order stands.
-    if sum(1 for row in run if len({id(p.line) for p in row}) >= 2) < SPLIT_ROWS * len(run):
+    split = sum(1 for row in run if len({id(p.line) for p in row}) >= 2) >= SPLIT_ROWS * len(run)
+    if not split and not layout:
         return None
     gutters = _gutters(run, width)
     if not gutters:
@@ -183,6 +186,15 @@ def _table(run: list[list[Piece]], width: float, rtl: bool) -> TableRows | None:
                 return None  # two pieces of one row in one column: the columns are not stable
             cells[band].append(piece)
         grid.append(cells[::-1] if rtl else cells)
+    if not split:
+        # A stable amount/ID column corroborates cell segmentation when the engine
+        # already read across the rows. Pure prose columns keep their existing flow.
+        populated = [[cell[0].text for cell in col if cell] for col in zip(*grid, strict=True)]
+        if not any(
+            sum(bool(_AMOUNT.fullmatch(text)) for text in col) >= max(3, .75 * len(run))
+            for col in populated
+        ):
+            return None
     lines = []
     for row in run:
         for piece in row:
@@ -191,7 +203,7 @@ def _table(run: list[list[Piece]], width: float, rtl: bool) -> TableRows | None:
     return TableRows(grid, lines)
 
 
-def table_rows(lines: list[OcrLine], scale: float, rtl: bool) -> list[TableRows]:
+def table_rows(lines: list[OcrLine], scale: float, rtl: bool, *, layout: bool = False) -> list[TableRows]:
     """Unruled tables in an OCR result whose ``scale`` is pixels per point. A line any of whose words
     falls in a table belongs to it whole: a table is returned only when every word of its lines is
     one of its cells' words."""
@@ -220,7 +232,7 @@ def table_rows(lines: list[OcrLine], scale: float, rtl: bool) -> list[TableRows]
 
     def close():
         if len(run) >= MIN_ROWS:
-            table = _table(run, GUTTER_HEIGHTS * height, rtl)
+            table = _table(run, GUTTER_HEIGHTS * height, rtl, layout)
             if table is not None:
                 tables.append(table)
 

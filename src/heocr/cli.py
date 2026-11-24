@@ -78,6 +78,8 @@ def _parser() -> argparse.ArgumentParser:
                         help="opt into experimental OCR routing for a declared capture")
     parser.add_argument("--ocr-router", choices=("v2",),
                         help="opt into OCR routing by capture type (declaration, PDF render or camera metadata)")
+    parser.add_argument("--ocr-layout", choices=("v1",),
+                        help="enable geometric OCR layout for columns, cells, mixed runs and clipped edges")
     parser.add_argument("--ocr-old-print-model", metavar="MODEL",
                         help="enable historical-print detection with router v2 and a pinned local P-hist v2 model")
     parser.add_argument("--ocr-hybrid", choices=("haiku",),
@@ -159,6 +161,7 @@ def main(argv: list[str] | None = None) -> int:
             tesseract=args.tesseract,
             ocr_model=args.ocr_model,
             ocr_router=args.ocr_router,
+            ocr_layout=args.ocr_layout,
             ocr_old_print_model=args.ocr_old_print_model,
             ocr_hybrid=args.ocr_hybrid,
             ocr_hybrid_old_print=args.ocr_hybrid_old_print,
