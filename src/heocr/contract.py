@@ -249,6 +249,7 @@ class Document:
     _ocr_error: str | None = field(default=None, repr=False, compare=False)
     _ocr_engines: dict = field(default_factory=dict, repr=False, compare=False)  # ocr_model="auto": model -> engine
     _route: Any = field(default=None, repr=False, compare=False)  # ocr_model="auto": the probe's state, then its decision
+    _hybrid: Any = field(default=None, repr=False, compare=False)  # optional hosted page reader
     _crnn: Any = field(default=None, repr=False, compare=False)  # optional CPU line recognizer
     _handwriting: Any = field(default=None, repr=False, compare=False)  # optional Kraken reader and local pins
     _convert_settings: dict[str, Any] | None = field(default=None, repr=False, compare=False)  # LibreOffice: cmd, timeout

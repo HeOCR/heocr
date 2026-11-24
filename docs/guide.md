@@ -90,6 +90,48 @@ Use `--photo-preprocess gray-otsu` (Python `photo_preprocess="gray-otsu"`) to se
 
 For internal capture checks, see the [DEV215 triad runbook](dev215-triads.md).
 
+### Haiku hybrid OCR
+
+`--ocr-hybrid haiku` explicitly authorizes HeOCR to send whole-page OCR images to
+Anthropic using `ANTHROPIC_API_KEY`. The feature is off by default. Use it only for
+documents you are authorized to share.
+
+```sh
+heocr scan.pdf --ocr-hybrid haiku --ocr-hybrid-max-usd 1.00 --ocr-hybrid-dry-run
+heocr scan.pdf --ocr-hybrid haiku --ocr-hybrid-max-usd 1.00
+heocr old-print.png --ocr-hybrid haiku --ocr-hybrid-old-print
+```
+
+The route pins `claude-haiku-5-5`, Anthropic's fixed Haiku 5.5 snapshot ID.
+Anthropic publishes this snapshot ID without a date suffix. HeOCR checks
+that the response reports the same ID. [Anthropic migration guide](https://platform.claude.com/docs/en/models/haiku-5-5/migration-guide)
+
+The fixed prompts live in the package. HeOCR sends an oriented RGB PNG of each
+image frame or rendered PDF page that needs full-page OCR. It strips source
+metadata, limits the long edge to 2,200 pixels and writes a fixed 200 DPI tag.
+Readable text layers and embedded regions use their
+usual routes. Use `--force-ocr` to send rendered pages with readable PDF text
+layers as well. The old-print switch also sends a local HeOCR R8b draft using
+PSM 3 and 200 DPI. Install the pinned seed once with
+`heocr --download-model heocr_r8b`. Hosted output is unverified page text and
+has no word boxes or table structure. Use `--no-repairs` to read its raw text.
+
+The cap defaults to USD 1 per input document. Before every request, HeOCR
+reserves USD 0.544768 at the highest uncached rates for a 1,048,576-token input
+and 8,192 output tokens. It replaces that reserve with reported list-price
+usage when available. An unknown charge keeps its reserve. The dry run
+prints a conservative JSON estimate using the document's possible page count
+and the cap. It reads only local metadata and works without a key. A cap below
+one reservation permits zero hosted calls. [Anthropic model pricing and limits](https://platform.claude.com/docs/en/models/haiku-5-5/overview)
+
+HeOCR uses its configured local OCR when the key or R8b seed is unavailable,
+the budget has insufficient room, or the API cannot return a complete
+transcript. A transport or protocol error stops hosted calls for the rest of
+that document. The JSON record includes the model ID, prompt hash, budget
+usage, and per-page hosted or fallback status. In Python, use
+`heocr.extract("scan.pdf", ocr_hybrid="haiku", ocr_hybrid_max_usd="1.00")`.
+Add `ocr_hybrid_old_print=True` for old print.
+
 
 ### LibreOffice
 

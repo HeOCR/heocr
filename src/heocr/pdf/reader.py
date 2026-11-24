@@ -2239,9 +2239,18 @@ def _rest_has_ink(image, scale: float) -> bool:
 
 
 def _ocr_page(doc: Document, index: int, page, width, height, page_class, signals, text: PageText, flags,
-              rendered=None, *, camera_jpeg: bool = False, form_image=None) -> None:
+              rendered=None, *, camera_jpeg: bool = False, form_image=None, hybrid_image=None) -> None:
     """Read a page by OCR. ``rendered`` is (image, pixels per point) when the page is already an
     image (an image file, D4b); otherwise the PDF page is rendered."""
+    if doc._hybrid is not None and doc._hybrid.eligible(doc, signals):
+        image, scale = rendered if rendered is not None else _render(page)
+        if rendered is None and scale * 72 < RENDER_DPI:
+            flags = flags + ["render_dpi_reduced"]
+        rendered = image, scale
+        hosted_image = image if hybrid_image is None else hybrid_image
+        if doc._hybrid.read(doc, index, hosted_image, width, height, page_class, signals, text.chars_total, flags):
+            signals["ocr_hybrid_render_dpi"] = round(scale * 72, 1) if hybrid_image is None else signals["dpi"]
+            return
     if page_class == "T5" and doc._handwriting is not None:
         from heocr.handwriting import read_page as read_handwriting
 
