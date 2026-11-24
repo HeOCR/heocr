@@ -5,7 +5,11 @@ from __future__ import annotations
 import hashlib
 import math
 import os
-from collections.abc import Callable, Sequence
+from collections import deque
+from collections.abc import Callable, Iterable, Iterator, Sequence
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
+from itertools import islice
 from pathlib import Path
 
 from heocr import contract
@@ -13,7 +17,7 @@ from heocr.contract import MAX_PAGES, Document, Unread
 from heocr.convert import CONVERSIONS, CONVERT_TIMEOUT
 from heocr.handwriting import HandwritingConfig, HandwritingReader
 from heocr.identify import identify
-from heocr.ocr.tesseract import DEFAULT_LANG, DEFAULT_PSM, check_settings
+from heocr.ocr.tesseract import DEFAULT_LANG, DEFAULT_PSM, _temporary_models, check_settings
 
 # The default OCR model: HeOCR's modern-print model, bundled in the package (``heocr.models``).
 DEFAULT_MODEL = "heocr_modern_v1"
@@ -27,6 +31,21 @@ IMAGE_FORMATS = ("png", "jpeg", "tiff", "gif", "bmp", "jp2", "webp")
 MAX_FILE_BYTES = 512 * 1024**2
 
 Reader = Callable[[bytes, Document], None]
+Source = str | os.PathLike[str] | bytes
+
+
+def _source_bytes(source: Source) -> bytes:
+    if isinstance(source, (bytes, bytearray, memoryview)):
+        body = bytes(source)
+    else:
+        path = Path(source)
+        size = path.stat().st_size
+        if size > MAX_FILE_BYTES:
+            raise ValueError(f"input is {size} bytes; the limit is {MAX_FILE_BYTES}")
+        body = path.read_bytes()
+    if len(body) > MAX_FILE_BYTES:
+        raise ValueError(f"input is {len(body)} bytes; the limit is {MAX_FILE_BYTES}")
+    return body
 
 
 def _readers() -> dict[str, Reader]:
@@ -43,7 +62,7 @@ def _readers() -> dict[str, Reader]:
 
 
 def extract(
-    source: str | os.PathLike[str] | bytes,
+    source: Source,
     *,
     repairs: bool = True,
     ocr: bool = True,
@@ -169,16 +188,7 @@ def extract(
             raise ValueError("ocr_line_v6 needs a local .traineddata file")
     if ocr_model in STOCK_MODELS or (ocr_model in ("auto", DEFAULT_MODEL) and ocr_lang != DEFAULT_LANG):
         ocr_model = None  # stock Tesseract: asked for, or a Hebrew model with a language list it would replace
-    if isinstance(source, (bytes, bytearray, memoryview)):
-        body = bytes(source)
-    else:
-        path = Path(source)
-        size = path.stat().st_size
-        if size > MAX_FILE_BYTES:
-            raise ValueError(f"input is {size} bytes; the limit is {MAX_FILE_BYTES}")
-        body = path.read_bytes()
-    if len(body) > MAX_FILE_BYTES:
-        raise ValueError(f"input is {len(body)} bytes; the limit is {MAX_FILE_BYTES}")
+    body = _source_bytes(source)
 
     if force_ocr and not ocr:
         raise ValueError("force_ocr needs OCR: it cannot be combined with ocr=False (--no-ocr)")
@@ -276,3 +286,34 @@ def extract(
                    detail=f"{failed} Tesseract call(s) failed or timed out; what they would have read is missing")
         )
     return doc
+
+
+def _extract_image(source: Source, **options) -> Document:
+    body = _source_bytes(source)
+    if identify(body).format not in IMAGE_FORMATS:
+        raise ValueError("extract_images needs standalone image inputs")
+    with _temporary_models():
+        return extract(body, **options)
+
+
+def extract_images(sources: Iterable[Source], *, workers: int = 1, **options) -> Iterator[Document]:
+    """Read standalone images in input order with one or two workers.
+
+    Each input uses the same settings and record format as :func:`extract`.
+    Frames of a multi-page image stay in one record. Pass ``workers=2`` to overlap
+    OCR of independent images, with at most two inputs in flight. Exhaust the
+    iterator or close it to join the workers if you stop reading early.
+    """
+    if isinstance(workers, bool) or not isinstance(workers, int) or workers not in (1, 2):
+        raise ValueError("workers must be 1 or 2")
+    read_image = partial(_extract_image, **options)
+    if workers == 1:
+        yield from map(read_image, sources)
+        return
+    sources = iter(sources)
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        pending = deque(executor.submit(read_image, source) for source in islice(sources, workers))
+        while pending:
+            yield pending.popleft().result()
+            for source in islice(sources, 1):
+                pending.append(executor.submit(read_image, source))

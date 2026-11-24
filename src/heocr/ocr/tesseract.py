@@ -25,6 +25,8 @@ import re
 import shutil
 import subprocess
 import tempfile
+from contextlib import ExitStack, contextmanager
+from contextvars import ContextVar
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -108,6 +110,20 @@ def _run(cmd: list[str], timeout: float) -> subprocess.CompletedProcess:
         raise OcrUnavailable("tesseract timed out") from exc
 
 
+_model_files: ContextVar[ExitStack | None] = ContextVar("tesseract_model_files", default=None)
+
+
+@contextmanager
+def _temporary_models():
+    """Remove private model copies when this extraction finishes."""
+    with ExitStack() as files:
+        token = _model_files.set(files)
+        try:
+            yield
+        finally:
+            _model_files.reset(token)
+
+
 def _private_tessdata(installation: Path, model_path: Path, name: str) -> Path:
     """A temporary tessdata folder: the model, plus the installation's ``configs`` for TSV output."""
     import atexit
@@ -115,8 +131,12 @@ def _private_tessdata(installation: Path, model_path: Path, name: str) -> Path:
     configs = installation / "configs"
     if not (configs / "tsv").is_file():
         raise OcrUnavailable("the Tesseract installation has no configs/tsv, needed for TSV output")
-    folder = Path(tempfile.mkdtemp(prefix="heocr-tessdata-"))
-    atexit.register(shutil.rmtree, folder, True)
+    files = _model_files.get()
+    if files is None:
+        folder = Path(tempfile.mkdtemp(prefix="heocr-tessdata-"))
+        atexit.register(shutil.rmtree, folder, True)
+    else:
+        folder = Path(files.enter_context(tempfile.TemporaryDirectory(prefix="heocr-tessdata-")))
     shutil.copyfile(model_path, folder / f"{name}.traineddata")
     shutil.copytree(configs, folder / "configs")
     return folder

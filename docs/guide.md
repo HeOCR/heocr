@@ -130,6 +130,18 @@ print(doc.text)
 
 `heocr.validate(record)` checks a record (a dict) against the contract and returns a list of errors, which is empty when it is valid.
 
+Use two workers for batches of independent image files. The iterator yields a
+complete document record for each input, in input order, using the same options
+as `extract`. Process each record as it arrives to keep memory bounded.
+
+```python
+for doc in heocr.extract_images(["page-01.png", "page-02.png"], workers=2):
+    print(doc.text)
+```
+
+Each worker runs Tesseract on one thread. Time limits still apply per input, and
+running two jobs can change when an explicit deadline is reached.
+
 The options, all keyword-only:
 
 | Option | Default | |
