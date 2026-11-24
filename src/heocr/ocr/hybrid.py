@@ -15,6 +15,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from heocr.contract import Block, Page, time_up
 from heocr.ocr.tesseract import OcrUnavailable, Tesseract
 
+# Anthropic's canonical Haiku 5.5 snapshot ID, also returned by the registered comparator.
 MODEL = "claude-haiku-5-5"
 OLD_PRINT_MODEL = "heocr_r8b"
 PAGE_DPI = 200

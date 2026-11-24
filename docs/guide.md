@@ -102,10 +102,14 @@ heocr scan.pdf --ocr-hybrid haiku --ocr-hybrid-max-usd 1.00
 heocr old-print.png --ocr-hybrid haiku --ocr-hybrid-old-print
 ```
 
-The route uses `claude-haiku-5-5` and the fixed prompts in the package. It sends
-an oriented RGB PNG of each image frame or rendered PDF page that needs full-page
-OCR. It strips source metadata, limits the long edge to 2,200 pixels and writes
-a fixed 200 DPI tag. Readable text layers and embedded regions use their
+The route pins `claude-haiku-5-5`, Anthropic's fixed Haiku 5.5 snapshot ID.
+Anthropic publishes this snapshot ID without a date suffix. HeOCR checks
+that the response reports the same ID. [Anthropic migration guide](https://platform.claude.com/docs/en/models/haiku-5-5/migration-guide)
+
+The fixed prompts live in the package. HeOCR sends an oriented RGB PNG of each
+image frame or rendered PDF page that needs full-page OCR. It strips source
+metadata, limits the long edge to 2,200 pixels and writes a fixed 200 DPI tag.
+Readable text layers and embedded regions use their
 usual routes. Use `--force-ocr` to send rendered pages with readable PDF text
 layers as well. The old-print switch also sends a local HeOCR R8b draft using
 PSM 3 and 200 DPI. Install the pinned seed once with
