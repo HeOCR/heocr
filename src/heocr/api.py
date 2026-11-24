@@ -8,6 +8,7 @@ import os
 from collections import deque
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
+from decimal import Decimal
 from functools import partial
 from itertools import islice
 from pathlib import Path
@@ -71,6 +72,9 @@ def extract(
     tesseract: str | Sequence[str] | None = None,
     ocr_model: str | None = DEFAULT_MODEL,
     ocr_router: str | None = None,
+    ocr_hybrid: str | None = None,
+    ocr_hybrid_old_print: bool = False,
+    ocr_hybrid_max_usd: str | Decimal | None = None,
     ocr_capture_type: str | None = None,
     ocr_line_v6: str | os.PathLike[str] | None = None,
     ocr_line_batch: bool = False,
@@ -113,6 +117,11 @@ def extract(
     ``ocr_router="v2"`` selects the capture route using a declaration when supplied, PDF rendering
     for document OCR, or exposure/focal-length metadata for JPEG photos. Inputs without a signal
     use the usual model. The option leaves text-layer handling unchanged.
+    ``ocr_hybrid="haiku"`` consents to sending whole-page OCR images to Anthropic.
+    It requires the ``ANTHROPIC_API_KEY`` environment variable for hosted reading.
+    ``ocr_hybrid_old_print=True`` also sends the pinned local R8b OCR draft for correction.
+    ``ocr_hybrid_max_usd`` caps API list-price spend per document (default USD 1.00).
+    The configured local OCR route handles pages where hosted reading is unavailable.
     ``photo_preprocess="gray-otsu"`` sends grayscale rasters to the main Tesseract reader
     with internal Otsu thresholding on standalone photos. Use a phone capture declaration
     when camera metadata is unavailable.
@@ -170,6 +179,15 @@ def extract(
     ocr_model = MODEL_ALIASES.get(ocr_model, ocr_model) if isinstance(ocr_model, str) else ocr_model
     if ocr_router is not None and ocr_router != "v2":
         raise ValueError("ocr_router must be 'v2'")
+    hybrid = None
+    if ocr_hybrid is not None:
+        from heocr.ocr.hybrid import HybridReader, parse_cap
+
+        if ocr_hybrid != "haiku" or not ocr:
+            raise ValueError("ocr_hybrid must be 'haiku' and needs OCR")
+        hybrid = HybridReader(cap=parse_cap(ocr_hybrid_max_usd), old_print=ocr_hybrid_old_print)
+    elif ocr_hybrid_old_print or ocr_hybrid_max_usd is not None:
+        raise ValueError("hybrid options require ocr_hybrid='haiku'")
     if photo_preprocess is not None and (photo_preprocess != "gray-otsu" or not ocr):
         raise ValueError("photo_preprocess must be 'gray-otsu' and needs OCR")
     if ocr_router is not None or ocr_capture_type is not None:
@@ -228,6 +246,8 @@ def extract(
             else False,
         },
     )
+    if hybrid is not None:
+        doc.options["ocr"]["hybrid"] = hybrid.record
     if force_ocr:
         doc.options["force_ocr"] = True
     if crnn_model is not None:
@@ -275,7 +295,11 @@ def extract(
         )
         doc.flags.append("not_read")
         return doc
-    reader(body, doc)
+    doc._hybrid = hybrid
+    try:
+        reader(body, doc)
+    finally:
+        doc._hybrid = None
     if repairs:
         from heocr.repairs import repair_hebrew_commas, repair_ocr_date_brackets, repair_ocr_ellipses
 

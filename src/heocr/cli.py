@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -77,6 +78,14 @@ def _parser() -> argparse.ArgumentParser:
                         help="opt into experimental OCR routing for a declared capture")
     parser.add_argument("--ocr-router", choices=("v2",),
                         help="opt into OCR routing by capture type (declaration, PDF render or camera metadata)")
+    parser.add_argument("--ocr-hybrid", choices=("haiku",),
+                        help="consent to sending whole-page OCR images to Anthropic (uses ANTHROPIC_API_KEY)")
+    parser.add_argument("--ocr-hybrid-old-print", action="store_true",
+                        help="declare old print and also send a local R8b OCR draft for correction")
+    parser.add_argument("--ocr-hybrid-max-usd", metavar="USD",
+                        help="cap the Anthropic list-price cost per document (default: 1.00)")
+    parser.add_argument("--ocr-hybrid-dry-run", action="store_true",
+                        help="estimate the document's cost upper bound locally without sending anything")
     parser.add_argument("--photo-preprocess", choices=("gray-otsu",),
                         help="send grayscale to the main OCR reader with internal Otsu thresholding on photos")
     parser.add_argument("-q", "--quiet", action="store_true", help="do not report unread parts on stderr (a missing OCR model is still reported)")
@@ -93,6 +102,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
     if args.download_model:
+        if args.ocr_hybrid_dry_run:
+            parser.error("--ocr-hybrid-dry-run cannot download a model")
         from heocr.models import ModelError, download
 
         try:
@@ -104,6 +115,22 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.file is None:
         parser.error("a file is required")
+    if args.ocr_hybrid_dry_run:
+        if args.ocr_hybrid is None or args.no_ocr:
+            parser.error("--ocr-hybrid-dry-run requires --ocr-hybrid haiku and OCR")
+        from heocr.ocr.hybrid import estimate_cost, parse_cap
+
+        try:
+            estimate = estimate_cost(args.file, max_pages=args.max_pages, cap=parse_cap(args.ocr_hybrid_max_usd))
+            report = json.dumps(estimate, indent=2) + "\n"
+            if args.output:
+                args.output.write_text(report, encoding="utf-8")
+            else:
+                sys.stdout.write(report)
+        except (OSError, ValueError, EOFError) as exc:
+            print(f"heocr: {exc}", file=sys.stderr)
+            return 1
+        return 0
     fmt = args.format or (_BY_SUFFIX.get(args.output.suffix.lower(), "text") if args.output else "text")
     if fmt == "docx" and not args.output and sys.stdout.isatty():
         parser.error("a Word file is not shown on a terminal: give -o FILE.docx, or redirect the output")
@@ -118,6 +145,9 @@ def main(argv: list[str] | None = None) -> int:
         elif any((args.handwriting_sha256, args.handwriting_mode, args.handwriting_segmenter,
                   args.handwriting_segmenter_sha256, args.handwriting_detector)):
             raise ValueError("handwriting options require --handwriting MODEL")
+        if args.ocr_hybrid and not args.no_ocr:
+            content = "Page images and local OCR drafts" if args.ocr_hybrid_old_print else "Page images"
+            print(f"heocr: {content} may be sent to Anthropic when ANTHROPIC_API_KEY is set.", file=sys.stderr)
         doc = extract(
             args.file,
             repairs=not args.no_repairs,
@@ -127,6 +157,9 @@ def main(argv: list[str] | None = None) -> int:
             tesseract=args.tesseract,
             ocr_model=args.ocr_model,
             ocr_router=args.ocr_router,
+            ocr_hybrid=args.ocr_hybrid,
+            ocr_hybrid_old_print=args.ocr_hybrid_old_print,
+            ocr_hybrid_max_usd=args.ocr_hybrid_max_usd,
             ocr_capture_type=args.ocr_capture_type,
             ocr_line_v6=args.ocr_line_v6,
             ocr_line_batch=args.ocr_line_batch,
@@ -167,6 +200,10 @@ def main(argv: list[str] | None = None) -> int:
     # A missing OCR model changes the results, so it is reported even with --quiet.
     for line in _model_warnings(doc):
         print(line, file=sys.stderr)
+    if "ocr_hybrid_local_fallback" in doc.flags:
+        reasons = sorted({p.signals["ocr_hybrid"] for p in doc.pages
+                          if p.signals.get("ocr_hybrid") not in (None, "hosted")})
+        print(f"heocr: used local OCR fallback on hybrid pages ({', '.join(reasons)})", file=sys.stderr)
     if not args.quiet:
         for item in doc.unread:
             where = f"page {item.page + 1}: " if item.page is not None else ""

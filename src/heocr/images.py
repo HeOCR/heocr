@@ -33,7 +33,7 @@ LOW_SCAN_DPI = RENDER_DPI / 3
 MIN_SCAN_EDGE_PT = 360  # smallest side of a page, to exclude labels and other cropped regions
 
 
-def _grey(frame):
+def _oriented(frame):
     from PIL import Image, ImageOps
 
     frame = ImageOps.exif_transpose(frame)
@@ -41,7 +41,11 @@ def _grey(frame):
         rgba = frame.convert("RGBA")
         white = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
         frame = Image.alpha_composite(white, rgba)
-    return frame.convert("L")
+    return frame
+
+
+def frame_page_count(image) -> int:
+    return getattr(image, "n_frames", 1) if (image.format or "").upper() in ("TIFF", "MPO") else 1
 
 
 def _dpi(frame) -> tuple[float, bool]:
@@ -75,7 +79,7 @@ def read_image(body: bytes, doc: Document) -> None:
         doc.flags.append("not_read")
         return
     total = getattr(image, "n_frames", 1)
-    frames = total if (image.format or "").upper() in ("TIFF", "MPO") else 1
+    frames = frame_page_count(image)
     if total > frames:
         doc.flags.append("image_frames_skipped")
     doc.page_count = frames
@@ -87,7 +91,9 @@ def read_image(body: bytes, doc: Document) -> None:
         try:
             image.seek(index)
             copied = image.copy()
-            frame = _grey(copied)
+            frame = _oriented(copied)
+            hybrid_image = frame if doc._hybrid is not None else None
+            frame = frame.convert("L")
         except (OSError, ValueError, EOFError) as exc:
             doc.unread.append(Unread(scope="page", reason="image_unreadable", page=index, detail=f"frame {index}: {type(exc).__name__}"))
             continue
@@ -124,8 +130,8 @@ def read_image(body: bytes, doc: Document) -> None:
 
             options["form_image"] = ImageOps.exif_transpose(copied)
         _ocr_page(doc, index, None, round(width, 2), round(height, 2), "T5", signals, PageText(), flags,
-                  rendered=(frame, scale), camera_jpeg=camera_jpeg, **options)
-        if doc._handwriting is None and "form_image" in options:
+                  rendered=(frame, scale), camera_jpeg=camera_jpeg, hybrid_image=hybrid_image, **options)
+        if doc._handwriting is None and "form_image" in options and signals.get("ocr_hybrid") != "hosted":
             from heocr.pdf.checkboxes import append_checkmarks
 
             append_checkmarks(doc, index, options["form_image"], dpi / 72)
