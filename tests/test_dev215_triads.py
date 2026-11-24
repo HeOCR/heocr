@@ -165,6 +165,15 @@ class TriadToolTest(unittest.TestCase):
         self.assertEqual(summary["pooled"]["issues"], 5)
         self.assertEqual(summary["pixel"]["router_minus_fixed"]["modern_v1"]["issue_bootstrap_95_pp"], [0, 0])
         self.assertNotIn("שלום", output.read_text())
+        _, partial, partial_path = self.make_registration(rows[:4])
+        partial_freeze = json.loads(freeze.read_bytes())
+        partial_freeze["pages"] = pages[:1]
+        partial_freeze["registration_sha256"] = partial["registration_sha256"]
+        staged, staged_sha = self.write("partial-freeze.json", partial_freeze)
+        partial_args = argparse.Namespace(**{**vars(args), "registration": partial_path,
+                                             "registration_sha": partial["registration_sha256"],
+                                             "freeze": staged, "freeze_sha": staged_sha})
+        self.assertEqual(len(triads.preflight(partial_args)[1]), 3)
         # The asset hash rejects altered pixels before any reader call.
         (self.assets / pages[0]["captures"]["scanner"]["file"]).write_bytes(b"changed")
         with self.assertRaisesRegex(ValueError, "SHA-256 differs"):

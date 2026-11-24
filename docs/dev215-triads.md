@@ -53,11 +53,11 @@ Save the scorer inputs under one private asset root. The freeze is a JSON object
 | --- | --- |
 | Top level | `schema` = `heocr.office.score-freeze.dev215.v1`, `split` = `dev`, `registration_sha256`, `source_freeze_sha256`, `lineage_receipt_sha256`, `review_receipt_sha256`, `heocr_commit` (full Git hash), `tesseract_sha256`, `eng_sha256`, `heb_sha256`, `scorer_sha256`, `dependencies`, `pages` |
 | `dependencies` | Exact installed versions keyed by `Pillow`, `pypdfium2`, `defusedxml`, and `rapidfuzz` |
-| Each of the ten `pages` | `print_id`, `source_id`, `issue_cluster`, `reference` (relative JSON path), `reference_sha256`, `captures` (object keyed by the three capture slots) |
+| Each complete triad in `pages` | `print_id`, `source_id`, `issue_cluster`, `reference` (relative JSON path), `reference_sha256`, `captures` (object keyed by the three capture slots) |
 | Each capture asset | `file` (relative PNG path), `sha256`, `size` (width and height in pixels), `raw_sha256`, `page_index`, `rotation`, `geometry_receipt_sha256`, `witness_boxes` (top-left pixel boxes as `[left, top, right, bottom]`), `witness_outside_crop` (boolean) |
 | Each reference JSON | `schema` = `heocr.office.reference.dev215.v1`, `split` = `dev`, `print_id`, `source_id`, `lines` (strings in reviewed page order), `keep` (one boolean per line for the frozen common mask) |
 
-Eval supplies the freeze SHA-256 after review. For a cropped-out witness, set `witness_outside_crop` to true and `witness_boxes` to an empty list. For a retained frame, use false and supply the white-mask boxes. Resolve partial triads and unclear joins before freezing.
+Eval supplies the freeze SHA-256 after review. For a cropped-out witness, set `witness_outside_crop` to true and `witness_boxes` to an empty list. For a retained frame, use false and supply the white-mask boxes. Freeze the complete registered triads for same-day diagnostics. The report gives coverage over the ten-sheet packet, and incomplete triads stay out of the scores.
 
 ## Score the phone branch
 
@@ -92,4 +92,4 @@ The scorer runs router v2, fixed modern_v1 and fixed Rivok through the same HeOC
 | Pixel | | | | | | |
 | Pooled triads | | | | | | |
 
-A failed prerequisite or branch parity check holds the handoff. Use the quality review to decide whether the phone branch is ready on the Thursday subset. The wider DEV215 coverage and any v1 scoring decision have their own approval.
+A failed prerequisite or branch parity check holds the handoff. Report a partially returned packet as diagnostic and keep the full-packet decision on hold. Use the quality review to decide whether the phone branch is ready on the Thursday subset. The wider DEV215 coverage and any v1 scoring decision have their own approval.

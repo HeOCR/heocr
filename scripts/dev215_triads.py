@@ -228,8 +228,7 @@ def checked_raster(raw, capture):
 def preflight(args):
     registration = load(args.registration, args.registration_sha, "heocr.office.registration.dev215.v1")
     freeze = load(args.freeze, args.freeze_sha, "heocr.office.score-freeze.dev215.v1")
-    require(not registration["missing"] and len(registration["captures"]) == 30
-            and len(freeze["pages"]) == 10, "Wait for all ten complete registered triads")
+    require(0 < len(freeze["pages"]) <= 10, "Freeze at least one complete registered triad")
     require(freeze["registration_sha256"] == args.registration_sha
             and freeze["source_freeze_sha256"] == registration["source_freeze_sha256"],
             "Score freeze and registration differ")
@@ -274,7 +273,8 @@ def preflight(args):
             seen_rasters.add(asset["sha256"])
             checked_raster(read_pinned(path, asset["sha256"]), asset)
             jobs.append((page, slot, raw["device"]["type"], reference, path))
-    require(seen == set(registered), "Frozen roster differs from the registered captures")
+    complete = {key for key in registered if all((key[0], slot) in registered for slot in SLOTS)}
+    require(seen == complete, "Freeze must cover the complete registered triads")
     return freeze, jobs
 
 
@@ -382,8 +382,9 @@ def score(args):
     heocr, scorer, revision = runtime(args, freeze)
     translations = scorer.folds()
     private_dir(args.out)
+    coverage = {"complete_triads": len(jobs) // len(SLOTS), "packet_triads": 10}
     if args.preflight_only:
-        return {"ready": True, "captures": len(jobs), "freeze_sha256": args.freeze_sha}
+        return {"ready": True, "captures": len(jobs), "coverage": coverage, "freeze_sha256": args.freeze_sha}
     rows = []
     for page, slot, carrier, reference, raster in jobs:
         doc = score_one(heocr, read_pinned(raster, page["captures"][slot]["sha256"]), carrier, args)
@@ -396,12 +397,12 @@ def score(args):
     data = {
         "schema": "heocr.office.scores.dev215.v1", "split": "dev", "heocr_commit": revision,
         "freeze_sha256": args.freeze_sha, "registration_sha256": args.registration_sha, "model_pins": MODEL_PINS,
-        "captures": rows, "summary": summarize(rows),
+        "captures": rows, "coverage": coverage, "summary": summarize(rows),
         "phone_parity": {carrier: sum(r["carrier"] == carrier and r["phone_matches_modern"] for r in rows)
                          for carrier in ("iphone", "pixel")},
     }
     pin = write_receipt(args.out, "scores", data)
-    return {"scores_sha256": pin, "captures": len(rows), "phone_parity": data["phone_parity"]}
+    return {"scores_sha256": pin, "captures": len(rows), "coverage": coverage, "phone_parity": data["phone_parity"]}
 
 
 def main():
