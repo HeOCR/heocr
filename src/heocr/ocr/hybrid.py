@@ -229,7 +229,9 @@ def _line_replies(transcript: str, keys: set[str]) -> dict[str, str]:
             raise ValueError("duplicate line ID")
         return answer
 
-    reply = json.loads(transcript, object_pairs_hook=unique)
+    # Haiku sometimes wraps the entire JSON object in one Markdown code fence.
+    fenced = re.fullmatch(r"```(?:json)?[ \t]*\r?\n(.*?)\r?\n```", transcript.strip(), re.DOTALL)
+    reply = json.loads(fenced[1] if fenced else transcript, object_pairs_hook=unique)
     if not isinstance(reply, dict) or set(reply) != keys or any(
         not isinstance(value, str) or value and not (
             value == value.strip() and value.isprintable()

@@ -303,6 +303,12 @@ class ConfidenceHybridTest(HybridFixture):
         })
         self.assertEqual(doc.blocks[0].checks["hybrid_lines"][0]["line"], 1)
 
+    def test_single_markdown_fence_around_line_json_is_accepted(self):
+        self.set_transcript("```json\r\n" + json.dumps({"1": "טקסט מתוקן"}) + "\r\n```")
+        doc = self.gated()
+        self.assertEqual(doc.pages[0].signals["ocr_hybrid"], "hosted")
+        self.assertIn("טקסט מתוקן", doc.text)
+
     def test_missing_key_and_zero_threshold_keep_exact_local_text(self):
         local = self.gated(ocr_hybrid=None, ocr_hybrid_confidence=None)
         with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": ""}):
@@ -315,10 +321,13 @@ class ConfidenceHybridTest(HybridFixture):
         self.assertEqual(zero.pages[0].signals["ocr_hybrid_lines"]["below_threshold"], 0)
 
     def test_invalid_batch_and_changed_digits_fall_back(self):
-        self.set_transcript('{"1":"first","1":"second"}')
-        doc = self.gated()
-        self.assertEqual(doc.pages[0].signals["ocr_hybrid"], "invalid_line_response")
-        self.assertIn(LOCAL, doc.text)
+        for invalid in ('{"1":"first","1":"second"}', '```json\n{"1":"first","1":"second"}\n```',
+                        'Here is the response:\n```json\n{"1":"text"}\n```'):
+            with self.subTest(invalid=invalid):
+                self.set_transcript(invalid)
+                doc = self.gated()
+                self.assertEqual(doc.pages[0].signals["ocr_hybrid"], "invalid_line_response")
+                self.assertIn(LOCAL, doc.text)
         self.set_transcript(json.dumps({"1": "", "2": "קריאה בטוחה 321"}))
         doc = self.gated(ocr_hybrid_confidence=100)
         self.assertEqual(doc.pages[0].signals["ocr_hybrid"], "no_complete_line_transcripts")
