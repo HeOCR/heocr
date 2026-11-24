@@ -165,11 +165,11 @@ def column_order(lines, page_width: int) -> list | None:
         refined = _band_columns(body, supported, next_bounds, height)
         if refined is not None:
             bounds, bands = next_bounds, refined
-    grouped = [sorted(side, key=lambda line: line.bbox[1]) for side in (header, *bands, footer)]
+    grouped = (header, *bands, footer)
     if [id(line) for side in grouped for line in side] == [id(line) for line in lines]:
-        return None
+        return None  # keep the existing intra-column order when traversal is already grouped
     return [replace(line, paragraph=(f"{band}:{line.paragraph[0]}", line.paragraph[1]))
-            for band, side in enumerate(grouped) for line in side]
+            for band, side in enumerate(grouped) for line in sorted(side, key=lambda item: item.bbox[1])]
 
 
 def _edge_ink(gray):

@@ -70,6 +70,11 @@ class LayoutTest(unittest.TestCase):
         self.assertEqual([value.text.split()[0] for value in result],
                          ["ימין"] * 7 + ["אמצע"] * 7 + ["שמאל"] * 7)
 
+    def test_does_not_resort_the_interior_of_already_grouped_columns(self):
+        right = [prose("ימין", y) for y in (45, 121, 83, 159, 197)]
+        left = [prose("שמאל", y) for y in (45, 83, 121, 159, 197)]
+        self.assertIsNone(column_order(right + left, 800))
+
     def test_ltr_run_uses_visual_geometry_and_preserves_hebrew_anchors(self):
         mixed = line([word("גרסה", 200, 20), word("2026", 140, 20),
                       word("build", 110, 20), word("הותקנה", 55, 20)])
