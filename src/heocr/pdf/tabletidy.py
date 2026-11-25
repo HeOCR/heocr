@@ -17,6 +17,11 @@ reshaped. Each step is a listed rule, flagged on the table:
 - ``table_section_rows_split``: a row whose first cell holds extra lines above the row's other values (a section
   label such as "(1) ... - קרקע" that the detector merged into the row below it) is split: the label lines become a
   row of their own, label in the first cell and the other cells empty (0032 gold convention c, first-column style).
+- ``table_label_lines_joined``: a label printed on two lines, whose first line the detector made a row of its own,
+  is one cell again. This applies to a row that holds only one-line letter labels (no digits anywhere), when the
+  next row holds values and, under each of those labels, a letter label overlapping it horizontally, and the two
+  lines sit closer together than the table's rows do (a line break inside a cell, not a row gap). A section label
+  row (convention c) keeps its row: it is a full row gap above the next row.
 
 Cells hold ``Cell`` objects in logical order (first = start column); a position covered by a cell from a row above
 is a ``merged_above`` placeholder carrying that cell's colspan.
@@ -155,6 +160,64 @@ def split_section_rows(block: Block) -> int:
     return split
 
 
+LINE_BREAK = 0.3  # share of the line height: a label line this much closer than the row gap continues the next row
+
+
+def _gap(above, below) -> float:
+    return below[1] - above[3]
+
+
+def join_label_lines(block: Block) -> int:
+    rows = block.cells
+    # The table's usual gap between consecutive rows' first label lines.
+    tops = []
+    for row in rows:
+        boxes = [_line_box(c._lines[0]) for c in row[:1] if c.text.strip() and c._lines]
+        tops.append(boxes[0] if boxes and boxes[0] else None)
+    gaps = sorted(_gap(a, b) for a, b in zip(tops, tops[1:]) if a and b)
+    if len(gaps) < 3:
+        return 0
+    row_gap = gaps[len(gaps) // 2]
+    joined = 0
+    r = 0
+    while r + 1 < len(rows):
+        row, nxt = rows[r], rows[r + 1]
+        filled = [c for c in row if c.text.strip()]
+        values = [c for c in nxt if any(ch.isdigit() for ch in c.text)]
+        plain = all(c.rowspan == 1 and "merged_above" not in c.flags for c in row + nxt)
+        if not filled or len(values) < 2 or not plain or not all(_letters(c) and len(c._lines or []) == 1
+                                                                 for c in filled):
+            r += 1
+            continue
+        pairs = []
+        for cell in filled:
+            a = _line_box(cell._lines[0])
+            match = None
+            for below in nxt:
+                if not (_letters(below) and below._lines):
+                    continue
+                b = _line_box(below._lines[0])
+                if a is None or b is None:
+                    continue
+                height = max(a[3] - a[1], b[3] - b[1], 1.0)
+                overlap = min(a[2], b[2]) - max(a[0], b[0])
+                if overlap > 0.5 * min(a[2] - a[0], b[2] - b[0]) and _gap(a, b) < row_gap - LINE_BREAK * height:
+                    match = below
+                    break
+            if match is None:
+                break
+            pairs.append((cell, match))
+        if len(pairs) != len(filled):
+            r += 1
+            continue
+        for above, below in pairs:
+            below.text = f"{above.text.strip()}\n{below.text.strip()}"
+            below._lines = list(above._lines) + list(below._lines or [])
+        del rows[r]
+        joined += 1
+    return joined
+
+
 def join_enumerators(block: Block) -> int:
     rows = block.cells
     if any(not row or row[0].colspan != 1 or row[0].rowspan != 1 or "merged_above" in row[0].flags or len(row) < 2
@@ -186,6 +249,8 @@ def tidy(block: Block) -> None:
         block.flags.append("table_labels_rejoined")
     if split_section_rows(block):
         block.flags.append("table_section_rows_split")
+    if join_label_lines(block):
+        block.flags.append("table_label_lines_joined")
     if drop_empty_columns(block):
         block.flags.append("table_empty_columns_dropped")
     if drop_empty_rows(block):

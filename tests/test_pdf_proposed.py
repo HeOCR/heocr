@@ -4,7 +4,9 @@ import unittest
 from unittest import mock
 
 import heocr
-from heocr.pdf.proposed import _cut, merge_proposals, to_table
+from heocr.contract import Block, Cell
+from heocr.pdf.proposed import _cut, _row_above, merge_proposals, to_table
+from heocr.pdf.tabletidy import join_label_lines
 from heocr.pdf.lines import Atom
 from heocr.pdf.tables import Table, _whole_words
 from tests.synth.pdf import PdfPage, TextLine, lines_block, make_pdf
@@ -181,6 +183,24 @@ class ReaderTests(unittest.TestCase):
         points = _whole_words(word + number, [left, right])
         self.assertEqual({points[id(a)] for a in word}, {(word[4].cx, word[4].cy)})
         self.assertFalse(any(id(a) in points for a in number))  # digits keep their own places
+
+    def test_a_letter_on_a_column_line_stays_with_its_word(self):
+        left, right = [0.0, 0.0, 100.0, 20.0], [100.0, 0.0, 200.0, 20.0]
+        word = [Atom("א", 73.0 + 6 * i, 5.0, 79.0 + 6 * i, 15.0, 10.0, i) for i in range(5)]  # the last centred on x=100
+        points = _whole_words(word, [left, right])
+        self.assertEqual({points[id(a)] for a in word}, {(word[0].cx, word[0].cy)})
+        whole = [Atom("א", 10.0 + 6 * i, 5.0, 16.0 + 6 * i, 15.0, 10.0, i) for i in range(5)]
+        self.assertEqual(_whole_words(whole, [left, right]), {})  # a word inside one cell is left as it is
+
+    def test_a_short_line_a_row_gap_above_the_rows_is_a_missed_first_row(self):
+        bands = [(220.0, 230.0), (235.0, 245.0), (250.0, 260.0), (265.0, 275.0)]
+        label = [(300.0, 206.0, 330.0, 215.0, "צפונית")]
+        self.assertEqual(_row_above(label, 100.0, 500.0, 10, bands), (206.0, 215.0))
+        caption = [(150.0, 206.0, 450.0, 215.0, "טבלת דמי נסיעה")]          # wider than a column: a caption
+        self.assertIsNone(_row_above(caption, 100.0, 500.0, 10, bands))
+        far = [(300.0, 180.0, 330.0, 189.0, "פסקה")]               # more than a row gap above
+        self.assertIsNone(_row_above(far, 100.0, 500.0, 10, bands))
+        self.assertIsNone(_row_above(label, 100.0, 500.0, 10, bands[:2]))  # too few rows to know the gap
 
     def test_without_the_option_nothing_changes(self):
         doc = heocr.extract(make_pdf([borderless_page()]), ocr=False)
@@ -373,3 +393,34 @@ class PinTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _label(text, top):
+    return Cell(text, _lines=[[text, [300.0, top, 330.0, top + 10.0]]])
+
+
+def _value(text, top):
+    return Cell(text, _lines=[[text, [100.0, top, 120.0, top + 10.0]]])
+
+
+class JoinLabelLinesTest(unittest.TestCase):
+    def rows(self, label_top):
+        return [[_label("גבעה", 370.0), _value("4.0", 370.0), _value("6.0", 370.0)],
+                [_label("עמק/", label_top), Cell(""), Cell("")],
+                [_label("שדה ירוק", 394.0), _value("11.0", 394.0), _value("12.0", 394.0)],
+                [_label("חוף", 408.0), _value("3.0", 408.0), _value("4.0", 408.0)],
+                [_label("גליל", 422.0), _value("8.0", 422.0), _value("3.0", 422.0)]]
+
+    def test_a_label_line_tight_above_its_row_joins_it(self):
+        block = Block(kind="table", cells=self.rows(385.0), flags=[])
+        self.assertEqual(join_label_lines(block), 1)
+        self.assertEqual([row[0].text for row in block.cells], ["גבעה", "עמק/\nשדה ירוק", "חוף", "גליל"])
+        self.assertEqual(block.cells[1][1].text, "11.0")
+
+    def test_a_section_label_a_row_gap_above_keeps_its_row(self):
+        rows = self.rows(376.0)
+        rows[1][0] = _label("(1) אזור", 376.0)
+        rows[2][0] = _label("שדה ירוק", 394.0)
+        block = Block(kind="table", cells=rows, flags=[])
+        self.assertEqual(join_label_lines(block), 0)
+        self.assertEqual(len(block.cells), 5)

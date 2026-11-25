@@ -444,9 +444,9 @@ WORD_GAP = 0.15  # letters closer than this share of their height, on one line, 
 
 
 def _whole_words(atoms: list[Atom], boxes: list[list[float]]) -> dict[int, tuple[float, float]]:
-    """For each word whose letters fall in more than one cell: every letter's point moved to one letter of the word
-    in the cell that holds most of it (ties: the leftmost). Only letters: a number's digits and marks keep their own
-    places, since layers often store a decimal's parts apart."""
+    """For each word whose letters fall in more than one cell, or partly in none (a letter on a column line): every
+    letter's point moved to one letter of the word in the cell that holds most of it (ties: the leftmost). Only
+    letters: a number's digits and marks keep their own places, since layers often store a decimal's parts apart."""
     lines: list[list[Atom]] = []
     for a in sorted((a for a in atoms if not a.is_space and a.text[:1].isalpha()), key=lambda a: a.cy):
         if lines and abs(a.cy - lines[-1][-1].cy) < 0.5 * max(a.y1 - a.y0, 1.0):
@@ -465,12 +465,14 @@ def _whole_words(atoms: list[Atom], boxes: list[list[float]]) -> dict[int, tuple
     points: dict[int, tuple[float, float]] = {}
     for word in words:
         homes: dict[int, list[Atom]] = {}
+        housed = 0
         for a in word:
             for i, box in enumerate(boxes):
                 if _within(a, box, INSIDE):
                     homes.setdefault(i, []).append(a)
+                    housed += 1
                     break
-        if len(homes) < 2:
+        if not homes or (len(homes) == 1 and housed == len(word)):
             continue
         anchor = max(homes.values(), key=len)[0]
         for a in word:

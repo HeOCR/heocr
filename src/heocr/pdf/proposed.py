@@ -171,6 +171,34 @@ def _missing_rows(bands: list, spans_across: set[int], top: float, bottom: float
     return out
 
 
+TOP_ROW_WIDTH = 1.5  # in mean column widths: a lone line above the table no wider than this can be a missed row
+
+
+def _row_above(ink: list, x0: float, x1: float, cols: int, bands: list) -> tuple[float, float] | None:
+    """A short text line just above the detected rows, a row gap away and no wider than about one column: a first
+    row the detector left out (a matrix's top diagonal label, a lone header). A caption is wider, or further away."""
+    known = [b for b in bands if b is not None]
+    if len(known) < 3:
+        return None
+    gaps = sorted(b[0] - a[1] for a, b in zip(known, known[1:]))
+    heights = sorted(b[1] - b[0] for b in known)
+    gap, height = max(gaps[len(gaps) // 2], 0.0), heights[len(heights) // 2]
+    first = known[0][0]
+    near = [b for b in ink if x0 <= (b[0] + b[2]) / 2 <= x1 and b[3] <= first
+            and first - b[3] <= gap + 0.5 * height]
+    if not near:
+        return None
+    lo, hi = min(b[1] for b in near), max(b[3] for b in near)
+    if hi - lo > 1.5 * height:  # more than one line
+        return None
+    # The line's characters, and nothing else on its band above the table.
+    line = [b for b in ink if x0 <= (b[0] + b[2]) / 2 <= x1 and lo <= (b[1] + b[3]) / 2 <= hi]
+    left, right = min(b[0] for b in line), max(b[2] for b in line)
+    if right - left > TOP_ROW_WIDTH * (x1 - x0) / max(cols, 1):
+        return None
+    return lo, hi
+
+
 MIN_COLUMN_GAP = 0.6  # share of the median character height: a narrower common gap is a word space
 
 
@@ -290,6 +318,11 @@ def to_table(proposal: dict, ink: list[Box] | None = None, spans=None) -> Table 
         for k in range(r0, r0 + rs - 1):
             spans_across.add(sum(1 for b in row_bands[:k + 1] if b is not None))
     added = _missing_rows(row_bands, spans_across, top, bottom, _clusters(y_ink))
+    above = _row_above(ink, x0, x1, cols, row_bands) if spans is None and ink else None
+    if above is not None:
+        added.setdefault(0, []).insert(0, above)
+        top = above[0]
+        flags.append("table_top_row_added")
     if added:
         flags.append("table_rows_added")
         new_index: dict[int, int] = {}
