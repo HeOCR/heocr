@@ -20,6 +20,8 @@ Defaults (D2 plan, the lead's review):
 from __future__ import annotations
 
 import hashlib
+from errno import errorcode
+from math import isfinite
 import os
 import re
 import shutil
@@ -80,13 +82,16 @@ class OcrResult:
 
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        read = 0
-        for chunk in iter(lambda: stream.read(1 << 20), b""):
-            read += len(chunk)
-            if read > _MAX_MODEL_BYTES:
-                raise OcrUnavailable(f"{path.name} is larger than expected")
-            digest.update(chunk)
+    try:
+        with path.open("rb") as stream:
+            read = 0
+            for chunk in iter(lambda: stream.read(1 << 20), b""):
+                read += len(chunk)
+                if read > _MAX_MODEL_BYTES:
+                    raise OcrUnavailable(f"{path.name} is larger than expected")
+                digest.update(chunk)
+    except OSError as exc:
+        raise _io_failure("could not read a tesseract component", exc) from exc
     return digest.hexdigest()
 
 
@@ -101,6 +106,10 @@ def _env() -> dict[str, str]:
     return {**os.environ, **THREAD_ENV}
 
 
+def _io_failure(action: str, exc: OSError) -> OcrUnavailable:
+    return OcrUnavailable(f"{action} ({errorcode.get(exc.errno, type(exc).__name__)})")
+
+
 def _run(cmd: list[str], timeout: float) -> subprocess.CompletedProcess:
     try:
         return subprocess.run(cmd, capture_output=True, timeout=timeout, check=False, env=_env())
@@ -108,6 +117,8 @@ def _run(cmd: list[str], timeout: float) -> subprocess.CompletedProcess:
         raise OcrUnavailable("tesseract not found") from exc
     except subprocess.TimeoutExpired as exc:
         raise OcrUnavailable("tesseract timed out") from exc
+    except OSError as exc:
+        raise _io_failure("could not start tesseract", exc) from exc
 
 
 _model_files: ContextVar[ExitStack | None] = ContextVar("tesseract_model_files", default=None)
@@ -132,13 +143,16 @@ def _private_tessdata(installation: Path, model_path: Path, name: str) -> Path:
     if not (configs / "tsv").is_file():
         raise OcrUnavailable("the Tesseract installation has no configs/tsv, needed for TSV output")
     files = _model_files.get()
-    if files is None:
-        folder = Path(tempfile.mkdtemp(prefix="heocr-tessdata-"))
-        atexit.register(shutil.rmtree, folder, True)
-    else:
-        folder = Path(files.enter_context(tempfile.TemporaryDirectory(prefix="heocr-tessdata-")))
-    shutil.copyfile(model_path, folder / f"{name}.traineddata")
-    shutil.copytree(configs, folder / "configs")
+    try:
+        if files is None:
+            folder = Path(tempfile.mkdtemp(prefix="heocr-tessdata-"))
+            atexit.register(shutil.rmtree, folder, True)
+        else:
+            folder = Path(files.enter_context(tempfile.TemporaryDirectory(prefix="heocr-tessdata-")))
+        shutil.copyfile(model_path, folder / f"{name}.traineddata")
+        shutil.copytree(configs, folder / "configs")
+    except OSError as exc:
+        raise _io_failure("could not stage tesseract model files", exc) from exc
     return folder
 
 
@@ -209,10 +223,7 @@ class Tesseract:
         if local_pin is not None:
             model_path, lang, expected_sha256 = local_pin
             check_settings(lang, psm)
-            try:
-                folder = _private_tessdata(folder, model_path, lang)
-            except OSError:
-                raise OcrUnavailable("pinned local model is unavailable") from None
+            folder = _private_tessdata(folder, model_path, lang)
         elif model is not None:
             from heocr.models import ModelError, resolve
 
@@ -257,22 +268,33 @@ class Tesseract:
 
         ``psm`` overrides the engine's page segmentation mode for this call (8 for a single word).
         """
-        with tempfile.TemporaryDirectory(prefix="heocr-ocr-") as temp:
-            source = Path(temp) / "input.png"
-            if self.photo_gray_otsu and image.mode != "L":
-                image = image.convert("L")
-            image.save(source, dpi=(dpi, dpi))
-            base = Path(temp) / "result"
-            try:
+        try:
+            with tempfile.TemporaryDirectory(prefix="heocr-ocr-") as temp:
+                source = Path(temp) / "input.png"
+                if self.photo_gray_otsu and image.mode != "L":
+                    image = image.convert("L")
+                image.save(source, dpi=(dpi, dpi))
+                base = Path(temp) / "result"
                 done = self._recognize_call(source, base, dpi, psm)
-            except OcrUnavailable:
-                self.failures += 1
-                raise
-            tsv = base.with_suffix(".tsv")
-            if done.returncode != 0 or not tsv.is_file():
-                self.failures += 1
-                raise OcrUnavailable(f"tesseract failed with exit code {done.returncode}")
-            return parse_tsv(tsv.read_text(encoding="utf-8", errors="replace"))
+                if done.returncode < 0:
+                    raise OcrUnavailable(f"tesseract terminated by signal {-done.returncode}")
+                if done.returncode:
+                    if b"Image too large:" in done.stderr:
+                        raise OcrUnavailable("tesseract rejected the image dimensions")
+                    raise OcrUnavailable(f"tesseract failed with exit code {done.returncode}")
+                tsv = base.with_suffix(".tsv")
+                if not tsv.is_file():
+                    raise OcrUnavailable("tesseract produced no TSV output")
+                try:
+                    return parse_tsv(tsv.read_text(encoding="utf-8", errors="replace"))
+                except ValueError as exc:
+                    raise OcrUnavailable("tesseract produced invalid TSV output") from exc
+        except OcrUnavailable:
+            self.failures += 1
+            raise
+        except OSError as exc:
+            self.failures += 1
+            raise _io_failure("tesseract image or output I/O failed", exc) from exc
 
     def _recognize_call(self, source: Path, base: Path, dpi: int, psm: int | None) -> subprocess.CompletedProcess:
         return _run(
@@ -353,9 +375,12 @@ def _parse_line_batch(tsv: str, sizes: Sequence[tuple[int, int]]) -> list[OcrRes
 
 def parse_tsv(tsv: str) -> OcrResult:
     """Lines from Tesseract's TSV: words grouped by block, paragraph and line, in output order."""
+    rows = tsv.splitlines()
+    if not rows or rows[0].split("\t")[:2] != ["level", "page_num"]:
+        raise ValueError("missing TSV header")
     lines: dict[tuple[str, str, str, str], OcrLine] = {}
     order: list[tuple[str, str, str, str]] = []
-    for row in tsv.splitlines()[1:]:
+    for row in rows[1:]:
         cols = row.split("\t")
         if len(cols) < 12 or cols[0] != "5":
             continue
@@ -369,6 +394,10 @@ def parse_tsv(tsv: str) -> OcrResult:
         except ValueError:
             conf = -1.0
         box = [left, top, left + width, top + height]
+        if width < 0 or height < 0 or not all(map(isfinite, box)):
+            raise ValueError("invalid TSV coordinates")
+        if not isfinite(conf):
+            conf = -1.0
         if key not in lines:
             lines[key] = OcrLine(text, box, [conf], (cols[2], cols[3]), [OcrWord(text, list(box), conf)])
             order.append(key)
