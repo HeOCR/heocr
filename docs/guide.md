@@ -295,9 +295,10 @@ bundle. The oblique line reader still uses pinned Rivok Full weights.
 
 Use `--document-roles` (Python `document_roles=True`) for paginated PDFs
 and scanner images with reliable line geometry. Supported margin lines
-receive header, footnote or footer roles. JSON and plain text then follow
-header, body, footnotes and footer on each affected page. The body retains
-its previous order and every literal line stays in the output. The rule
+receive header, footnote or footer roles. JSON follows header, body,
+footnotes and footer on each affected page. The body retains its previous
+order and every literal line stays in the output. Plain text keeps its
+original reading; the role and order changes are in the structured record. The rule
 uses isolated page bands and a numbered or marked line for footnotes.
 Declared phone captures stay on their usual route.
 

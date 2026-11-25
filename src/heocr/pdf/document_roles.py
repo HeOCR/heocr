@@ -101,4 +101,7 @@ def apply(doc: Document) -> None:
         elif block.page not in emitted:
             result.extend(ordered[block.page])
             emitted.add(block.page)
-    doc.blocks[:] = result
+    if any("document_roles_ordered" in page.flags for page in doc.pages):
+        if doc._plain_blocks is None:
+            doc._plain_blocks = tuple(doc.blocks)
+        doc.blocks[:] = result

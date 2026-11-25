@@ -57,10 +57,9 @@ def _note_line(block: "Block", body: str) -> str:
 def to_text(doc: "Document") -> str:
     parts: list[str] = []
     previous_page: int | None = None
-    page_roles = ("header", "footnote", "footer") if doc.options.get("document_roles") else ()
-    inline_roles = (*_INLINE_ROLES, *page_roles)
-    for block in doc.blocks:
-        if block.role not in inline_roles:
+    blocks = doc._plain_blocks if doc._plain_blocks is not None else doc.blocks
+    for block in blocks:
+        if block.role not in _INLINE_ROLES:
             continue
         where = block.page if block.page is not None else block.slide
         if previous_page is not None and where is not None and where != previous_page:
@@ -72,9 +71,7 @@ def to_text(doc: "Document") -> str:
     body = "\n".join(parts).replace("\n\f\n", "\f")
     sections = []
     for role, title in _SECTIONS:
-        if role in page_roles:
-            continue
-        items = [_note_line(b, _block_text(b)) for b in doc.blocks if b.role == role and _block_text(b)]
+        items = [_note_line(b, _block_text(b)) for b in blocks if b.role == role and _block_text(b)]
         if items:
             sections.append(f"--- {title} ---\n" + "\n".join(items))
     out = "\n\n".join([body, *sections]) if sections else body

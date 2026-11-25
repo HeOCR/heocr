@@ -35,7 +35,9 @@ class DocumentRolesTest(unittest.TestCase):
                       ocr={"status": "unverified"}, bbox=[20, 18, 90, 489], lines=lines,
                       checks={"test": True}, repairs=[{"rule": "fixture"}])
         doc = Document("a"*64, 0, "png", "image", pages=[Page(0, 300, 500, "T5", "ocr")], blocks=[mixed])
+        plain = doc.text
         apply(doc)
+        self.assertEqual(doc.text, plain)
         self.assertEqual(Counter(line.text for b in doc.blocks for line in b.lines),
                          Counter(line.text for line in lines))
         self.assertEqual([b.role for b in doc.blocks], ["header", "body", "body", "footnote", "footer"])
