@@ -54,3 +54,24 @@ class FormFieldsTest(unittest.TestCase):
     def test_a_lone_colon_in_prose_does_not_create_a_field(self):
         data = make_pdf([PdfPage(lines=[TextLine("הסבר: זה חלק מן המאמר", 520, 700)])])
         self.assertEqual(associations(heocr.extract(data, ocr=False, form_fields=True)), [])
+
+    def test_distant_prose_lead_ins_do_not_corroborate_each_other(self):
+        lines = [
+            TextLine("Background: the team prepared the samples.", 60, 700, rtl=False),
+            TextLine("All readings are recorded in the notebook.", 60, 680, rtl=False),
+            TextLine("Summary: the records are ready for review.", 60, 650, rtl=False),
+        ]
+        doc = heocr.extract(make_pdf([PdfPage(lines=lines)]), ocr=False, form_fields=True)
+        self.assertEqual(associations(doc), [])
+
+    def test_prose_lead_ins_do_not_join_a_nearby_form_group(self):
+        lines = [
+            TextLine("קוד מדגם: 481", 520, 700),
+            TextLine("מצב ניסוי: מוכן", 520, 681),
+            TextLine("רקע: הצוות הכין את המתקן לפני הניסוי.", 520, 605),
+            TextLine("סיכום: המדגם הוחזר למעבדה.", 520, 525),
+        ]
+        original = heocr.extract(make_pdf([PdfPage(lines=lines)]), ocr=False)
+        doc = heocr.extract(make_pdf([PdfPage(lines=lines)]), ocr=False, form_fields=True)
+        self.assertEqual(associations(doc), [("קוד מדגם", "481"), ("מצב ניסוי", "מוכן")])
+        self.assertEqual(doc.text, original.text)

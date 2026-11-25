@@ -111,6 +111,28 @@ def _add(block: Block, pairs: list[dict]) -> None:
         block.checks = {**(block.checks or {}), "form_fields": pairs}
 
 
+def _field_rows(candidates: list[tuple[Block, Line, dict, Line | None]]) -> set[int]:
+    """Find neighboring label rows sharing a reading-direction margin."""
+    ordered = sorted(enumerate(candidates), key=lambda item: item[1][1].bbox[1])
+    supported = set()
+    for i, (index, (_, line, _, _)) in enumerate(ordered):
+        top, bottom = line.bbox[1], line.bbox[3]
+        height = bottom - top
+        if height <= 0:
+            continue
+        edge = 2 if line.direction == "rtl" else 0
+        for j in range(i + 1, len(ordered)):
+            other_index, (_, other, _, _) = ordered[j]
+            gap = other.bbox[1] - bottom
+            if gap > 2 * height:
+                break
+            unit = min(height, other.bbox[3] - other.bbox[1])
+            if (unit > 0 and other.direction == line.direction and -0.25 * unit <= gap <= 2 * unit
+                    and abs(line.bbox[edge] - other.bbox[edge]) <= 1.5 * unit):
+                supported.update((index, other_index))
+    return supported
+
+
 def mark(doc: Document) -> None:
     groups = defaultdict(list)
     for block in doc.blocks:
@@ -121,29 +143,38 @@ def mark(doc: Document) -> None:
         elif block.kind == "text" and block.page is not None:
             groups[block.page].extend((block, ordinal, line) for ordinal, line in enumerate(block.lines or []))
     for lines in groups.values():
-        values = [line for _, _, line in lines if ":" not in line.text and line.text.strip()]
-        picked = set()
-        pairs = defaultdict(list)
-        owners = {}
+        labels = [(block, ordinal, line) for block, ordinal, line in lines if ":" in line.text]
+        if len(labels) < 2:
+            continue
+        values = None
+        candidates = []
         # Explicit colons give label identity. A separated value stays on
         # the same geometry row, on the reading-direction side of the label.
-        for block, index, line in lines:
-            if ":" not in line.text:
-                continue
+        for block, index, line in labels:
             label, value = (part.strip() for part in line.text.split(":", 1))
             if not _label(label):
                 continue
             method = "inline_colon"
             box = line.bbox
+            nearby = None
             if not value:
+                if values is None:
+                    values = [other for _, _, other in lines if ":" not in other.text and other.text.strip()]
                 nearby = _neighbor(line, values, rtl=line.direction == "rtl")
-                if nearby is None or id(nearby) in picked:
+                if nearby is None:
                     continue
-                picked.add(id(nearby))
                 value, box, method = nearby.text.strip(), nearby.bbox, "adjacent_colon_line"
-            owners[id(block)] = block
-            pairs[id(block)].append(_pair(label, value, method, line=index, label_bbox=line.bbox, value_bbox=box))
-        # A lone colon in running text does not define a form.
-        if sum(len(items) for items in pairs.values()) >= 2:
-            for owner, items in pairs.items():
-                _add(owners[owner], items)
+            pair = _pair(label, value, method, line=index, label_bbox=line.bbox, value_bbox=box)
+            candidates.append((block, line, pair, nearby))
+        # Colons scattered through prose do not corroborate one another.
+        supported = _field_rows(candidates)
+        picked = Counter(id(nearby) for i, (_, _, _, nearby) in enumerate(candidates)
+                         if i in supported and nearby is not None)
+        by_block = defaultdict(list)
+        owners = {}
+        for i, (block, _, pair, nearby) in enumerate(candidates):
+            if i in supported and (nearby is None or picked[id(nearby)] == 1):
+                owners[id(block)] = block
+                by_block[id(block)].append(pair)
+        for owner, items in by_block.items():
+            _add(owners[owner], items)
