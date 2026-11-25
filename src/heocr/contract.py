@@ -252,6 +252,8 @@ class Document:
     _hybrid: Any = field(default=None, repr=False, compare=False)  # optional hosted page reader
     _crnn: Any = field(default=None, repr=False, compare=False)  # optional CPU line recognizer
     _handwriting: Any = field(default=None, repr=False, compare=False)  # optional Kraken reader and local pins
+    _table_proposer: Any = field(default=None, repr=False, compare=False)  # optional TableFormer proposer (D3g)
+    _pdf_body: Any = field(default=None, repr=False, compare=False)  # the PDF's bytes, kept only for the proposer
     _convert_settings: dict[str, Any] | None = field(default=None, repr=False, compare=False)  # LibreOffice: cmd, timeout
     _max_pages: int = field(default=MAX_PAGES, repr=False, compare=False)  # pages read at most
     _time_limit: float | None = field(default=None, repr=False, compare=False)  # seconds for the whole document

@@ -60,6 +60,7 @@ from heocr.pdf.ocrtables import (
     image_rulings, isolated_cell_text, tables_in,
 )
 from heocr.pdf.perspective import rectify_grid
+from heocr.pdf.proposed import merge_proposals
 from heocr.pdf.tables import find_tables, rulings, table_blocks
 from heocr.textflags import is_private_use, text_flags
 
@@ -760,6 +761,8 @@ def read_pdf(body: bytes, doc: Document) -> None:
         return
     try:
         doc.page_count = len(pdf)
+        if doc._table_proposer is not None:
+            doc._pdf_body = body
         pages = min(len(pdf), doc._max_pages)
         page_limit(doc, len(pdf))
         verdict = document_is_rtl(pdf, pages)
@@ -1215,6 +1218,10 @@ def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = froz
     # Ruled tables first: their characters go to cells, the rest to lines (D3b).
     tables = find_tables(*rulings(page)) if stats.paths else []
     table_flags = sorted({f for t in tables if not t.rows for f in t.flags if f == "table_grid_unresolved"})
+    if doc._table_proposer is not None:
+        # Learned proposals (D3g) for tables without rulings: native grids keep first claim, before arrange.
+        tables, proposal_flags = _table_proposals(doc, index, tables, width, height, layer.sideways)
+        table_flags = table_flags + proposal_flags
     repairs_on = doc.options.get("repairs", True)
     # Two pages side by side are read as two, in the document's order (D4c).
     halves = _spread_halves(width, text.atoms, tables, doc._rtl) if "possible_spread" in flags else None
@@ -1287,6 +1294,21 @@ def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = froz
             + (["image_region_tables"] if regions.get("image_region_tables") else []),
         )
     )
+
+
+def _table_proposals(doc: Document, index: int, tables, width: float, height: float, sideways: bool):
+    """Native ruled grids plus non-overlapping TableFormer proposals, and the page flags that say so."""
+    if sideways:
+        return tables, ["table_proposals_skipped_sideways"]
+    try:
+        proposals = doc._table_proposer.page_tables(doc._pdf_body, index, width, height)
+    except Exception as exc:  # the optional proposer failing never stops the reading
+        if "table_proposer_failed" not in doc.flags:
+            doc.flags.append("table_proposer_failed")
+        doc.unread.append(Unread(scope="page", reason="table_proposer_failed", page=index, detail=str(exc)[:200]))
+        return tables, ["table_proposer_failed"]
+    merged = merge_proposals(tables, proposals)
+    return merged, (["tableformer_tables"] if len(merged) > len(tables) else [])
 
 
 def _read_region(doc: Document, index: int, atoms: list[Atom], tables, built: PageLines | None, repairs_on: bool) -> dict:

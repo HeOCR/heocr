@@ -386,7 +386,7 @@ def table_blocks(page_index: int, atoms: list[Atom], tables: list[Table], rtl: b
                 source="text_layer",
                 tool=TOOL,
                 direction="rtl" if rtl else "ltr",
-                flags=["ruled_table", *table.flags],
+                flags=[*([] if "tableformer_proposed" in table.flags else ["ruled_table"]), *table.flags],
                 _cell_repairs=ledger,
             )
         )
