@@ -27,6 +27,7 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 from difflib import SequenceMatcher
+from statistics import median
 
 from heocr.contract import Block, Document
 
@@ -210,6 +211,34 @@ def mark_ocr_running_headers(doc: Document) -> None:
     if headers:
         selected = {id(b) for b in headers}
         doc.blocks[:] = _ordered([*headers, *(b for b in doc.blocks if id(b) not in selected)])
+
+
+def order_isolated_ocr_footer(blocks: list[Block], first: int, width: float, height: float) -> bool:
+    """Finish all body columns before a small, vertically detached bottom band."""
+    page = blocks[first:]
+    if len(page) < 3 or any(b.kind != "text" or b.role != "body" or b.source != "ocr"
+                            or not b.bbox or not b.lines or "ocr_form_entry" in b.flags for b in page):
+        return False
+    line_height = median(line.bbox[3] - line.bbox[1] for block in page for line in block.lines)
+    if line_height <= 0:
+        return False
+    body, footer = [], []
+    for block in page:
+        x0, y0, x1, y1 = block.bbox
+        if (y0 >= 0.84 * height and x1 - x0 < 0.65 * width and y1 - y0 < 4 * line_height
+                and len(block.lines) <= 3):
+            footer.append(block)
+        else:
+            body.append(block)
+    if not body or not 1 <= len(footer) <= 3:
+        return False
+    if min(b.bbox[1] for b in footer) - max(b.bbox[3] for b in body) < line_height:
+        return False
+    ordered = body + sorted(footer, key=lambda b: (b.bbox[1], -b.bbox[2]))
+    if ordered == page:
+        return False
+    blocks[first:] = ordered
+    return True
 
 
 def _ordered(blocks: list[Block]) -> list[Block]:

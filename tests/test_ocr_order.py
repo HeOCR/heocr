@@ -11,6 +11,7 @@ from PIL import Image, ImageDraw
 
 import heocr
 from heocr.contract import Block, Line
+from heocr.pdf.furniture import order_isolated_ocr_footer
 from heocr.pdf.ocrorder import order_across_disjoint_gaps
 from heocr.pdf.reader import _OcrLineRecords, _order_ocr_gaps
 from tests.synth.pdf import PdfPage, make_pdf
@@ -22,6 +23,29 @@ def paragraph(left, right, *tops, text="מסלול מוצל"):
     return Block("text", text="\n".join(line.text for line in lines), page=1,
                  bbox=[left, min(tops), right, max(tops) + 10], lines=lines, source="ocr",
                  ocr={"status": "unverified", "words": len(lines) * 2})
+
+
+class FooterOrderTest(unittest.TestCase):
+    def test_detached_footer_follows_both_body_columns(self):
+        prior = paragraph(40, 410, 90, text="דף קודם")
+        first = paragraph(310, 510, 100, 115)
+        footer = paragraph(40, 180, 725, text="סוף העמוד")
+        left = paragraph(30, 240, 105, 120)
+        blocks = [prior, first, footer, left]
+        self.assertTrue(order_isolated_ocr_footer(blocks, 1, 600, 800))
+        self.assertEqual(blocks, [prior, first, left, footer])
+        self.assertIs(blocks[-1], footer)
+        self.assertFalse(order_isolated_ocr_footer(blocks, 1, 600, 800))
+
+    def test_connected_bottom_text_and_tables_keep_their_order(self):
+        first = paragraph(310, 510, 100)
+        footer = paragraph(40, 180, 725)
+        near = paragraph(30, 550, 710)
+        blocks = [first, footer, near]
+        self.assertFalse(order_isolated_ocr_footer(blocks, 0, 600, 800))
+        table = Block("table", page=1, bbox=[30, 105, 240, 150], source="ocr")
+        blocks = [first, footer, table]
+        self.assertFalse(order_isolated_ocr_footer(blocks, 0, 600, 800))
 
 
 class ParagraphOrderTest(unittest.TestCase):

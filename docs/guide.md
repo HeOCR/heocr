@@ -273,6 +273,11 @@ To use one refinement with `--profile fast-mix-v1`, pass
 `--ocr-phone-latin-edges`, `--ocr-oblique-rivok` or
 `--ocr-issuer-staggered-lanes`. Each flag applies only to its capture route.
 
+Add `--ocr-footer-order` to a fast-mix scan or issuer OCR run to finish the
+body before a short, detached footer. The rule preserves each block's text
+and geometry. It leaves tables, form entries and connected bottom text in
+their ordinary order. The Python option is `ocr_footer_order=True`.
+
 ### Geometric OCR layout
 
 ```sh
