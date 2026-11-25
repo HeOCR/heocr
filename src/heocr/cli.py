@@ -62,6 +62,10 @@ def _parser() -> argparse.ArgumentParser:
                         help="include supported label/value associations in JSON block checks")
     parser.add_argument("--form-scan-marks", action="store_true",
                         help="verify printed X marks on scanned forms for -f forms")
+    parser.add_argument("--form-grid-recovery", action="store_true",
+                        help="recover corroborated grid fields from OCR for -f forms")
+    parser.add_argument("--join-form-pages", action="store_true",
+                        help="join explicitly continued sections across adjacent pages for -f forms")
     parser.add_argument("--no-convert", action="store_true", help="do not convert DOC, RTF, ODT, ODS, XLS, ODP or PPT with LibreOffice; they are reported unread")
     parser.add_argument("--soffice", help="the LibreOffice program (soffice), when it is not on the PATH")
     parser.add_argument("--convert-timeout", type=float, metavar="SECONDS", help="time limit for one LibreOffice conversion (default: 180)")
@@ -236,6 +240,7 @@ def main(argv: list[str] | None = None) -> int:
             check_numbers=False if args.check_numbers == "off" else args.check_numbers,
             form_fields=args.form_fields or fmt == "forms",
             form_scan_marks=args.form_scan_marks and fmt == "forms",
+            form_grid_recovery=args.form_grid_recovery and fmt == "forms",
             convert=not args.no_convert,
             soffice=args.soffice,
             convert_timeout=args.convert_timeout,
@@ -263,7 +268,7 @@ def main(argv: list[str] | None = None) -> int:
     elif fmt == "json":
         out = doc.to_json() + "\n"
     elif fmt == "forms":
-        out = json.dumps(doc.to_forms(), ensure_ascii=False, indent=2) + "\n"
+        out = json.dumps(doc.to_forms(join_pages=args.join_form_pages), ensure_ascii=False, indent=2) + "\n"
     elif fmt == "markdown":
         out = doc.markdown
     else:

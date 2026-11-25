@@ -81,6 +81,7 @@ class Line:
     direction: str = "rtl"
     _pdf_punctuation: dict[int, str] = field(default_factory=dict, repr=False, compare=False)
     _form_mark_reading: tuple[str, str] | None = field(default=None, repr=False, compare=False)
+    _form_grid_words: tuple[tuple[str, list[float]], ...] = field(default=(), repr=False, compare=False)
 
     def to_dict(self) -> dict[str, Any]:
         return {"text": self.text, "bbox": _round_box(self.bbox), "direction": self.direction}
@@ -250,6 +251,7 @@ class Document:
     _plain_blocks: tuple[Block, ...] | None = field(default=None, repr=False, compare=False, kw_only=True)
     # Run-time only, never serialized: OCR settings and the engine found for this document.
     _ocr_settings: dict[str, Any] | None = field(default=None, repr=False, compare=False)
+    _form_grid_recovery: bool = field(default=False, repr=False, compare=False)
     _ocr_engine: Any = field(default=None, repr=False, compare=False)
     _ocr_error: str | None = field(default=None, repr=False, compare=False)
     _ocr_engines: dict = field(default_factory=dict, repr=False, compare=False)  # ocr_model="auto": model -> engine
@@ -304,11 +306,11 @@ class Document:
 
         return [to_csv(block) for block in tables(self)]
 
-    def to_forms(self) -> list[dict[str, Any]]:
-        """Form structure inferred from this reading. Enable form_fields when extracting D3h pairs."""
+    def to_forms(self, *, join_pages: bool = False) -> list[dict[str, Any]]:
+        """Infer form structure and optionally join explicitly continued sections."""
         from heocr.form_export import export
 
-        return export(self)
+        return export(self, join_pages=join_pages)
 
     # -- record ------------------------------------------------------------
     def to_dict(self) -> dict[str, Any]:

@@ -429,6 +429,17 @@ boxes. When it confirms an X, the form export can recover a checked box
 or the selected option. The flag leaves plain text and document JSON
 intact.
 
+Add `--form-grid-recovery` for recognized grid rows separated by repeated
+wide gaps, or for simple label/value spans at the head of a mixed OCR
+table. In Python, pass `form_grid_recovery=True` to `extract()`. This uses
+existing OCR readings and may abstain when a cell is unreadable.
+
+For multipage forms, add `--join-form-pages` or call
+`doc.to_forms(join_pages=True)`. A matching section heading with a
+continuation marker such as `(המשך)` or `(continued)` near the top of
+the next page keeps that page in the same section. Each field keeps its
+own page numbers.
+
 ### Historical print with router v2
 
 ```sh
