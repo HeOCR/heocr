@@ -8,7 +8,8 @@ The registry includes HeOCR's releases and optional upstream components.
   (``download()``). The download is checked against the pinned sha256 and size before it is
   kept.
 - **Bundled models.** ``heocr_modern_v1`` (the default OCR model since 0.2.0) and
-  ``heocr_oldprint_v1`` ship inside the package and resolve without a download.
+  ``heocr_oldprint_v1`` can ship in model-enabled wheels and resolve without a download.
+  Plain source builds use the same pins and resolve named models from the local cache.
   ``ocr_model="heb"`` (or ``"stock"``) reads with stock Tesseract ``heb``.
 """
 

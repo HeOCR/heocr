@@ -16,7 +16,8 @@ PDF page: ruled tables cell by cell (D3e), ink accounting, the number model for 
 - **Pages:** at most ``max_pages`` frames are read (``contract.MAX_PAGES``, 2,000 by default);
   the rest are one ``unread`` entry (``page_limit``), and the document is flagged.
 - **Nothing silent:** a frame without ink is an ``empty`` page; a file Pillow cannot decode, or
-  a frame that fails to load, goes to ``unread`` with the reason.
+  a frame that fails to load, goes to ``unread`` with the reason. When OCR is enabled, a
+  frame that fails the ink check also records why OCR was skipped.
 """
 
 from __future__ import annotations
@@ -109,6 +110,9 @@ def read_image(body: bytes, doc: Document) -> None:
         image_format = (image.format or "").lower()
         signals = {"image_format": image_format, "frame": index, "dpi": round(dpi, 1), "pixels": list(frame.size)}
         if not has_ink(frame):
+            if doc._ocr_settings is not None:
+                doc.unread.append(Unread(scope="page", reason="ocr_skipped_no_ink", page=index,
+                                         detail="image below the ink threshold; OCR was not run"))
             doc.pages.append(Page(index, round(width, 2), round(height, 2), "empty", "none", signals, {"chars_total": 0, "chars_read": 0, "status": "nothing_to_read"}, flags))
             continue
         exif = image.getexif() if image.format == "JPEG" and doc._rtl else {}

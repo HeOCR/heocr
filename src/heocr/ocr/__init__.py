@@ -37,7 +37,7 @@ def engine_for(doc: "Document") -> Tesseract | None:
             engine.route = route
         return engine
     if doc._ocr_engine is None and doc._ocr_error is None:
-        model = settings.get("model")
+        requested_model = model = settings.get("model")
         capture = settings.get("capture_type")
         if capture is None and model is not None and _bundled_missing(model):
             # A bundled model whose file is not here (an install from the repository): stock Tesseract reads
@@ -52,6 +52,10 @@ def engine_for(doc: "Document") -> Tesseract | None:
             if capture is not None:
                 engine.route = {"mode": "capture", "capture_type": capture, "model": settings["model"],
                                 "reason": settings["capture_reason"]}
+            elif requested_model is not None:
+                engine.route = {"mode": "fixed", "model": engine.lang}
+                if model is None:
+                    engine.route["unavailable"] = requested_model
             engine.photo_gray_otsu = settings.get("photo_gray_otsu", False)
             doc._ocr_engine = engine
             doc.components.update(engine.provenance())

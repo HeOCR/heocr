@@ -17,7 +17,7 @@ Every decision is recorded in the output. Text that could not be read is reporte
 pip install git+https://github.com/HeOCR/heocr
 ```
 
-The GitHub install has no bundled OCR models. With Tesseract and Hebrew language data installed, the default OCR falls back to stock `heb`. The CLI warns and the record includes `bundled_model_unavailable`. See the [user guide](docs/guide.md#tesseract) to set up Tesseract.
+The default OCR model is `heocr_modern_v1`. Use a model-enabled wheel or place the pinned weights in the local model cache. The plain GitHub build falls back to installed stock `heb` when the model is unavailable. The CLI warns and records `bundled_model_unavailable`. See the [user guide](docs/guide.md#install) for the verified wheel build and Tesseract setup.
 
 ```python
 import heocr
