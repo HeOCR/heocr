@@ -119,7 +119,7 @@ Flags are open strings, not a closed enum; preserve and surface unknown flags fo
 
 The GitHub install has no bundled OCR models. With Tesseract and Hebrew language data installed, the default OCR falls back to stock `heb`. The CLI warns and the record includes `bundled_model_unavailable`. Use `ocr_model="heb"` or `--ocr-model heb` to select stock explicitly. Verify any niqqud against the source. These settings affect OCR only.
 
-TXT (`doc.text`, `-f text`, `.txt`), Markdown (`doc.markdown`, `-f markdown`, `.md`), and DOCX (`heocr.write_docx`, `-f docx`, `.docx`) work with the GitHub install. DOCX creates an editable Word view. Keep JSON for the full record.
+TXT (`doc.text`, `-f text`, `.txt`), Markdown (`doc.markdown`, `-f markdown`, `.md`), DOCX (`heocr.write_docx`, `-f docx`, `.docx`), and the tables alone as XLSX (`heocr.write_xlsx`, `-f xlsx`, `.xlsx`) or CSV (`doc.tables_csv()`, `-f csv`, `.csv`) work with the GitHub install. DOCX creates an editable Word view. Keep JSON for the full record.
 
 ## Copy-paste recipes
 

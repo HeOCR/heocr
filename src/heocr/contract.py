@@ -287,6 +287,19 @@ class Document:
 
         return to_docx(self)
 
+    def to_xlsx(self) -> bytes:
+        """The document's tables as an Excel workbook (XLSX), one sheet per table: its bytes. See
+        :mod:`heocr.table_export`."""
+        from heocr.table_export import to_xlsx
+
+        return to_xlsx(self)
+
+    def tables_csv(self) -> list[str]:
+        """Each table as CSV text, in reading order. See :mod:`heocr.table_export`."""
+        from heocr.table_export import tables, to_csv
+
+        return [to_csv(block) for block in tables(self)]
+
     # -- record ------------------------------------------------------------
     def to_dict(self) -> dict[str, Any]:
         from heocr import __version__
