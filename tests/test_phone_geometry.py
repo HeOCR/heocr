@@ -241,6 +241,18 @@ class PhoneGeometryTest(unittest.TestCase):
         args = _parser().parse_args(["page.jpg", "--profile", "fast-mix-v2"])
         self.assertEqual(args.profile, "fast-mix-v2")
 
+    def test_fast_mix_v3_keeps_the_v2_phone_route(self):
+        image, _ = phone_page()
+        payload = BytesIO()
+        image.save(payload, format="PNG")
+        with patch("heocr.pdf.reader._ocr_page"):
+            before = extract(payload.getvalue(), profile="fast-mix-v2", ocr_capture_type="pixel")
+            after = extract(payload.getvalue(), profile="fast-mix-v3", ocr_capture_type="pixel")
+        self.assertEqual(after._ocr_settings, before._ocr_settings)
+        self.assertEqual(after.options["ocr"]["profile"]["name"], "fast-mix-v3")
+        self.assertIsNone(after._table_proposer)
+        self.assertEqual(_parser().parse_args(["page.jpg", "--profile", "fast-mix-v3"]).profile, "fast-mix-v3")
+
     def test_phone_raster_limit_is_opt_in_and_keeps_source_page_size(self):
         raster, _ = phone_page()
         payload = BytesIO()

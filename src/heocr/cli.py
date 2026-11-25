@@ -12,7 +12,7 @@ from heocr.api import extract
 from heocr.contract import MAX_PAGES
 from heocr.handwriting import HandwritingConfig
 from heocr.ocr.phone_profile import PHONE_PROFILES
-from heocr.ocr.routes import CAPTURE_MODELS, FAST_MIX_PROFILES
+from heocr.ocr.routes import CAPTURE_MODELS, FAST_MIX_PROFILES, FAST_MIX_V3
 
 _FORMATS = ("text", "markdown", "json", "docx", "xlsx", "csv")
 _BY_SUFFIX = {".md": "markdown", ".markdown": "markdown", ".json": "json", ".txt": "text", ".docx": "docx", ".xlsx": "xlsx", ".csv": "csv"}
@@ -234,7 +234,7 @@ def main(argv: list[str] | None = None) -> int:
             tables_models=args.tables_models,
         )
     except ImportError as exc:
-        if args.tables is None:
+        if args.tables is None and args.profile != FAST_MIX_V3:
             raise
         print(f"heocr: {exc}", file=sys.stderr)
         return 1

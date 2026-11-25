@@ -278,6 +278,19 @@ body before a short, detached footer. The rule preserves each block's text
 and geometry. It leaves tables, form entries and connected bottom text in
 their ordinary order. The Python option is `ocr_footer_order=True`.
 
+#### Fast mix v3
+
+The opt-in `fast-mix-v3` profile enables the detached footer rule and
+additive learned cells for scanner and issuer OCR. On office inputs, pass
+`--tables-models DIR` with the [two pinned local bundles](#learned-tables-extra).
+
+```sh
+heocr scan.pdf --profile fast-mix-v3 --ocr-capture-type scanner --tables-models DIR -f json
+```
+
+Phone captures use the fast-mix-v2 phone path and need no TableFormer
+bundle. The oblique line reader still uses pinned Rivok Full weights.
+
 ### Geometric OCR layout
 
 ```sh
