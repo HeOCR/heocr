@@ -253,6 +253,20 @@ class PhoneGeometryTest(unittest.TestCase):
         self.assertIsNone(after._table_proposer)
         self.assertEqual(_parser().parse_args(["page.jpg", "--profile", "fast-mix-v3"]).profile, "fast-mix-v3")
 
+    def test_fast_mix_doc_keeps_the_v3_phone_recognizer_and_cap(self):
+        image, _ = phone_page()
+        payload = BytesIO()
+        image.save(payload, format="PNG")
+        with patch("heocr.pdf.reader._ocr_page") as read:
+            before = extract(payload.getvalue(), profile="fast-mix-v3", ocr_capture_type="pixel")
+            after = extract(payload.getvalue(), profile="fast-mix-doc-v1", ocr_capture_type="pixel")
+        self.assertEqual(after._ocr_settings, {**before._ocr_settings, "form_scan_marks": True})
+        self.assertEqual(after.options["ocr"]["profile"]["name"], "fast-mix-doc-v1")
+        self.assertEqual(max(read.call_args.kwargs["rendered"][0].size), 1700)
+        self.assertIsNone(after._table_proposer)
+        args = _parser().parse_args(["page.jpg", "--profile", "fast-mix-doc-v1", "-f", "forms"])
+        self.assertEqual(args.profile, "fast-mix-doc-v1")
+
     def test_phone_raster_limit_is_opt_in_and_keeps_source_page_size(self):
         raster, _ = phone_page()
         payload = BytesIO()

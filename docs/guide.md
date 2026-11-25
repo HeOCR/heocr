@@ -291,6 +291,21 @@ heocr scan.pdf --profile fast-mix-v3 --ocr-capture-type scanner --tables-models 
 Phone captures use the fast-mix-v2 phone path and need no TableFormer
 bundle. The oblique line reader still uses pinned Rivok Full weights.
 
+#### Fast mix document v1
+
+The opt-in `fast-mix-doc-v1` profile uses fast-mix-v3 recognition and
+enables page roles, cross-page table joins, form fields, scan marks,
+grid recovery and explicit form-section continuation. Office routes
+use the same pinned local TableFormer bundles as fast-mix-v3.
+
+```sh
+heocr scan.pdf --profile fast-mix-doc-v1 --ocr-capture-type scanner --tables-models DIR -f forms
+```
+
+Use `-f json` for the document record or `-f forms` for the form tree.
+With Python, use `extract(..., profile="fast-mix-doc-v1")` and
+`doc.to_forms()` for the form tree.
+
 ### Page roles
 
 Use `--document-roles` (Python `document_roles=True`) for paginated PDFs

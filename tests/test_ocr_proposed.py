@@ -150,6 +150,30 @@ class OcrProposedTest(unittest.TestCase):
         self.assertEqual(len([b for b in doc.blocks if "ocr_table_supplement" in b.flags]), 1)
         self.assertEqual(heocr.validate(doc.to_dict()), [])
 
+    def test_fast_mix_doc_enables_whole_document_stages_on_scanner(self):
+        payload = scanned_pdf(borderless())
+        with self.assertRaisesRegex(ValueError, "pinned --tables-models"):
+            heocr.extract(payload, profile="fast-mix-doc-v1", ocr_capture_type="scanner", tesseract=FAKE)
+        stub = Stub()
+        with (mock.patch("heocr.tableformer.TableFormerProposer", return_value=stub) as proposer,
+              mock.patch("heocr.pdf.reader.engine_for", return_value=Tesseract.find(FAKE, lang="heb")),
+              mock.patch("heocr.pdf.document_roles.apply") as roles):
+            doc = heocr.extract(payload, profile="fast-mix-doc-v1", ocr_capture_type="scanner",
+                                tesseract=FAKE, tables_models="unused")
+        proposer.assert_called_once_with("unused")
+        roles.assert_called_once_with(doc)
+        self.assertEqual(doc.options["ocr"]["profile"]["name"], "fast-mix-doc-v1")
+        self.assertEqual(doc.options["tables"], stub.record)
+        self.assertTrue(doc.options["ocr"]["footer_order"])
+        self.assertTrue(doc.options["join_tables"])
+        self.assertTrue(doc.options["form_fields"])
+        self.assertTrue(doc._ocr_settings["form_scan_marks"])
+        self.assertTrue(doc._form_grid_recovery)
+        with mock.patch("heocr.form_export.export") as export:
+            doc.to_forms()
+        export.assert_called_once_with(doc, join_pages=True)
+        self.assertEqual(heocr.validate(doc.to_dict()), [])
+
     def test_cli_forwards_the_opt_in_and_local_model_directory(self):
         args = ["scan.pdf", "--profile", "fast-mix-v2", "--ocr-capture-type", "scanner",
                 "--tables", "tableformer", "--tables-models", "local-models"]

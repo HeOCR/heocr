@@ -252,6 +252,7 @@ class Document:
     # Run-time only, never serialized: OCR settings and the engine found for this document.
     _ocr_settings: dict[str, Any] | None = field(default=None, repr=False, compare=False)
     _form_grid_recovery: bool = field(default=False, repr=False, compare=False)
+    _join_form_pages: bool = field(default=False, repr=False, compare=False)
     _ocr_engine: Any = field(default=None, repr=False, compare=False)
     _ocr_error: str | None = field(default=None, repr=False, compare=False)
     _ocr_engines: dict = field(default_factory=dict, repr=False, compare=False)  # ocr_model="auto": model -> engine
@@ -310,7 +311,7 @@ class Document:
         """Infer form structure and optionally join explicitly continued sections."""
         from heocr.form_export import export
 
-        return export(self, join_pages=join_pages)
+        return export(self, join_pages=join_pages or self._join_form_pages)
 
     # -- record ------------------------------------------------------------
     def to_dict(self) -> dict[str, Any]:

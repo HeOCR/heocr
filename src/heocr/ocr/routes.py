@@ -21,7 +21,9 @@ RIVOK_FULL = "heb_rivok"
 FAST_MIX_V1 = "fast-mix-v1"
 FAST_MIX_V2 = "fast-mix-v2"
 FAST_MIX_V3 = "fast-mix-v3"
-FAST_MIX_PROFILES = (FAST_MIX_V1, FAST_MIX_V2, FAST_MIX_V3)
+FAST_MIX_DOC_V1 = "fast-mix-doc-v1"
+FAST_MIX_TABLE_PROFILES = (FAST_MIX_V3, FAST_MIX_DOC_V1)
+FAST_MIX_PROFILES = (FAST_MIX_V1, FAST_MIX_V2, *FAST_MIX_TABLE_PROFILES)
 PHOTO_CAPTURES = ("phone", "iphone", "pixel", "camera-photo")
 CAPTURE_MODELS = {
     "phone": "heocr_modern_v1",
