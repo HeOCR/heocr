@@ -322,6 +322,59 @@ class TidyTests(unittest.TestCase):
 
 
 class PinTests(unittest.TestCase):
+    def test_opt_in_detector_bypasses_converter_and_flags_only_pages_seen(self):
+        from tempfile import TemporaryDirectory
+        from types import ModuleType
+
+        from heocr.tableformer import DETECTOR_NAME, DETECTOR_VERSIONS, TableFormerSession
+
+        doc_body = make_pdf([borderless_page(), PdfPage(lines=[]), borderless_page()])
+        table = {**proposal(), "page_size": [595, HEIGHT]}
+        with (TemporaryDirectory() as models,
+              mock.patch.dict("sys.modules", {"docling": ModuleType("docling")}),
+              mock.patch("importlib.metadata.version", side_effect=DETECTOR_VERSIONS.__getitem__),
+              mock.patch("heocr.tableformer._verify_files", return_value={"model": "fixture"}),
+              mock.patch.object(TableFormerSession, "_make_converter") as make_converter,
+              mock.patch("heocr.tableformer._HeronDetector") as detector,
+              mock.patch("heocr.tableformer._load_predictor", return_value=("predictor", 512)) as load,
+              mock.patch("heocr.tableformer._predict_structure", return_value=[table]) as predict):
+            detector.return_value.side_effect = [[], [table["bbox"]]]
+            session = TableFormerSession(models, detector=DETECTOR_NAME)
+            doc = heocr.extract(doc_body, ocr=False, tables="tableformer", tables_models=session)
+
+        flag = f"table_detector_{DETECTOR_NAME}"
+        self.assertEqual([flag in page.flags for page in doc.pages], [True, False, True])
+        self.assertNotIn("tableformer_tables", doc.pages[0].flags)
+        self.assertIn("tableformer_tables", doc.pages[2].flags)
+        self.assertEqual(doc.options["tables"]["detector"], DETECTOR_NAME)
+        self.assertEqual(detector.return_value.call_count, 2)
+        load.assert_called_once()
+        predict.assert_called_once_with("predictor", 512, doc_body, 2, (595, HEIGHT), [table["bbox"]])
+        make_converter.assert_not_called()
+        self.assertEqual(heocr.validate(doc.to_dict()), [])
+
+    def test_detector_pin_verifies_preprocessor_and_does_not_require_stock_heron(self):
+        from hashlib import sha256
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from types import ModuleType
+
+        from heocr.tableformer import DETECTOR_NAME, DETECTOR_PINNED, DETECTOR_VERSIONS, TableFormerSession
+
+        pins = {name: sha256(name.encode()).hexdigest() for name in DETECTOR_PINNED}
+        with (TemporaryDirectory() as models,
+              mock.patch.dict("sys.modules", {"docling": ModuleType("docling")}),
+              mock.patch("importlib.metadata.version", side_effect=DETECTOR_VERSIONS.__getitem__),
+              mock.patch("heocr.tableformer.DETECTOR_PINNED", pins)):
+            for name in pins:
+                pin = Path(models) / name
+                pin.parent.mkdir(parents=True, exist_ok=True)
+                pin.write_bytes(name.encode())
+            TableFormerSession(models, detector=DETECTOR_NAME)
+            (Path(models) / next(name for name in pins if name.endswith("preprocessor_config.json"))).write_bytes(b"changed")
+            with self.assertRaisesRegex(ValueError, "preprocessor_config.json"):
+                TableFormerSession(models, detector=DETECTOR_NAME)
+
     def test_shared_session_loads_one_converter_and_keeps_document_proposals_isolated(self):
         import sys
         from types import ModuleType, SimpleNamespace
