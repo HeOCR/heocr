@@ -40,7 +40,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-ocr", action="store_true", help="do not run OCR; pages that need it are reported unread")
     parser.add_argument("--force-ocr", action="store_true", help="read every PDF page by OCR, ignoring its text layer (a workaround for a text layer heocr reads badly)")
     parser.add_argument("--document-roles", action="store_true",
-                        help="tag supported page headers, footnotes and footers with pagewise order")
+                        help="tag supported page headers, footnotes and footers with pagewise JSON order")
     parser.add_argument("--ocr-line-v6", metavar="MODEL", help="reread Rivok Full prose lines with the pinned local v6 model")
     parser.add_argument("--ocr-line-batch", action="store_true", help="batch Rivok and v6 prose crops within each page (needs --ocr-line-v6)")
     parser.add_argument("--ocr-number-batch", action="store_true", help="batch full-page OCR number-word rereads")

@@ -246,7 +246,7 @@ class Document:
     options: dict[str, Any] = field(default_factory=lambda: {"repairs": True})
     # Layout roles can reorder the structured record. Keep the original
     # blocks for the plain text view, without adding an extra payload.
-    _plain_blocks: tuple[Block, ...] | None = field(default=None, repr=False, compare=False)
+    _plain_blocks: tuple[Block, ...] | None = field(default=None, repr=False, compare=False, kw_only=True)
     # Run-time only, never serialized: OCR settings and the engine found for this document.
     _ocr_settings: dict[str, Any] | None = field(default=None, repr=False, compare=False)
     _ocr_engine: Any = field(default=None, repr=False, compare=False)
