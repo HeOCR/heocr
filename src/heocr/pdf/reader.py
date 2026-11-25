@@ -2430,9 +2430,14 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
                 shallow_turn = (turned, deskew)
             deskew = 0.0
     # Ruled tables in the image are read cell by cell; the rest of the page once, without them (D3e).
-    rectified = rectify_grid(image, scale, tolerate_gaps=camera_jpeg) if not grids else None
+    legacy_grid = rectify_grid(image, scale, tolerate_gaps=camera_jpeg) if not grids else None
+    rectified = [legacy_grid] if legacy_grid is not None else []
+    if not (grids or rectified) and (doc._ocr_settings or {}).get("phone_tables") and not time_up(doc):
+        from heocr.pdf.phone_tables import grids_from_phone
+
+        rectified = grids_from_phone(image)
     learned_grids = []
-    if doc._table_proposer is not None and rectified is None:
+    if doc._table_proposer is not None and not rectified:
         # Keep learned proposals out of the page mask and the text-layout guards.
         learned_grids, proposal_flags = _ocr_table_proposals(doc, index, image, scale, grids, camera_jpeg)
         flags = flags + proposal_flags
@@ -2441,7 +2446,7 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
     last_page = index + 1 >= min(doc.page_count or index + 1, doc._max_pages)
     dpi = round(scale * 72)
     probe = None
-    probed = rectified is not None and routes.pending(doc)
+    probed = bool(rectified) and routes.pending(doc)
     if probed:
         # The unmasked reading can choose the model and serve as fallback.
         try:
@@ -2453,16 +2458,29 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
         if probe is not None and routes.observe(doc, image, probe, dpi, last_page=last_page):
             engine = engine_for(doc)
             probe = None
-        if rectified is not None:
+        if rectified:
             numbers = number_engine_for(doc) if doc.options.get("check_numbers", "suspect") else None
-            rectified_read = _validated_rectified_tables(doc, index, engine, rectified, scale, numbers, image.size)
-            if rectified_read is None:
-                rectified = None
-                flags = flags + ["ocr_grid_cell_fallback"]
-            else:
+            accepted, blocks, chars = [], [], 0
+            for candidate in rectified:
+                validated = _validated_rectified_tables(doc, index, engine, candidate, scale, numbers, image.size)
+                if validated is not None:
+                    accepted.append(candidate)
+                    blocks.extend(validated[0])
+                    chars += validated[1]
+            rectified = accepted
+            if rectified:
+                rectified_read = (blocks, chars)
                 flags = flags + ["ocr_grid_rectified"]
+                if legacy_grid is None:
+                    flags = flags + ["ocr_phone_tables_rectified"]
+            else:
+                flags = flags + ["ocr_grid_cell_fallback"]
+                if legacy_grid is None and doc._table_proposer is not None:
+                    learned_grids, proposal_flags = _ocr_table_proposals(doc, index, image, scale, grids, camera_jpeg)
+                    flags = flags + proposal_flags
 
-        page_image = _without(image, scale, [t.bbox for t in grids], polygon=rectified.mask if rectified else ()) if grids or rectified else image
+        page_image = _without(image, scale, [t.bbox for t in grids],
+                              polygons=[candidate.mask for candidate in rectified]) if grids or rectified else image
         # Bare paper outside a table can produce noise when Tesseract thresholds its texture.
         if (grids or rectified) and not _rest_has_ink(page_image, scale):
             result = OcrResult([])
@@ -2817,7 +2835,7 @@ def _ocr_row_tables(doc: Document, index: int, engine, tables: list[TableRows], 
     return blocks, read
 
 
-def _without(image, scale: float, boxes, *, polygon=()) -> object:
+def _without(image, scale: float, boxes, *, polygons=()) -> object:
     """A copy of the page image with the given boxes (points) painted in the paper's own grey
     (``paper_level``: not white, which a global threshold would split the page on)."""
     from PIL import ImageDraw
@@ -2830,7 +2848,7 @@ def _without(image, scale: float, boxes, *, polygon=()) -> object:
     draw = ImageDraw.Draw(out)
     for x0, y0, x1, y1 in boxes:
         draw.rectangle([(x0 - 2) * scale, (y0 - 2) * scale, (x1 + 2) * scale, (y1 + 2) * scale], fill=fill)
-    if polygon:
+    for polygon in polygons:
         draw.polygon(polygon, fill=fill)
     return out
 
@@ -2839,7 +2857,7 @@ def _validated_rectified_tables(doc: Document, index: int, engine, rectified, sc
     """Stage isolated reads before committing a projective mask to the page."""
     before = len(doc.unread)
     factor = min(1, CELL_TEXT_PAGE_EDGE / max(page_size))
-    blocks, chars = _ocr_tables(doc, index, engine, rectified.image, scale, [rectified.grid],
+    blocks, chars = _ocr_tables(doc, index, engine, rectified.image, rectified.cell_scale or scale, [rectified.grid],
                                 None if numbers is engine else numbers, text_scale=factor)
     unread = doc.unread[before:]
     rows = [row for block in blocks for row in block.cells]

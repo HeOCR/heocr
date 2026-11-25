@@ -88,6 +88,7 @@ where it needs to read pixels. Add a route when the input calls for one.
 | --- | --- | --- |
 | Readable PDF, office file or routine scan | No route flags | The default chooses the text layer, format reader or installed local OCR. |
 | Angled standalone phone photo of printed Hebrew | `--profile phone-specialist` | Adds layout and guarded perspective correction. Declare `--ocr-capture-type phone` if automatic detection misses the photo. Requires local modern_v1. [Phone specialist profile](#phone-specialist-profile) |
+| Oblique phone photo of a ruled form or table | `--ocr-phone-tables --ocr-capture-type phone` | Recovers closed grids on the photographed paper plane. [Phone form and table grids](#phone-form-and-table-grids) |
 | Known scanner or issuer-render capture | `--ocr-router v2 --ocr-capture-type scanner` or `--ocr-router v2 --ocr-capture-type issuer-render` | Uses pinned Rivok Full where OCR is needed. [Capture router v2](#capture-router-v2) |
 | Scan with columns, mixed-direction lines or possible tables | `--ocr-layout v1 -f json` | Applies geometric layout to OCR. JSON keeps the structure and flags. [Geometric OCR layout](#geometric-ocr-layout) |
 | Borderless table in a PDF, including a scanned PDF | Install `heocr[tables]`, then use `--tables tableformer --tables-models DIR` | Local model weights. [Learned tables extra](#learned-tables-extra) |
@@ -454,6 +455,23 @@ For multipage forms, add `--join-form-pages` or call
 continuation marker such as `(המשך)` or `(continued)` near the top of
 the next page keeps that page in the same section. Each field keeps its
 own page numbers.
+
+### Phone form and table grids
+
+On a standalone phone photo, `--ocr-phone-tables` estimates the paper plane
+from visible page edges, then looks for intersecting rulings in the
+rectified view. It reads cells from the original-resolution warp and returns
+the table box in the source image's coordinates. When the plane or grid
+lacks support, ordinary OCR reads the page. This option runs locally.
+
+```sh
+heocr photo.jpg --ocr-capture-type phone --ocr-phone-tables -f json
+heocr photo.jpg --ocr-capture-type phone --ocr-phone-tables --form-grid-recovery -f forms
+```
+
+The Python option is `ocr_phone_tables=True`. Combine it with
+`ocr_phone_geometry=True` to also enable line-level rereads on the ordinary
+phone path.
 
 ### Historical print with router v2
 
