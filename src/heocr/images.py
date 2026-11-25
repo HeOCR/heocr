@@ -133,9 +133,19 @@ def read_image(body: bytes, doc: Document) -> None:
             from PIL import ImageOps
 
             options["form_image"] = ImageOps.exif_transpose(copied)
+        max_edge = (doc._ocr_settings or {}).get("phone_max_edge")
+        if max_edge is not None and max(frame.size) > max_edge:
+            factor = max_edge / max(frame.size)
+            size = tuple(max(1, round(edge * factor)) for edge in frame.size)
+            frame = frame.resize(size, Image.Resampling.BOX)
+            if "form_image" in options:
+                options["form_image"] = options["form_image"].resize(size, Image.Resampling.BOX)
+            scale *= factor
+            flags.append("ocr_phone_raster_downscaled")
+            signals["ocr_pixels"] = list(size)
         _ocr_page(doc, index, None, round(width, 2), round(height, 2), "T5", signals, PageText(), flags,
                   rendered=(frame, scale), camera_jpeg=camera_jpeg, hybrid_image=hybrid_image, **options)
         if doc._handwriting is None and "form_image" in options and signals.get("ocr_hybrid") != "hosted":
             from heocr.pdf.checkboxes import append_checkmarks
 
-            append_checkmarks(doc, index, options["form_image"], dpi / 72)
+            append_checkmarks(doc, index, options["form_image"], scale)

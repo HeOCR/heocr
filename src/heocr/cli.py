@@ -102,6 +102,8 @@ def _parser() -> argparse.ArgumentParser:
                         help="required SHA-256 of the local phone specialist model")
     parser.add_argument("--ocr-phone-geometry", action="store_true",
                         help="reread isolated lines on angled phone images with supported paper edges")
+    parser.add_argument("--ocr-phone-max-edge", type=int, metavar="PX",
+                        help="limit the OCR raster's long edge for standalone phone images")
     parser.add_argument("--photo-preprocess", choices=("gray-otsu",),
                         help="send grayscale to the main OCR reader with internal Otsu thresholding on photos")
     parser.add_argument("-q", "--quiet", action="store_true", help="do not report unread parts on stderr (a missing OCR model is still reported)")
@@ -198,6 +200,7 @@ def main(argv: list[str] | None = None) -> int:
             ocr_number_batch=args.ocr_number_batch,
             photo_preprocess=args.photo_preprocess,
             ocr_phone_geometry=args.ocr_phone_geometry,
+            ocr_phone_max_edge=args.ocr_phone_max_edge,
             profile=args.profile,
             phone_model=args.phone_model,
             phone_model_sha256=args.phone_model_sha256,

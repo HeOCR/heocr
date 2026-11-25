@@ -207,6 +207,28 @@ it also keeps a native line as read if the line maps to one rectified band and
 every word has confidence of at least 95. The profile accepts the same capture
 declaration and local line-model options as the phone specialist.
 
+To reduce the working raster of a large phone capture, set a long-edge limit
+in pixels. HeOCR retains the source page size and reports the working pixel
+dimensions and `ocr_phone_raster_downscaled` flag when resizing takes effect.
+Smaller rasters can lose fine print. In Python the equivalent is
+`ocr_phone_max_edge=1700`.
+
+```sh
+heocr photo.jpg --profile phone-specialist-fast --ocr-phone-max-edge 1700
+```
+
+For speed-focused runs on known modern-print rasters, choose the reader by
+capture and turn off the optional second number readings:
+
+```sh
+heocr scan.png --ocr-router v2 --ocr-capture-type scanner --ocr-layout v1 --check-numbers off
+heocr issuer-render.png --ocr-model modern --ocr-layout v1 --check-numbers off
+```
+
+These scans and renders keep geometric layout and use a single page model.
+Use the regular number checks when digits, amounts, or clause labels need
+independent verification.
+
 ### Geometric OCR layout
 
 ```sh

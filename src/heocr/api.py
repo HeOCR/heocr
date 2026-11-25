@@ -85,6 +85,7 @@ def extract(
     ocr_number_batch: bool = False,
     photo_preprocess: str | None = None,
     ocr_phone_geometry: bool = False,
+    ocr_phone_max_edge: int | None = None,
     profile: str | None = None,
     phone_model: str | os.PathLike[str] | None = None,
     phone_model_sha256: str | None = None,
@@ -142,6 +143,8 @@ def extract(
     The configured local OCR route handles pages where hosted reading is unavailable.
     ``ocr_phone_geometry=True`` enables perspective-corrected line OCR on phone images with
     supported page edges. Use a capture declaration or camera JPEG metadata.
+    ``ocr_phone_max_edge`` optionally bounds the working raster's long edge in pixels for
+    standalone phone images. Page size and output coordinates are still in source points.
     ``profile="phone-specialist"`` activates capture routing, layout v1 and phone
     geometry for standalone phone images. A local ``phone_model`` and
     ``phone_model_sha256`` can replace modern v1 on rectified line crops.
@@ -235,6 +238,10 @@ def extract(
         raise ValueError("hybrid options require ocr_hybrid='haiku'")
     if ocr_phone_geometry and (not ocr or ocr_psm != 3 or ocr_lang != DEFAULT_LANG or crnn_model is not None):
         raise ValueError("ocr_phone_geometry needs Hebrew Tesseract OCR with page mode 3")
+    if ocr_phone_max_edge is not None and (
+        not ocr or type(ocr_phone_max_edge) is not int or ocr_phone_max_edge < 1
+    ):
+        raise ValueError("ocr_phone_max_edge needs OCR and a positive integer")
     if photo_preprocess is not None and (photo_preprocess != "gray-otsu" or not ocr):
         raise ValueError("photo_preprocess must be 'gray-otsu' and needs OCR")
     if ocr_router is not None or ocr_capture_type is not None:
@@ -372,7 +379,7 @@ def extract(
         doc.options["ocr"]["line_v6_sha256"] = V6_SHA256
     if ocr_number_batch:
         doc._ocr_settings["number_batch"] = True
-    if (photo_preprocess is not None or ocr_phone_geometry) and kind.format in IMAGE_FORMATS:
+    if (photo_preprocess is not None or ocr_phone_geometry or ocr_phone_max_edge is not None) and kind.format in IMAGE_FORMATS:
         from heocr.ocr.routes import PHOTO_CAPTURES, classify_capture
 
         capture = ocr_capture_type
@@ -384,6 +391,9 @@ def extract(
                 doc._ocr_settings["photo_gray_otsu"] = True
             if ocr_phone_geometry:
                 doc._ocr_settings["phone_geometry"] = True
+            if ocr_phone_max_edge is not None:
+                doc._ocr_settings["phone_max_edge"] = ocr_phone_max_edge
+                doc.options["ocr"]["phone_max_edge"] = ocr_phone_max_edge
     if kind.format in CONVERSIONS:
         doc.options["convert"] = {"engine": "libreoffice", "to": CONVERSIONS[kind.format][1]} if convert else False
         doc._convert_settings = {"cmd": soffice, "timeout": convert_timeout or CONVERT_TIMEOUT} if convert else None
