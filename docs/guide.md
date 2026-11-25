@@ -77,7 +77,7 @@ where it needs to read pixels. Add a route when the input calls for one.
 | Document or goal | Flag or setup | What to expect |
 | --- | --- | --- |
 | Readable PDF, office file or routine scan | No route flags | The default chooses the text layer, format reader or installed local OCR. |
-| Angled standalone phone photo of printed Hebrew | `--profile phone-specialist` | Adds layout and guarded perspective correction. Add `--ocr-capture-type phone` if camera metadata is missing. Requires local modern_v1. [Phone specialist profile](#phone-specialist-profile) |
+| Angled standalone phone photo of printed Hebrew | `--profile phone-specialist` | Adds layout and guarded perspective correction. Declare `--ocr-capture-type phone` if automatic detection misses the photo. Requires local modern_v1. [Phone specialist profile](#phone-specialist-profile) |
 | Known scanner or issuer-render capture | `--ocr-router v2 --ocr-capture-type scanner` or `--ocr-router v2 --ocr-capture-type issuer-render` | Uses pinned Rivok Full where OCR is needed. [Capture router v2](#capture-router-v2) |
 | Scan with columns, mixed-direction lines or possible tables | `--ocr-layout v1 -f json` | Applies geometric layout to OCR. JSON keeps the structure and flags. [Geometric OCR layout](#geometric-ocr-layout) |
 | Borderless table in a PDF with a usable text layer | Install `heocr[tables]`, then pass `tables="tableformer"` and `tables_models=path` to `heocr.extract` | Python API with local model weights. [Learned tables extra](#learned-tables-extra) |
@@ -86,7 +86,7 @@ where it needs to read pixels. Add a route when the input calls for one.
 
 ### Capture router v2
 
-Use `heocr scan.pdf --ocr-router v2` or `heocr.extract("scan.pdf", ocr_router="v2")` to enable capture routing. PDF pages and regions that need OCR use the pinned Rivok Full v2.0 int8 model. JPEGs with camera exposure or focal-length EXIF use `heocr_modern_v1`. Inputs without a capture signal use the usual model route.
+Use `heocr scan.pdf --ocr-router v2` or `heocr.extract("scan.pdf", ocr_router="v2")` to enable capture routing. PDF pages and regions that need OCR use the pinned Rivok Full v2.0 int8 model. JPEGs with camera exposure or focal-length EXIF use `heocr_modern_v1`. When that metadata is absent, router v2 also checks for a strongly foreshortened paper outline in RGB JPEG or PNG images. Inputs without a capture signal use the usual model route.
 
 You can override classification with `--ocr-capture-type` or `ocr_capture_type=`. For example, use `heocr scan.png --ocr-router v2 --ocr-capture-type scanner` for a known scanner image. `phone`, `iphone` and `pixel` pick modern_v1, and `scanner` and `issuer-render` pick Rivok. The capture declaration applies to the whole input and also works on its own. Keep the model, language and alternate-backend options at their defaults. The OCR record includes the capture signal and chosen model. When the classifier or declaration picks a pinned model, a missing or mismatched local file is reported as unavailable.
 
@@ -127,7 +127,7 @@ Pages/min is the median of three serial batches with Tesseract limited to one th
 
 #### Photo grayscale and Otsu
 
-Use `--photo-preprocess gray-otsu` (Python `photo_preprocess="gray-otsu"`) to send grayscale pixels to the main Tesseract reader and explicitly select its built-in Otsu thresholding. It applies to standalone camera JPEGs recognized by EXIF, or standalone images declared as `phone`, `iphone` or `pixel`. For example, use `heocr photo.jpg --ocr-router v2 --ocr-capture-type phone --photo-preprocess gray-otsu`. The OCR options record the setting on eligible input. Page geometry, DPI, model selection and scan routes use their usual settings.
+Use `--photo-preprocess gray-otsu` (Python `photo_preprocess="gray-otsu"`) to send grayscale pixels to the main Tesseract reader and explicitly select its built-in Otsu thresholding. It applies to standalone images recognized by the capture classifier or declared as `phone`, `iphone` or `pixel`. For example, use `heocr photo.jpg --ocr-router v2 --ocr-capture-type phone --photo-preprocess gray-otsu`. The OCR options record the setting on eligible input. Page geometry, DPI, model selection and scan routes use their usual settings.
 
 #### Phone perspective correction
 
@@ -159,8 +159,9 @@ heocr photo.jpg --profile phone-specialist --ocr-capture-type pixel \
 
 Use this local profile for standalone phone images. It combines capture
 routing, layout v1 and guarded perspective correction. Router v2 recognizes
-camera JPEGs by exposure or focal-length EXIF. Declare `phone`, `iphone` or
-`pixel` for a standalone image without that evidence. Other inputs follow the
+camera JPEGs by exposure or focal-length EXIF and can detect a strong paper
+perspective in RGB JPEGs and PNGs. Declare `phone`, `iphone` or `pixel` for a
+standalone image without either signal. Other inputs follow the
 same route and yield the same record with or without the profile. For a phone
 photo wrapped in a PDF,
 [declare the capture with router v2](#capture-router-v2) to select modern_v1

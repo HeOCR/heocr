@@ -40,14 +40,22 @@ def classify_capture(body: bytes, file_format: str) -> tuple[str | None, str, st
     if file_format == "pdf":
         # The PDF reader already decides if a page or region needs OCR.
         return "pdf-render", "pdf_container", RIVOK_FULL
-    if file_format == "jpeg":
-        from PIL import ExifTags, Image
+    if file_format in ("jpeg", "png"):
+        from PIL import ExifTags, Image, ImageOps
+
+        from heocr.ocr.phone_geometry import _sheet
+        from heocr.ocr.regions import MAX_RENDER_PIXELS
 
         try:
             with Image.open(BytesIO(body)) as image:
-                photo = image.getexif().get_ifd(ExifTags.IFD.Exif)
-            if photo.get(ExifTags.Base.ExposureTime) or photo.get(ExifTags.Base.FocalLength):
-                return "camera-photo", "camera_exif", CAPTURE_MODELS["phone"]
+                if file_format == "jpeg":
+                    photo = image.getexif().get_ifd(ExifTags.IFD.Exif)
+                    if photo.get(ExifTags.Base.ExposureTime) or photo.get(ExifTags.Base.FocalLength):
+                        return "camera-photo", "camera_exif", CAPTURE_MODELS["phone"]
+                if image.mode == "RGB" and image.width * image.height <= MAX_RENDER_PIXELS:
+                    gray = ImageOps.exif_transpose(image.convert("L"))
+                    if _sheet(gray) is not None:
+                        return "camera-photo", "camera_perspective", CAPTURE_MODELS["phone"]
         except (OSError, ValueError, Image.DecompressionBombError):
             pass  # The image reader handles decode errors and unread reporting.
     return None, "no_capture_evidence", None
