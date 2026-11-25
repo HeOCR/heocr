@@ -26,11 +26,11 @@ class DocumentRolesTest(unittest.TestCase):
         self.assertEqual(heocr.validate(candidate.to_dict()), [])
 
     def test_splits_geometry_lines_without_losing_the_original_log(self):
-        lines = [Line("Heading", [20, 18, 90, 27], "ltr"),
+        lines = [Line("Footer", [20, 480, 90, 489], "ltr"),
                  Line("Body first", [20, 80, 90, 91], "ltr"),
+                 Line("Heading", [20, 18, 90, 27], "ltr"),
                  Line("Body next", [20, 120, 90, 131], "ltr"),
-                 Line("1 A note", [20, 457, 90, 466], "ltr"),
-                 Line("Footer", [20, 480, 90, 489], "ltr")]
+                 Line("1 A note", [20, 457, 90, 466], "ltr")]
         mixed = Block(kind="text", text="\n".join(line.text for line in lines), page=0, source="ocr",
                       ocr={"status": "unverified"}, bbox=[20, 18, 90, 489], lines=lines,
                       checks={"test": True}, repairs=[{"rule": "fixture"}])
@@ -38,7 +38,8 @@ class DocumentRolesTest(unittest.TestCase):
         apply(doc)
         self.assertEqual(Counter(line.text for b in doc.blocks for line in b.lines),
                          Counter(line.text for line in lines))
-        self.assertEqual([b.role for b in doc.blocks], ["header", "body", "footnote", "footer"])
+        self.assertEqual([b.role for b in doc.blocks], ["header", "body", "body", "footnote", "footer"])
+        self.assertEqual([b.text for b in doc.blocks], ["Heading", "Body first", "Body next", "1 A note", "Footer"])
         body = next(b for b in doc.blocks if b.role == "body")
         self.assertEqual(body.checks, {"test": True})
         self.assertEqual(sum(len(b.repairs) for b in doc.blocks), 1)
