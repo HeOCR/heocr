@@ -342,11 +342,18 @@ def table_blocks(page_index: int, atoms: list[Atom], tables: list[Table], rtl: b
         inside = [a for a in remaining if _within(a, table.bbox, 0.0)]
         if not any(not a.is_space for a in inside):
             continue  # a frame or a drawing, not a table of this layer's text
-        if _crosses_text(table, inside):
+        proposed = "tableformer_proposed" in table.flags
+        if not proposed and _crosses_text(table, inside):
             # Real table rulings never cut through characters: these are underlines, form lines
             # or a column rule over running text. The text stays as lines.
             rejected.append(table)
             continue
+        points: dict[int, tuple[float, float]] = {}
+        if proposed:
+            # A learned grid is cut where the fewest characters are; a word it still cuts goes whole to one cell.
+            points = _whole_words(inside, [cell["box"] for row in table.rows for cell in row if cell["box"]])
+            if points:
+                table.flags.append("table_words_kept_whole")
         taken: set[int] = set()
         ledger = CellRepairs(repairs_on)
         cells_out: list[list[Cell]] = []
@@ -357,7 +364,7 @@ def table_blocks(page_index: int, atoms: list[Atom], tables: list[Table], rtl: b
                 if cell["placeholder"]:
                     out_row.append(Cell("", colspan=cell["colspan"], flags=["merged_above"]))
                     continue
-                mine = [a for a in inside if id(a) not in taken and _within(a, cell["box"], INSIDE)]
+                mine = [a for a in inside if id(a) not in taken and _within_at(a, points.get(id(a)), cell["box"], INSIDE)]
                 taken.update(id(a) for a in mine)
                 cell_lines: list = []
                 text = ledger.text(mine, rtl, cell_lines)
@@ -410,6 +417,50 @@ def _crosses_text(table: Table, atoms: list[Atom]) -> bool:
                 if box[1] <= a.cy <= box[3] and (a.x0 + 0.5 < box[0] < a.x1 - 0.5 or a.x0 + 0.5 < box[2] < a.x1 - 0.5):
                     crossed += 1
     return crossed > CROSSING_SHARE * max(len(ink), 1)
+
+
+WORD_GAP = 0.15  # letters closer than this share of their height, on one line, are one word
+
+
+def _whole_words(atoms: list[Atom], boxes: list[list[float]]) -> dict[int, tuple[float, float]]:
+    """For each word whose letters fall in more than one cell: every letter's point moved to one letter of the word
+    in the cell that holds most of it (ties: the leftmost). Only letters: a number's digits and marks keep their own
+    places, since layers often store a decimal's parts apart."""
+    lines: list[list[Atom]] = []
+    for a in sorted((a for a in atoms if not a.is_space and a.text[:1].isalpha()), key=lambda a: a.cy):
+        if lines and abs(a.cy - lines[-1][-1].cy) < 0.5 * max(a.y1 - a.y0, 1.0):
+            lines[-1].append(a)
+        else:
+            lines.append([a])
+    words: list[list[Atom]] = []
+    for line in lines:
+        line.sort(key=lambda a: a.x0)
+        for i, a in enumerate(line):
+            gap = a.x0 - line[i - 1].x1 if i else None
+            if gap is not None and -0.5 * max(a.y1 - a.y0, 1.0) <= gap <= WORD_GAP * max(a.y1 - a.y0, 1.0):
+                words[-1].append(a)
+            else:
+                words.append([a])
+    points: dict[int, tuple[float, float]] = {}
+    for word in words:
+        homes: dict[int, list[Atom]] = {}
+        for a in word:
+            for i, box in enumerate(boxes):
+                if _within(a, box, INSIDE):
+                    homes.setdefault(i, []).append(a)
+                    break
+        if len(homes) < 2:
+            continue
+        anchor = max(homes.values(), key=len)[0]
+        for a in word:
+            points[id(a)] = (anchor.cx, anchor.cy)
+    return points
+
+
+def _within_at(atom: Atom, point, box, margin: float) -> bool:
+    if point is None:
+        return _within(atom, box, margin)
+    return box[0] + margin <= point[0] <= box[2] - margin and box[1] + margin <= point[1] <= box[3] - margin
 
 
 def _within(atom: Atom, box, margin: float) -> bool:
