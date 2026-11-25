@@ -10,12 +10,20 @@ page being read the page flag and ``signals.ocr_calls_failed``. The same test, r
 failure, leaves none.
 """
 
+from contextlib import redirect_stderr, redirect_stdout
+import errno
+import io
+import json
+import os
+from pathlib import Path
 import subprocess
 import sys
+from tempfile import TemporaryDirectory
 import unittest
 from unittest import mock
 
 import heocr
+from heocr.cli import main as cli
 from heocr.ocr import tesseract
 
 # (the function the call is made from, its module, an existing test that reaches it, whether the call is
@@ -79,6 +87,70 @@ def _replay(test_id: str, function: str | None = None, module: str = "", mode: s
 
 
 class OcrCallFailureTest(unittest.TestCase):
+    def test_forced_stock_cli_records_engine_and_output_failures(self) -> None:
+        from PIL import Image, ImageDraw
+
+        with TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            source = folder / "test.png"
+            image = Image.new("RGB", (600, 800), "white")
+            ImageDraw.Draw(image).rectangle((30, 30, 550, 65), fill="black")
+            image.save(source)
+            (folder / "phist_v2.traineddata").write_bytes(b"local fixture model")
+            args = [str(source), "--ocr-model", "stock", "--ocr-lang", "phist_v2", "--psm", "3",
+                    "--max-pages", "1", "--check-numbers", "off", "--no-convert", "--tesseract", sys.executable,
+                    "--format", "json"]
+            for mode, reason, detail in (
+                ("permission", "ocr_route_unavailable", "could not start tesseract (EACCES)"),
+                ("space", "ocr_failed", "could not start tesseract (ENOSPC)"),
+                ("timeout", "ocr_failed", "tesseract timed out"),
+                ("killed", "ocr_failed", "tesseract terminated by signal 9"),
+                ("dimensions", "ocr_failed", "tesseract rejected the image dimensions"),
+                ("missing", "ocr_failed", "tesseract produced no TSV output"),
+                ("empty", "ocr_failed", "tesseract produced invalid TSV output"),
+                ("malformed", "ocr_failed", "tesseract produced invalid TSV output"),
+                ("nonfinite", "ocr_failed", "tesseract produced invalid TSV output"),
+            ):
+                with self.subTest(mode=mode):
+                    out, err = io.StringIO(), io.StringIO()
+
+                    def run(argv, **kwargs):
+                        if argv[-1] == "--version":
+                            if mode == "permission":
+                                raise PermissionError(errno.EACCES, "hidden", str(folder))
+                            return subprocess.CompletedProcess(argv, 0, b"tesseract 5.5.3\n", b"")
+                        self.assertEqual(argv[argv.index("-l") + 1], "phist_v2")
+                        if mode == "space":
+                            raise OSError(errno.ENOSPC, "hidden", str(folder))
+                        if mode == "timeout":
+                            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+                        if mode == "killed":
+                            return subprocess.CompletedProcess(argv, -9, b"", b"")
+                        if mode == "dimensions":
+                            return subprocess.CompletedProcess(argv, 1, b"", b"Image too large: (32768, 32)")
+                        tsv = Path(argv[2]).with_suffix(".tsv")
+                        if mode == "empty":
+                            tsv.touch()
+                        if mode in {"malformed", "nonfinite"}:
+                            left = "?" if mode == "malformed" else "NaN"
+                            tsv.write_text("level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\t"
+                                           "top\twidth\theight\tconf\ttext\n"
+                                           f"5\t1\t1\t1\t1\t1\t{left}\t2\t18\t23\t90\tabc\n", encoding="utf-8")
+                        return subprocess.CompletedProcess(argv, 0, b"", b"")
+
+                    with (mock.patch.dict(os.environ, {"TESSDATA_PREFIX": tmp}),
+                          mock.patch.object(tesseract.subprocess, "run", run),
+                          redirect_stdout(out), redirect_stderr(err)):
+                        self.assertEqual(cli(args), 0)
+                    record = json.loads(out.getvalue())
+                    self.assertEqual(heocr.validate(record), [])
+                    self.assertEqual(record["blocks"], [])
+                    self.assertEqual(record["pages"][0]["route"], "none")
+                    self.assertEqual(record["unread"][0]["reason"], reason)
+                    self.assertIn(detail, record["unread"][0]["detail"])
+                    self.assertIn(detail, err.getvalue())
+                    self.assertNotIn(tmp, out.getvalue() + err.getvalue())
+
     def test_every_path_flags_a_timed_out_or_failed_call(self) -> None:
         for function, module, test_id, on_page in PATHS:
             for mode in ("timeout", "failure"):
