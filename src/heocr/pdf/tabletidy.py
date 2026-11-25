@@ -7,6 +7,10 @@ reshaped. Each step is a listed rule, flagged on the table:
   spanning it loses one column. Without rulings an all-empty column cannot be seen on the page; it is the detector's.
 - ``table_empty_rows_dropped``: a row whose cells are all empty, with no cell spanning into or out of it, is removed:
   without rulings a blank row cannot be seen on the page either.
+- ``table_labels_rejoined``: a label printed across a column line at the end of a row (a matrix's diagonal label,
+  wider than its column) is one cell again. This applies when the row's last two filled cells hold one line of letters
+  each, sit a word space apart on one baseline, and every cell after them is empty: the second joins the first, and its
+  cell is left empty.
 - ``table_enumerators_joined``: a first column that holds only margin enumerators ("(1)", "2.", "(א)") in a
   minority of rows is joined to the label column: each enumerator prefixes the label beside it, and the column goes
   (0032 gold convention d: an enumerator printed outside the grid joins its row label).
@@ -83,6 +87,39 @@ def drop_empty_rows(block: Block) -> int:
     return 0
 
 
+WORD_SPACE = 0.6  # share of the line height: a gap this small between two cells' text is a word space
+
+
+def _letters(cell: Cell) -> bool:
+    text = cell.text.strip()
+    return bool(text) and "\n" not in text and not any(ch.isdigit() for ch in text)
+
+
+def rejoin_spilled_labels(block: Block) -> int:
+    joined = 0
+    for row in block.cells:
+        filled = [i for i, c in enumerate(row) if c.text.strip()]
+        if len(filled) < 2:
+            continue
+        first, second = row[filled[-2]], row[filled[-1]]
+        if filled[-1] != filled[-2] + 1 or any("merged_above" in c.flags for c in (first, second)):
+            continue
+        if not (_letters(first) and _letters(second)) or len(first._lines or []) != 1 or len(second._lines or []) != 1:
+            continue
+        a, b = _line_box(first._lines[0]), _line_box(second._lines[0])
+        if a is None or b is None:
+            continue
+        height = max(a[3] - a[1], b[3] - b[1], 1.0)
+        gap = max(a[0], b[0]) - min(a[2], b[2])   # the space between the two text boxes, in either order
+        if abs((a[1] + a[3]) / 2 - (b[1] + b[3]) / 2) > 0.3 * height or gap > WORD_SPACE * height:
+            continue
+        first.text = f"{first.text.strip()} {second.text.strip()}"
+        first._lines = [[first.text, [min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3])]]]
+        second.text, second._lines = "", []
+        joined += 1
+    return joined
+
+
 def _line_box(line):
     return line[1] if line and len(line) > 1 else None
 
@@ -145,6 +182,8 @@ def tidy(block: Block) -> None:
         return
     if join_enumerators(block):
         block.flags.append("table_enumerators_joined")
+    if rejoin_spilled_labels(block):
+        block.flags.append("table_labels_rejoined")
     if split_section_rows(block):
         block.flags.append("table_section_rows_split")
     if drop_empty_columns(block):

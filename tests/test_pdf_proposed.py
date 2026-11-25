@@ -229,6 +229,22 @@ class TidyTests(unittest.TestCase):
         self.assertEqual([[c.text for c in row] for row in b.cells], [["א", "1"], ["ב", "2"], ["", ""], ["ג", "3"]])
         self.assertIn("table_empty_rows_dropped", b.flags)
 
+    def test_a_label_spilling_across_a_column_line_is_rejoined_but_spaced_headers_are_not(self):
+        from heocr.contract import Cell
+        from heocr.pdf.tabletidy import tidy
+
+        def cell(text, x0, x1, y=100.0):
+            return Cell(text, _lines=[[text, [x0, y, x1, y + 10]]])
+        # a matrix row: values, then a two-word label printed across the next column line (3 points apart)
+        spilled = [cell("12.5", 300, 320), cell("כפר", 262, 280), cell("ירוק", 235, 259), Cell(""), Cell("")]
+        # a header row: the last two headers sit a column gap apart (20 points)
+        header = [cell("שם", 300, 320, 80), cell("סכום", 250, 280, 80), cell("הערות", 200, 230, 80), Cell(""), Cell("")]
+        b = self.block([header, spilled])
+        tidy(b)
+        self.assertEqual([c.text for c in b.cells[1]], ["12.5", "כפר ירוק", ""])
+        self.assertEqual([c.text for c in b.cells[0]], ["שם", "סכום", "הערות"])  # the all-empty columns are dropped too
+        self.assertIn("table_labels_rejoined", b.flags)
+
     def test_ruled_tables_are_never_reshaped(self):
         from heocr.contract import Block, Cell
         from heocr.pdf.tabletidy import tidy
