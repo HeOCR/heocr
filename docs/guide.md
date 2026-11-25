@@ -462,8 +462,8 @@ all local weights and configurations against the [detector pins](../src/heocr/ta
 Place the candidate files in `heocr--heron-phone/` under the same model directory.
 This requires `docling-ibm-models==4.0.4` and `transformers==5.24.1` alongside the
 `tables` extra. Pages where the detector runs carry `table_detector_heron_phone`,
-including pages where it finds no regions. This option depends on the caller's
-table-proposal route; enabling it does not enable phone proposals by itself.
+including pages where it finds no regions. For phone images, also enable the
+[phone proposal route](https://github.com/HeOCR/heocr/pull/256).
 
 ### Form label and value associations
 
