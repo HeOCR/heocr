@@ -93,6 +93,7 @@ where it needs to read pixels. Add a route when the input calls for one.
 | Scan with columns, mixed-direction lines or possible tables | `--ocr-layout v1 -f json` | Applies geometric layout to OCR. JSON keeps the structure and flags. [Geometric OCR layout](#geometric-ocr-layout) |
 | Borderless table in a PDF, including a scanned PDF | Install `heocr[tables]`, then use `--tables tableformer --tables-models DIR` | Local model weights. [Learned tables extra](#learned-tables-extra) |
 | Scanned book in historical Hebrew | `--ocr-router v2 --ocr-old-print-model PATH` | Tries the pinned local P-hist v2 on OCR pages with corroborating historical evidence. [Historical print](#historical-print-with-router-v2) |
+| Page or line with known print category | `--ocr-router specialist --ocr-category pointed` | Selects a local reader for the category and capture. [Specialist routing](#specialist-routing) |
 | Experimental hosted OCR for an approved document | Start with `--ocr-hybrid haiku --ocr-hybrid-dry-run` | Local cost estimate. The hybrid route is parked for launch. [Haiku hybrid OCR](#haiku-hybrid-ocr) |
 
 ### Capture router v2
@@ -104,6 +105,48 @@ You can override classification with `--ocr-capture-type` or `ocr_capture_type=`
 The PDF reader still uses readable text layers. Use `--force-ocr` to read a rendered PDF page in place of its text layer. Declare phone captures wrapped in PDF to select modern_v1.
 
 Install the optional Rivok Labs model with `heocr --download-model heb_rivok`. HeOCR checks the download before keeping it in the model cache (`HEOCR_MODELS` when set). OCR reads the local file. The router stays opt-in while carrier-matched DEV validation is pending.
+
+### Specialist routing
+
+Use `heocr page.png --ocr-router specialist --ocr-category old-rabbinic` or
+`heocr.extract("page.png", ocr_router="specialist", ocr_category="old-rabbinic")`.
+For an isolated line, add `--psm 7` or `ocr_psm=7`. A category declaration
+applies to the input. Supply pages or line crops separately when their categories differ.
+
+| Category | Built-in local model |
+| --- | --- |
+| `modern-unpointed` | HeOCR modern_v1 |
+| `pointed` | Rivok Lite int8 |
+| `old-rabbinic` | HeOCR oldprint_v1 |
+| `phone` | HeOCR modern_v1 |
+
+The router uses camera evidence or a capture declaration to choose the `phone`
+category when you omit the category. For other print categories, pass the
+category you know. It uses the ordinary default (modern_v1, with the existing
+stock Hebrew fallback) when the table has no match or the specialist cannot be loaded.
+Install named models explicitly with `--download-model` when they are absent.
+
+Pass `--ocr-specialist-config routes.json` to replace the built-in table.
+For a given category, a rule with a matching `capture` takes precedence over
+the generic category rule. Capture values include `iphone`, `pixel`, `phone`,
+`camera-photo`, `scanner`, `issuer-render` and `pdf-render`.
+
+```json
+{
+  "schema": "heocr.specialists.v1",
+  "routes": [
+    {"category": "modern-unpointed", "model": "heocr_modern_v1"},
+    {"category": "modern-unpointed", "capture": "scanner", "model": "heb_rivok"}
+  ]
+}
+```
+
+A custom rule's `model` may also be an object with a `path` to a local
+`.traineddata` file and its full `sha256`. Relative paths are relative to
+the config file. Custom checkpoints must preserve the exact Rivok Full
+float LSTM unicharset and recoder. The named models keep their original
+codecs. The OCR record captures the config SHA-256, the actual model and the
+codec parent for a loaded custom checkpoint. [Built-in routing table](../src/heocr/models_data/specialists.json)
 
 See the [HeOCR component model card](../src/heocr/models_data/MODEL_CARD.heb_rivok.md) for the immutable weight pin and upstream credits. The package includes Rivok's [Apache-2.0 licence](../src/heocr/models_data/LICENSE.heb_rivok) and [NOTICE](../src/heocr/models_data/NOTICE.heb_rivok).
 

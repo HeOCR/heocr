@@ -39,17 +39,32 @@ def engine_for(doc: "Document") -> Tesseract | None:
     if doc._ocr_engine is None and doc._ocr_error is None:
         requested_model = model = settings.get("model")
         capture = settings.get("capture_type")
-        if capture is None and model is not None and _bundled_missing(model):
-            # A bundled model whose file is not here (an install from the repository): stock Tesseract reads
-            # instead, and the document says so. Never silent.
-            if "bundled_model_unavailable" not in doc.flags:
-                doc.flags.append("bundled_model_unavailable")
-            model = None
+        specialist = settings.get("specialist")
+        selection, route = specialist if specialist is not None else (None, None)
+        engine = None
+        if selection is not None and selection.name != model:
+            try:
+                engine = Tesseract.find(settings["cmd"], lang=settings["lang"], psm=settings["psm"],
+                                        **selection.engine_options())
+                if parent := selection.check_codec(engine):
+                    route = {**route, "codec_parent_sha256": parent}
+            except OcrUnavailable:
+                engine = None
+                route = {**route, "reason": "specialist_unavailable", "unavailable": selection.name}
+                doc.flags.append("ocr_specialist_unavailable")
         try:
-            engine = Tesseract.find(
-                settings["cmd"], lang=settings["lang"], psm=settings["psm"], model=model
-            )
-            if capture is not None:
+            if engine is None:
+                if (capture is None or specialist is not None) and model is not None and _bundled_missing(model):
+                    # Source-built wheels can lack the bundled model. Retain the normal stock fallback.
+                    if "bundled_model_unavailable" not in doc.flags:
+                        doc.flags.append("bundled_model_unavailable")
+                    model = None
+                engine = Tesseract.find(settings["cmd"], lang=settings["lang"], psm=settings["psm"], model=model)
+            if route is not None:
+                engine.route = {**route, "model": engine.lang}
+                if model is None:
+                    engine.route["fallback_unavailable"] = requested_model
+            elif capture is not None:
                 engine.route = {"mode": "capture", "capture_type": capture, "model": settings["model"],
                                 "reason": settings["capture_reason"]}
             elif requested_model is not None:

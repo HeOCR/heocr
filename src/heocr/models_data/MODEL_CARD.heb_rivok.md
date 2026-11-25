@@ -23,3 +23,12 @@ HeOCR's wheels. The router remains opt-in pending carrier-matched DEV validation
 
 Use a distinct filename for a custom or adapted checkpoint. The name
 `heb_rivok.traineddata` identifies the exact int8 release above in HeOCR.
+
+## Rivok Lite v2.0 int8
+
+The experimental pointed category can use the Hebrew-only Lite model from
+the same upstream revision and licence. Lite derives from the upstream
+Tesseract `heb` model and retains its own codec. The optional download
+`heocr --download-model heb_rivok_lite` verifies a size of 3,486,882 bytes
+and SHA-256 `59da073ad0bca9449fa5a965996e49d0e2bee3c17e8b0b4e2769d67a7ce34c40`.
+[Pinned Lite weights](https://huggingface.co/Rivok/tesseract-heb-rivok/resolve/9253cacf097ab396a2fc36d633737c43af5c28a3/tessdata/heb_rivok_lite.traineddata)
