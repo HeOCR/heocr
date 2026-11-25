@@ -82,6 +82,10 @@ def _parser() -> argparse.ArgumentParser:
                         help="opt into OCR routing by capture type (declaration, PDF render or camera metadata)")
     parser.add_argument("--ocr-layout", choices=("v1",),
                         help="enable geometric OCR layout for columns, cells, mixed runs and clipped edges")
+    parser.add_argument("--tables", choices=("tableformer",),
+                        help="opt into local TableFormer table proposals")
+    parser.add_argument("--tables-models", type=Path, metavar="DIR",
+                        help="directory holding the pinned TableFormer and layout models")
     parser.add_argument("--ocr-old-print-model", metavar="MODEL",
                         help="enable historical-print detection with router v2 and a pinned local P-hist v2 model")
     parser.add_argument("--ocr-hybrid", choices=("haiku",),
@@ -223,7 +227,14 @@ def main(argv: list[str] | None = None) -> int:
             convert_timeout=args.convert_timeout,
             max_pages=args.max_pages,
             time_limit=args.time_limit,
+            tables=args.tables,
+            tables_models=args.tables_models,
         )
+    except ImportError as exc:
+        if args.tables is None:
+            raise
+        print(f"heocr: {exc}", file=sys.stderr)
+        return 1
     except (OSError, ValueError) as exc:
         print(f"heocr: {exc}", file=sys.stderr)
         return 1

@@ -204,7 +204,7 @@ def extract(
     cells itself, from the page's text layer or, on a page read by OCR, cell by cell (camera photos
     are skipped); ruled tables keep first claim.
     ``tables_models`` is the local directory holding the pinned weights (see ``heocr.tableformer``);
-    nothing is downloaded.
+    nothing is downloaded. Explicit table proposals can be combined with the fast-mix profiles.
     ``time_limit`` is a safety net, in seconds, for the whole document (conversion and OCR
     included); there is none by default, so a record does not depend on the machine's speed.
     It is checked before each page, image frame, embedded image and page of number checks: a
@@ -236,7 +236,7 @@ def extract(
         not ocr or ocr_lang != DEFAULT_LANG or ocr_psm != DEFAULT_PSM or ocr_model != DEFAULT_MODEL
         or check_numbers != "suspect" or ocr_number_batch or ocr_line_batch or ocr_phone_geometry
         or any(value is not None for value in (crnn_model, handwriting, ocr_hybrid, ocr_old_print_model,
-              ocr_line_v6, tables, photo_preprocess, phone_model, phone_model_sha256, ocr_phone_max_edge))
+              ocr_line_v6, photo_preprocess, phone_model, phone_model_sha256, ocr_phone_max_edge))
     ):
         raise ValueError(f"{fast_mix_profile} fixes the Hebrew PSM 3 reader, layout, and reread settings")
     if ocr_router is not None and ocr_router != "v2":
