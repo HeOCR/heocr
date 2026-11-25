@@ -60,7 +60,7 @@ from heocr.pdf.ocrtables import (
     image_rulings, isolated_cell_text, tables_in,
 )
 from heocr.pdf.perspective import rectify_grid
-from heocr.pdf.proposed import merge_proposals
+from heocr.pdf.proposed import PROPOSED, image_spans, merge_proposals
 from heocr.pdf.tables import find_tables, rulings, table_blocks
 from heocr.pdf.tabletidy import tidy
 from heocr.textflags import is_private_use, text_flags
@@ -1341,6 +1341,34 @@ def _table_proposals(doc: Document, index: int, tables, width: float, height: fl
     return merged, (["tableformer_tables"] if len(merged) > len(tables) else [])
 
 
+def _ocr_table_proposals(doc: Document, index: int, image, scale: float, grids, camera_jpeg: bool):
+    """Ruled grids found in a page image plus non-overlapping TableFormer proposals, and the page flags.
+
+    Docling sees the page image exactly as heocr reads it (after any straightening), wrapped in a one-page PDF of
+    the same size in points, so the proposals' boxes meet the image. A camera photo is skipped: its warped rows do
+    not fit an upright grid, and the phone geometry path reads it.
+    """
+    settings = doc._ocr_settings or {}
+    if camera_jpeg or settings.get("phone_geometry"):
+        return grids, ["table_proposals_skipped_camera"]
+    if time_up(doc):
+        return grids, []
+    import io
+
+    gray = image.convert("L")
+    body = io.BytesIO()
+    gray.save(body, "PDF", resolution=scale * 72)
+    try:
+        proposals = doc._table_proposer.page_tables(body.getvalue(), 0, image.width / scale, image.height / scale)
+    except Exception as exc:  # the optional proposer failing never stops the reading
+        if "table_proposer_failed" not in doc.flags:
+            doc.flags.append("table_proposer_failed")
+        doc.unread.append(Unread(scope="page", reason="table_proposer_failed", page=index, detail=str(exc)[:200]))
+        return grids, ["table_proposer_failed"]
+    merged = merge_proposals(grids, proposals, spans=lambda box: image_spans(gray, scale, box, INK_LEVEL))
+    return merged, (["tableformer_tables"] if len(merged) > len(grids) else [])
+
+
 def _read_region(doc: Document, index: int, atoms: list[Atom], tables, built: PageLines | None, repairs_on: bool) -> dict:
     """Read one region of a text-layer page (the page, or one half of a spread): ruled tables,
     side-by-side rows, then lines. Blocks are appended in reading order, tables by their top edge."""
@@ -2398,6 +2426,10 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
             deskew = 0.0
     # Ruled tables in the image are read cell by cell; the rest of the page once, without them (D3e).
     rectified = rectify_grid(image, scale, tolerate_gaps=camera_jpeg) if not grids else None
+    if doc._table_proposer is not None and rectified is None:
+        # Learned proposals (D3g) read cell by cell like ruled grids; ruled grids keep first claim.
+        grids, proposal_flags = _ocr_table_proposals(doc, index, image, scale, grids, camera_jpeg)
+        flags = flags + proposal_flags
     rectified_read = None
     page_failed = False
     last_page = index + 1 >= min(doc.page_count or index + 1, doc._max_pages)
@@ -2631,6 +2663,8 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
             t_blocks, in_cells = _ocr_tables(doc, index, engine, table_image, scale, grids,
                                             None if numbers is engine else numbers,
                                             **({"form_probe": form_probe} if form_probe else {}))
+        for block in t_blocks:
+            tidy(block)  # D3g: learned proposals only; ruled grids are never reshaped
         _place_tables(doc, first, t_blocks)
         read += in_cells
         flags = flags + ["ocr_tables"]
@@ -2904,7 +2938,7 @@ def _ocr_tables(doc: Document, index: int, engine, image, scale: float, grids, n
                 doc.unread.append(Unread(scope="page", reason="table_row_ink_unread", page=index, bbox=bbox, detail=f"{inked} inked cells, OCR read none"))
             rows.append(out_row)
         _flag_cells_out_of_column(doc, index, grid, rows, (ox, oy))
-        flags = ["ruled_table", "ocr_unverified", *grid.flags]
+        flags = ([] if PROPOSED in grid.flags else ["ruled_table"]) + ["ocr_unverified", *grid.flags]
         if unread_cells:
             flags.append("table_cells_ink_unread")
         if preserved:
