@@ -406,6 +406,22 @@ or colon-labelled fields on the same line or aligned row. OCR text and
 table exports retain their original readings. The option adds structure
 to the existing reads and does not call another model.
 
+### Structured form output
+
+`heocr application.pdf -f forms -o form.json` writes an array of
+`hdoc_form.v1` records. In Python, use
+`heocr.extract(source, form_fields=True).to_forms()`. The array holds
+one supported form per input and is empty when HeOCR found no fields.
+
+Each form contains sections and fields with label, value, kind, slot,
+and source page where available. Side-by-side label/value grids can
+produce a group with a column count and children in reading order.
+Standalone tables inside the form retain their cells and spans.
+Printed checkbox states are `checked` or `unchecked`; printed choice
+lists give the marked option. Explicit blank values use the empty string.
+The export uses the existing readings and leaves the text and document
+JSON intact.
+
 ### Historical print with router v2
 
 ```sh

@@ -303,6 +303,12 @@ class Document:
 
         return [to_csv(block) for block in tables(self)]
 
+    def to_forms(self) -> list[dict[str, Any]]:
+        """Form structure inferred from this reading. Enable form_fields when extracting D3h pairs."""
+        from heocr.form_export import export
+
+        return export(self)
+
     # -- record ------------------------------------------------------------
     def to_dict(self) -> dict[str, Any]:
         from heocr import __version__

@@ -14,7 +14,7 @@ from heocr.handwriting import HandwritingConfig
 from heocr.ocr.phone_profile import PHONE_PROFILES
 from heocr.ocr.routes import CAPTURE_MODELS, FAST_MIX_PROFILES, FAST_MIX_V3
 
-_FORMATS = ("text", "markdown", "json", "docx", "xlsx", "csv")
+_FORMATS = ("text", "markdown", "json", "docx", "xlsx", "csv", "forms")
 _BY_SUFFIX = {".md": "markdown", ".markdown": "markdown", ".json": "json", ".txt": "text", ".docx": "docx", ".xlsx": "xlsx", ".csv": "csv"}
 
 
@@ -30,7 +30,7 @@ def _parser() -> argparse.ArgumentParser:
         "-f",
         "--format",
         choices=_FORMATS,
-        help="output format: text, markdown, json, docx (a Word file), xlsx (the tables, a sheet each) or csv (the tables: one file each with -o NAME.csv as NAME-1.csv, NAME-2.csv..., else separated by an empty line) (default: from the output suffix, else text)",
+        help="output format: text, markdown, json, forms (hdoc_form.v1 JSON), docx (a Word file), xlsx (the tables, a sheet each) or csv (the tables: one file each with -o NAME.csv as NAME-1.csv, NAME-2.csv..., else separated by an empty line) (default: from the output suffix, else text)",
     )
     parser.add_argument(
         "--no-repairs",
@@ -232,7 +232,7 @@ def main(argv: list[str] | None = None) -> int:
             crnn_sha256=args.crnn_sha256,
             handwriting=handwriting,
             check_numbers=False if args.check_numbers == "off" else args.check_numbers,
-            form_fields=args.form_fields,
+            form_fields=args.form_fields or fmt == "forms",
             convert=not args.no_convert,
             soffice=args.soffice,
             convert_timeout=args.convert_timeout,
@@ -259,6 +259,8 @@ def main(argv: list[str] | None = None) -> int:
         out = doc.to_xlsx()
     elif fmt == "json":
         out = doc.to_json() + "\n"
+    elif fmt == "forms":
+        out = json.dumps(doc.to_forms(), ensure_ascii=False, indent=2) + "\n"
     elif fmt == "markdown":
         out = doc.markdown
     else:
