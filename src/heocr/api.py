@@ -19,7 +19,7 @@ from heocr.contract import MAX_PAGES, Document, Unread
 from heocr.convert import CONVERSIONS, CONVERT_TIMEOUT
 from heocr.handwriting import HandwritingConfig, HandwritingReader
 from heocr.identify import identify
-from heocr.ocr.routes import FAST_MIX_V1
+from heocr.ocr.routes import FAST_MIX_PROFILES, FAST_MIX_V2
 from heocr.ocr.tesseract import DEFAULT_LANG, DEFAULT_PSM, _temporary_models, check_settings
 
 # The default OCR model: HeOCR's modern-print model, bundled in the package (``heocr.models``).
@@ -88,6 +88,9 @@ def extract(
     ocr_phone_geometry: bool = False,
     ocr_phone_max_edge: int | None = None,
     profile: str | None = None,
+    ocr_phone_latin_edges: bool = False,
+    ocr_oblique_rivok: bool = False,
+    ocr_issuer_staggered_lanes: bool = False,
     phone_model: str | os.PathLike[str] | None = None,
     phone_model_sha256: str | None = None,
     force_ocr: bool = False,
@@ -155,6 +158,9 @@ def extract(
     ``profile="fast-mix-v1"`` uses this fast phone path with a 1,700-pixel cap.
     For declared scans and issuer renders it uses Rivok Full and modern v1 respectively,
     with layout v1 and number rereads off. It requires the pinned local models.
+    ``profile="fast-mix-v2"`` enables three refinements to that recipe. Use
+    ``ocr_phone_latin_edges``, ``ocr_oblique_rivok`` or
+    ``ocr_issuer_staggered_lanes`` with fast-mix-v1 to exercise each refinement alone.
     ``photo_preprocess="gray-otsu"`` sends grayscale rasters to the main Tesseract reader
     with internal Otsu thresholding on standalone photos. Use a phone capture declaration
     when camera metadata is unavailable.
@@ -220,14 +226,19 @@ def extract(
     if ocr:
         check_settings(ocr_lang, ocr_psm)
     ocr_model = MODEL_ALIASES.get(ocr_model, ocr_model) if isinstance(ocr_model, str) else ocr_model
-    fast_mix = profile == FAST_MIX_V1
+    fast_mix_profile = profile if profile in FAST_MIX_PROFILES else None
+    fast_mix = fast_mix_profile is not None
+    if (ocr_phone_latin_edges or ocr_oblique_rivok or ocr_issuer_staggered_lanes) and not fast_mix:
+        raise ValueError("the phone and issuer refinements need a fast-mix profile")
+    if fast_mix_profile == FAST_MIX_V2:
+        ocr_phone_latin_edges = ocr_oblique_rivok = ocr_issuer_staggered_lanes = True
     if fast_mix and (
         not ocr or ocr_lang != DEFAULT_LANG or ocr_psm != DEFAULT_PSM or ocr_model != DEFAULT_MODEL
         or check_numbers != "suspect" or ocr_number_batch or ocr_line_batch or ocr_phone_geometry
         or any(value is not None for value in (crnn_model, handwriting, ocr_hybrid, ocr_old_print_model,
               ocr_line_v6, tables, photo_preprocess, phone_model, phone_model_sha256, ocr_phone_max_edge))
     ):
-        raise ValueError("fast-mix-v1 fixes the Hebrew PSM 3 reader, layout, and reread settings")
+        raise ValueError(f"{fast_mix_profile} fixes the Hebrew PSM 3 reader, layout, and reread settings")
     if ocr_router is not None and ocr_router != "v2":
         raise ValueError("ocr_router must be 'v2'")
     if ocr_layout is not None and (ocr_layout != "v1" or not ocr):
@@ -300,11 +311,11 @@ def extract(
         if ocr_capture_type is None:
             classified = classify_capture(body, kind.format)
             if classified[0] not in PHOTO_CAPTURES:
-                raise ValueError("fast-mix-v1 needs --ocr-capture-type for a scan or issuer render")
+                raise ValueError(f"{fast_mix_profile} needs --ocr-capture-type for a scan or issuer render")
             ocr_capture_type = classified[0]
         if ocr_capture_type in PHOTO_CAPTURES:
             if kind.format not in IMAGE_FORMATS:
-                raise ValueError("fast-mix-v1 phone OCR requires a standalone image")
+                raise ValueError(f"{fast_mix_profile} phone OCR requires a standalone image")
             profile = PHONE_SPECIALIST_FAST
             ocr_phone_max_edge = 1700
         else:
@@ -399,7 +410,16 @@ def extract(
         if pin is not None:
             doc._ocr_settings["phone_model"] = pin
     if fast_mix:
-        doc.options["ocr"].setdefault("profile", {})["name"] = FAST_MIX_V1
+        doc.options["ocr"].setdefault("profile", {})["name"] = fast_mix_profile
+        if ocr_phone_latin_edges and phone_profile is not None:
+            doc._ocr_settings["phone_latin_edges"] = True
+            doc.options["ocr"]["phone_latin_edges"] = True
+        if ocr_oblique_rivok and phone_profile is not None:
+            doc._ocr_settings["oblique_rivok"] = True
+            doc.options["ocr"]["oblique_line_model"] = "heb_rivok"
+        if ocr_issuer_staggered_lanes and ocr_capture_type == "issuer-render":
+            doc._ocr_settings["issuer_staggered_lanes"] = True
+            doc.options["ocr"]["issuer_staggered_lanes"] = True
     if ocr_old_print_model is not None:
         from heocr.ocr.old_print import PHIST_V2_SHA256
 

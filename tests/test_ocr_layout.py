@@ -5,7 +5,7 @@ from unittest import mock
 from PIL import Image, ImageDraw
 
 import heocr
-from heocr.ocr.layout import clip_guard, column_order, normalize_ltr
+from heocr.ocr.layout import clip_guard, column_order, normalize_ltr, staggered_lanes
 from heocr.ocr.tesseract import OcrLine, OcrResult, OcrWord, Tesseract
 from heocr.pdf.ocrrows import table_rows
 
@@ -39,6 +39,19 @@ def prose(side, y):
 
 
 class LayoutTest(unittest.TestCase):
+    def test_staggered_lanes_split_two_bridges_and_read_the_right_lane_first(self):
+        left = [prose("שמאל", y) for y in range(30, 175, 17)]
+        right = [prose("ימין", y) for y in range(205, 350, 17)]
+        bridges = [line([*prose("ימין", y).words, *prose("שמאל", y).words]) for y in (181, 195)]
+        initial = [*left, *bridges, *right]
+        ordered = staggered_lanes(initial, 800)
+        self.assertEqual([row.text.split()[0] for row in ordered], ["ימין"] * 11 + ["שמאל"] * 11)
+        self.assertEqual(ordered[0].bbox, prose("ימין", 181).bbox)
+        self.assertEqual(sum(len(row.words) for row in ordered), sum(len(row.words) for row in initial))
+        self.assertIsNone(staggered_lanes([*left, bridges[0], *right], 800))
+        spanning = line([*bridges[1].words, word("חוצה", 375, 195, 70)])
+        self.assertIsNone(staggered_lanes([*left, bridges[0], spanning, *right], 800))
+
     def test_narrow_margin_notes_follow_the_adjacent_body_row(self):
         body = [line([word("מילה", 260, y), word("שורה", 520, y), word("מבחן", 720, y)])
                 for y in range(30, 530, 38)]

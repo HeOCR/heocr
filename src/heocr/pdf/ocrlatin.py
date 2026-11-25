@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from math import ceil, floor
 import re
+from statistics import median
 
 from heocr.ocr.tesseract import OcrUnavailable, OcrWord
 
@@ -12,6 +13,7 @@ LATIN_MIN_CONFIDENCE = 80
 LATIN_LINES_PER_PAGE = 8
 WORD_OVERLAP = 0.8
 LATIN_TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9'._/@:+-]*")
+EDGE_IDENTIFIER = re.compile(r"[A-Za-z][A-Za-z0-9._@/+:-]*[-_/][A-Za-z0-9._@/+:-]+")
 HEBREW = re.compile(r"[א-ת]")
 HEBREW_WORD = re.compile(r"[א-ת]+")
 BIDI_FORMAT = str.maketrans("", "", "\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069")
@@ -158,3 +160,57 @@ def reread_latin_runs(image, dpi, lines, english, english_size, get_reviewer):
         reviewed += 1
         if reviewed >= LATIN_LINES_PER_PAGE:
             break
+
+
+def reread_latin_edges(image, dpi, lines, reader):
+    """Use agreeing English reads of isolated identifier lines at the text edges."""
+    if not 5 <= len(lines) <= 80:
+        return 0
+    vertical = sorted(lines, key=lambda line: line.bbox[1])
+    edges = ((vertical[0], vertical[1].bbox[1] - vertical[0].bbox[3]),
+             (vertical[-1], vertical[-1].bbox[1] - vertical[-2].bbox[3]))
+    pad = max(2, round(.15 * median(line.bbox[3] - line.bbox[1] for line in lines)))
+    slots = []
+    for line, gap in edges:
+        x0, y0, x1, y1 = line.bbox
+        if not 1 <= len(line.words) <= 12 or gap < .65 * (y1 - y0) or x1 - x0 > .70 * image.width:
+            continue
+        if sum(char.isdigit() for char in line.text) < 3 or sum(char in "·.-/:" for char in line.text) < 3:
+            continue
+        box = (max(0, floor(x0) - 2 * pad), max(0, floor(y0) - pad),
+               min(image.width, floor(x1) + 2 * pad), min(image.height, floor(y1) + pad))
+        if box[0] < box[2] and box[1] < box[3]:
+            slots.append((line, box))
+    if not slots:
+        return 0
+
+    crops = [image.crop(box) for _, box in slots]
+    try:
+        first = reader.recognize_batch(crops, dpi, psm=7)
+        second = reader.recognize_batch(crops, dpi, psm=13)
+        if len(first) != len(slots) or len(second) != len(slots):
+            raise OcrUnavailable("Latin edge reader returned an incomplete batch")
+    except OcrUnavailable:
+        reader.failures += 1
+        return 0
+    accepted = 0
+    for (line, box), a, b in zip(slots, first, second, strict=True):
+        if len(a.lines) != 1 or len(b.lines) != 1:
+            continue
+        read = a.lines[0]
+        text = read.text
+        if (not read.words or text == line.text or not EDGE_IDENTIFIER.search(text)
+                or len(re.findall(r"[A-Za-z]", text)) < 6):
+            continue
+        if re.sub(r"[^A-Za-z0-9]", "", text) != re.sub(r"[^A-Za-z0-9]", "", b.lines[0].text):
+            continue
+        x, y = box[:2]
+        words = [OcrWord(word.text, [word.bbox[0] + x, word.bbox[1] + y, word.bbox[2] + x, word.bbox[3] + y],
+                         word.confidence) for word in read.words]
+        line.words[:] = words
+        line.confidences[:] = read.confidences
+        line.bbox = _union(words)
+        line.text = text
+        line.latin_runs_reread += 1
+        accepted += 1
+    return accepted

@@ -7,6 +7,7 @@ from unittest import mock
 from PIL import Image, ImageDraw
 
 import heocr
+from heocr.pdf.ocrlatin import reread_latin_edges
 from heocr.ocr.tesseract import OcrLine, OcrResult, OcrWord
 
 BOXES = ([280, 40, 340, 60], [210, 40, 264, 60], [150, 40, 196, 60], [108, 40, 132, 60], [38, 40, 91, 60])
@@ -30,6 +31,23 @@ def invented_image():
 
 
 class LatinRunTest(unittest.TestCase):
+    def test_latin_edge_read_requires_two_agreeing_identifier_reads(self):
+        image = Image.new("L", (400, 250), 255)
+        edge = result(("14/24", "א-1-2"), ([30, 20, 75, 32], [80, 20, 155, 32])).lines[0]
+        body = [result(("שלום",), ([200, y, 350, y + 12],)).lines[0]
+                for y in (65, 100, 135, 170)]
+        first = result(("Region-Doc", "14/24"), ([4, 2, 70, 14], [75, 2, 122, 14]))
+        different = result(("Region-Doc", "15/24"), ([4, 2, 70, 14], [75, 2, 122, 14]))
+        engine = mock.Mock()
+        engine.recognize_batch.side_effect = ([first], [different], [first], [first])
+        self.assertEqual(reread_latin_edges(image, 300, [edge, *body], engine), 0)
+        self.assertEqual(edge.text, "14/24 א-1-2")
+        self.assertEqual(reread_latin_edges(image, 300, [edge, *body], engine), 1)
+        self.assertEqual(edge.text, "Region-Doc 14/24")
+        self.assertEqual(edge.bbox, [30, 20, 148, 32])
+        self.assertEqual(edge.latin_runs_reread, 1)
+        self.assertEqual([line.text for line in body], ["שלום"] * 4)
+
     def extract(self, review, *, english=None, first=FIRST, check_numbers="suspect", uncertain=True):
         primary = mock.Mock(lang="heb", psm=3, version="tesseract invented", route=None)
         primary.recognize.return_value = result(first, BOXES)

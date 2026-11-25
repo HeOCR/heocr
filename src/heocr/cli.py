@@ -12,7 +12,7 @@ from heocr.api import extract
 from heocr.contract import MAX_PAGES
 from heocr.handwriting import HandwritingConfig
 from heocr.ocr.phone_profile import PHONE_PROFILES
-from heocr.ocr.routes import CAPTURE_MODELS, FAST_MIX_V1
+from heocr.ocr.routes import CAPTURE_MODELS, FAST_MIX_PROFILES
 
 _FORMATS = ("text", "markdown", "json", "docx", "xlsx", "csv")
 _BY_SUFFIX = {".md": "markdown", ".markdown": "markdown", ".json": "json", ".txt": "text", ".docx": "docx", ".xlsx": "xlsx", ".csv": "csv"}
@@ -94,12 +94,18 @@ def _parser() -> argparse.ArgumentParser:
                         help="cap the Anthropic list-price cost per document (default: 1.00)")
     parser.add_argument("--ocr-hybrid-dry-run", action="store_true",
                         help="estimate the document's cost upper bound locally without sending anything")
-    parser.add_argument("--profile", choices=(*PHONE_PROFILES, FAST_MIX_V1),
+    parser.add_argument("--profile", choices=(*PHONE_PROFILES, *FAST_MIX_PROFILES),
                         help="use an opt-in phone or mixed-capture OCR profile")
     parser.add_argument("--phone-model", type=Path, metavar="FILE",
                         help="local .traineddata for the phone-specialist line slot")
     parser.add_argument("--phone-model-sha256", metavar="HEX",
                         help="required SHA-256 of the local phone specialist model")
+    parser.add_argument("--ocr-phone-latin-edges", action="store_true",
+                        help="reread isolated mixed-script headers and footers on near phone captures with fast-mix")
+    parser.add_argument("--ocr-oblique-rivok", action="store_true",
+                        help="use local Rivok Full on supported rectified phone lines with fast-mix")
+    parser.add_argument("--ocr-issuer-staggered-lanes", action="store_true",
+                        help="split overlapping OCR lines at a supported issuer lane boundary with fast-mix")
     parser.add_argument("--ocr-phone-geometry", action="store_true",
                         help="reread isolated lines on angled phone images with supported paper edges")
     parser.add_argument("--ocr-phone-max-edge", type=int, metavar="PX",
@@ -202,6 +208,9 @@ def main(argv: list[str] | None = None) -> int:
             ocr_phone_geometry=args.ocr_phone_geometry,
             ocr_phone_max_edge=args.ocr_phone_max_edge,
             profile=args.profile,
+            ocr_phone_latin_edges=args.ocr_phone_latin_edges,
+            ocr_oblique_rivok=args.ocr_oblique_rivok,
+            ocr_issuer_staggered_lanes=args.ocr_issuer_staggered_lanes,
             phone_model=args.phone_model,
             phone_model_sha256=args.phone_model_sha256,
             force_ocr=args.force_ocr,
