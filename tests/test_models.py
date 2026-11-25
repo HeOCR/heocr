@@ -142,6 +142,29 @@ class ModelRouteTest(unittest.TestCase):
                                      "https://example.invalid/rivok", None, "Apache-2.0")
         return {modern.name: modern, rivok.name: rivok}
 
+    def test_fast_mix_uses_the_pinned_single_pass_models(self) -> None:
+        with mock.patch.dict(models.MODELS, self.capture_models()):
+            for capture, name in (("scanner", "heb_rivok"), ("issuer-render", "heocr_modern_v1")):
+                with self.subTest(capture=capture):
+                    self.log.unlink(missing_ok=True)
+                    doc = heocr.extract(SCAN, profile="fast-mix-v1", ocr_capture_type=capture, tesseract=FAKE)
+                    call = self.recognition_call()
+                    self.assertEqual(call[call.index("-l") + 1], name)
+                    self.assertEqual(doc.options["ocr"]["profile"]["name"], "fast-mix-v1")
+                    self.assertEqual(doc.options["ocr"]["layout"], "v1")
+                    self.assertFalse(doc.options["check_numbers"])
+                    self.assertEqual(doc.unread, [])
+
+    def test_fast_mix_missing_model_is_unread_without_stock_fallback(self) -> None:
+        with mock.patch.object(models, "bundled_dir", return_value=self.cache):
+            doc = heocr.extract(SCAN, profile="fast-mix-v1", ocr_capture_type="issuer-render", tesseract=FAKE)
+        self.assertEqual(doc.unread[0].reason, "ocr_route_unavailable")
+        self.assertNotIn("tesseract:heb.traineddata", doc.components)
+        with self.assertRaisesRegex(ValueError, "ocr-capture-type"):
+            heocr.extract(SCAN, profile="fast-mix-v1", tesseract=FAKE)
+        with self.assertRaisesRegex(ValueError, "fixes"):
+            heocr.extract(SCAN, profile="fast-mix-v1", ocr_capture_type="scanner", check_numbers="all")
+
     def test_capture_route_uses_the_declared_model(self) -> None:
         with mock.patch.dict(models.MODELS, self.capture_models()):
             modern = "heocr_modern_v1"

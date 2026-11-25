@@ -19,6 +19,7 @@ from heocr.contract import MAX_PAGES, Document, Unread
 from heocr.convert import CONVERSIONS, CONVERT_TIMEOUT
 from heocr.handwriting import HandwritingConfig, HandwritingReader
 from heocr.identify import identify
+from heocr.ocr.routes import FAST_MIX_V1
 from heocr.ocr.tesseract import DEFAULT_LANG, DEFAULT_PSM, _temporary_models, check_settings
 
 # The default OCR model: HeOCR's modern-print model, bundled in the package (``heocr.models``).
@@ -151,6 +152,9 @@ def extract(
     The page read still uses modern v1. The experimental
     ``profile="phone-specialist-fast"`` skips the two auxiliary page rereads and
     some high-confidence rectified line rereads. Other captures use their usual route.
+    ``profile="fast-mix-v1"`` uses this fast phone path with a 1,700-pixel cap.
+    For declared scans and issuer renders it uses Rivok Full and modern v1 respectively,
+    with layout v1 and number rereads off. It requires the pinned local models.
     ``photo_preprocess="gray-otsu"`` sends grayscale rasters to the main Tesseract reader
     with internal Otsu thresholding on standalone photos. Use a phone capture declaration
     when camera metadata is unavailable.
@@ -216,6 +220,14 @@ def extract(
     if ocr:
         check_settings(ocr_lang, ocr_psm)
     ocr_model = MODEL_ALIASES.get(ocr_model, ocr_model) if isinstance(ocr_model, str) else ocr_model
+    fast_mix = profile == FAST_MIX_V1
+    if fast_mix and (
+        not ocr or ocr_lang != DEFAULT_LANG or ocr_psm != DEFAULT_PSM or ocr_model != DEFAULT_MODEL
+        or check_numbers != "suspect" or ocr_number_batch or ocr_line_batch or ocr_phone_geometry
+        or any(value is not None for value in (crnn_model, handwriting, ocr_hybrid, ocr_old_print_model,
+              ocr_line_v6, tables, photo_preprocess, phone_model, phone_model_sha256, ocr_phone_max_edge))
+    ):
+        raise ValueError("fast-mix-v1 fixes the Hebrew PSM 3 reader, layout, and reread settings")
     if ocr_router is not None and ocr_router != "v2":
         raise ValueError("ocr_router must be 'v2'")
     if ocr_layout is not None and (ocr_layout != "v1" or not ocr):
@@ -281,6 +293,26 @@ def extract(
     kind = identify(body)
     phone_profile = None
     classified = None
+    if fast_mix:
+        from heocr.ocr.phone_profile import PHONE_SPECIALIST_FAST
+        from heocr.ocr.routes import PHOTO_CAPTURES, RIVOK_FULL, classify_capture
+
+        if ocr_capture_type is None:
+            classified = classify_capture(body, kind.format)
+            if classified[0] not in PHOTO_CAPTURES:
+                raise ValueError("fast-mix-v1 needs --ocr-capture-type for a scan or issuer render")
+            ocr_capture_type = classified[0]
+        if ocr_capture_type in PHOTO_CAPTURES:
+            if kind.format not in IMAGE_FORMATS:
+                raise ValueError("fast-mix-v1 phone OCR requires a standalone image")
+            profile = PHONE_SPECIALIST_FAST
+            ocr_phone_max_edge = 1700
+        else:
+            profile = None
+            ocr_layout = "v1"
+            check_numbers = False
+            ocr_model = RIVOK_FULL if ocr_capture_type == "scanner" else DEFAULT_MODEL
+            ocr_router = "v2"
     if profile is not None or phone_model is not None or phone_model_sha256 is not None:
         from heocr.models import MODELS
         from heocr.ocr import phone_profile as specialist
@@ -305,7 +337,7 @@ def extract(
                     "name": profile,
                     "line_model_sha256": pin[1] if pin is not None else MODELS[DEFAULT_MODEL].sha256,
                 }
-    capture_reason = "declared_capture"
+    capture_reason = classified[1] if fast_mix and classified is not None else "declared_capture"
     if ocr_router is not None:
         from heocr.ocr.routes import RIVOK_FULL, classify_capture
 
@@ -366,6 +398,8 @@ def extract(
             doc._ocr_settings["phone_fast"] = True
         if pin is not None:
             doc._ocr_settings["phone_model"] = pin
+    if fast_mix:
+        doc.options["ocr"].setdefault("profile", {})["name"] = FAST_MIX_V1
     if ocr_old_print_model is not None:
         from heocr.ocr.old_print import PHIST_V2_SHA256
 
@@ -406,7 +440,7 @@ def extract(
         return doc
     doc._hybrid = hybrid
     try:
-        with _temporary_models() if phone_profile is not None else nullcontext():
+        with _temporary_models() if phone_profile is not None or fast_mix else nullcontext():
             reader(body, doc)
     finally:
         doc._hybrid = None

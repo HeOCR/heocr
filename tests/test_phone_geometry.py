@@ -199,6 +199,19 @@ class PhoneGeometryTest(unittest.TestCase):
             geometry.assert_called_once()
             self.assertIn("ocr_phone_geometry_rectified", doc.pages[0].flags)
 
+    def test_fast_mix_uses_the_fast_phone_path_and_working_limit(self):
+        raster, _ = phone_page()
+        payload = BytesIO()
+        raster.resize((1800, 2000)).save(payload, format="PNG")
+        with patch("heocr.pdf.reader._ocr_page") as read:
+            doc = extract(payload.getvalue(), profile="fast-mix-v1", ocr_capture_type="pixel")
+            self.assertEqual(doc.options["ocr"]["profile"]["name"], "fast-mix-v1")
+            self.assertEqual(doc.options["check_numbers"], "suspect")
+            self.assertTrue(doc._ocr_settings["phone_fast"])
+            self.assertTrue(doc._ocr_settings["phone_geometry"])
+            self.assertEqual(max(read.call_args.kwargs["rendered"][0].size), 1700)
+        self.assertEqual(_parser().parse_args(["page.jpg", "--profile", "fast-mix-v1"]).profile, "fast-mix-v1")
+
     def test_phone_raster_limit_is_opt_in_and_keeps_source_page_size(self):
         raster, _ = phone_page()
         payload = BytesIO()
