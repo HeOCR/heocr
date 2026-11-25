@@ -12,7 +12,17 @@ pip install git+https://github.com/HeOCR/heocr
 
 HeOCR has no current public package or model release. We will publish a release only after heocr beats existing readers on at least one document type.
 
-The GitHub install has no bundled OCR models. With Tesseract and Hebrew language data installed, the default OCR falls back to stock `heb`. The CLI warns and the record includes `bundled_model_unavailable`. The warning is printed even with `-q`. Use `--ocr-model heb` or `ocr_model="heb"` to select stock explicitly.
+The default OCR model is `heocr_modern_v1`. A plain GitHub build loads it from `HEOCR_MODELS` (or the user model cache) when the pinned file is present. Model-enabled wheels carry the default model in the package. If the model is unavailable, OCR falls back to installed stock `heb` and records `bundled_model_unavailable`. The CLI warns even with `-q`. Use `--ocr-model heb` or `ocr_model="heb"` to select stock explicitly.
+
+To build a candidate wheel from a clean checkout and local pinned model files:
+
+```sh
+python scripts/fetch_models.py --from /path/to/models --model heocr_modern_v1
+python -m pip wheel --no-deps --wheel-dir dist .
+python scripts/fetch_models.py --check-wheel dist/heocr-*.whl --model heocr_modern_v1
+```
+
+Install the verified wheel in a fresh environment. On an inked OCR page, check `ocr.model_route.model` and `producer.components["tesseract:heocr_modern_v1.traineddata"]` in the JSON record. The model SHA-256 is pinned in [the registry](../src/heocr/models.py).
 
 The core needs only pypdfium2, Pillow and defusedxml. It reads text-layer PDFs, DOCX, XLSX, PPTX and HTML on its own. Two optional programs add the rest:
 - **Tesseract,** for scans, images and image regions;

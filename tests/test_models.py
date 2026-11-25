@@ -96,10 +96,28 @@ class ModelRouteTest(unittest.TestCase):
         # instead and the document says so.
         doc = heocr.extract(SCAN, tesseract=FAKE)
         self.assertEqual(doc.to_dict()["options"]["ocr"]["model"], "heocr_modern_v1")
-        self.assertNotIn("model_route", doc.blocks[0].ocr)
+        self.assertEqual(doc.blocks[0].ocr["model_route"],
+                         {"mode": "fixed", "model": "heb", "unavailable": "heocr_modern_v1"})
         self.assertIn("bundled_model_unavailable", doc.flags)
         self.assertEqual(doc.blocks[0].ocr["lang"], "heb")
         self.assertEqual(doc.unread, [])
+
+    def test_the_default_reads_with_verified_bundled_weights(self) -> None:
+        bundled = Path(self.tmp.name) / "bundled"
+        bundled.mkdir()
+        body = b"invented default model"
+        name = "heocr_modern_v1"
+        (bundled / f"{name}.traineddata").write_bytes(body)
+        digest = hashlib.sha256(body).hexdigest()
+        released = models.ReleasedModel(name, digest, len(body), "https://example.invalid/m",
+                                        None, "Apache-2.0", bundled=True)
+        with mock.patch.dict(models.MODELS, {name: released}), mock.patch.object(models, "bundled_dir", return_value=bundled):
+            doc = heocr.extract(SCAN, tesseract=FAKE, check_numbers=False)
+        call = self.recognition_call()
+        self.assertEqual(call[call.index("-l") + 1], name)
+        self.assertEqual(doc.components[f"tesseract:{name}.traineddata"], f"sha256:{digest}")
+        self.assertEqual(doc.blocks[0].ocr["model_route"], {"mode": "fixed", "model": name})
+        self.assertNotIn("bundled_model_unavailable", doc.flags)
 
     def test_short_names_for_the_bundled_models(self) -> None:
         for alias, name in (("modern", "heocr_modern_v1"), ("oldprint", "heocr_oldprint_v1")):
@@ -176,7 +194,7 @@ class ModelRouteTest(unittest.TestCase):
                     self.assertEqual(call[call.index("-l") + 1], model)
                     self.assertEqual(doc.options["ocr"]["router"], {"version": "v2", "reason": reason})
                     self.assertEqual(doc.options["ocr"].get("capture_type"), capture)
-                    self.assertEqual(doc.blocks[0].ocr.get("model_route"), None if capture is None else {
+                    self.assertEqual(doc.blocks[0].ocr.get("model_route"), {"mode": "fixed", "model": model} if capture is None else {
                         "mode": "capture", "capture_type": capture, "reason": reason, "model": model,
                     })
                     self.assertEqual(heocr.validate(doc.to_dict()), [])
@@ -524,6 +542,28 @@ class BundledAndRoutesTest(unittest.TestCase):
                       mock.patch("heocr.models.bundled_dir", return_value=self.bundled)):
             patch.start()
             self.addCleanup(patch.stop)
+
+    def test_wheel_check_requires_the_selected_model_bytes(self) -> None:
+        from zipfile import ZipFile
+
+        from scripts.fetch_models import main as fetch_models
+
+        wheel_path = self.cache / "test.whl"
+        args = ["--check-wheel", str(wheel_path), "--model", self.model.name]
+        member = f"heocr/models_data/{self.model.name}.traineddata"
+        with ZipFile(wheel_path, "w") as wheel:
+            wheel.writestr("heocr/models_data/README.md", b"source-built wheel")
+        with self.assertRaisesRegex(SystemExit, "expected exactly one"):
+            fetch_models(args)
+        for payload in (self.body + b"x", self.body):
+            with ZipFile(wheel_path, "w") as wheel:
+                wheel.writestr(member, payload)
+            if payload == self.body:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(fetch_models(args), 0)
+            else:
+                with self.assertRaisesRegex(SystemExit, "does not match the pinned hash and size"):
+                    fetch_models(args)
 
     def test_a_bundled_model_resolves_without_a_download(self) -> None:
         with self.assertRaises(models.ModelError):

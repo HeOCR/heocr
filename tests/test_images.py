@@ -143,6 +143,26 @@ class ImageInputTest(unittest.TestCase):
         self.assertEqual([p.page_class for p in doc.pages], ["T5", "empty", "T5"])
         self.assertEqual(doc.page_count, 3)
         self.assertEqual(sorted({b.page for b in doc.blocks}), [0, 2])
+        self.assertEqual([(u.page, u.reason) for u in doc.unread], [(1, "ocr_skipped_no_ink")])
+
+    def test_a_sparse_image_has_a_diagnostic_without_running_ocr(self) -> None:
+        from heocr.cli import main
+
+        image = page_image(ink=False, size=(200, 200))
+        image.putpixel((20, 20), 0)
+        source = Path(self.tmp.name) / "sparse.png"
+        source.write_bytes(encoded(image, "PNG"))
+        with mock.patch("heocr.pdf.reader.engine_for") as find:
+            doc = heocr.extract(source, tesseract=FAKE)
+            self.assertEqual(doc.text, "")
+            self.assertEqual(doc.pages[0].route, "none")
+            self.assertEqual([u.reason for u in doc.unread], ["ocr_skipped_no_ink"])
+            self.assertEqual(heocr.validate(doc.to_dict()), [])
+            err = io.StringIO()
+            with mock.patch("sys.stderr", err), mock.patch("sys.stdout", io.StringIO()):
+                self.assertEqual(main([str(source)]), 0)
+            self.assertIn("ocr_skipped_no_ink", err.getvalue())
+            find.assert_not_called()
 
     def test_fax_compressed_tiff(self) -> None:
         bilevel = page_image().point(lambda v: 0 if v < 128 else 255).convert("1")
