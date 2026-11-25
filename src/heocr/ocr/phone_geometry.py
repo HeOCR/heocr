@@ -16,6 +16,7 @@ _RECOGNITION_EDGE = 1700
 _CROP_DPI = 300
 _CROP_PADDING = 12
 _MAX_LINES = 80
+_FAST_NATIVE_CONFIDENCE = 95
 _LTR = re.compile(r"[A-Za-z]+|\d+(?:[.,:/-]\d+)*")
 
 
@@ -269,7 +270,7 @@ def _native_box(inverse, box, size):
     return [max(0, min(xs)), max(0, min(ys)), min(width, max(xs)), min(height, max(ys))]
 
 
-def read_lines(engine, image, result, *, line_engine=None):
+def read_lines(engine, image, result, *, line_engine=None, skip_confident=False):
     """Reread a supported prose block and retain the original on uncertainty."""
     if engine.psm != 3 or not 5 <= len(result.lines) <= _MAX_LINES or not all(line.words for line in result.lines):
         return None
@@ -307,7 +308,9 @@ def read_lines(engine, image, result, *, line_engine=None):
     if (getattr(engine, "version", None) == "tesseract 5.5.3"
             and getattr(engine, "models", None) == {modern.name: modern.sha256}):
         targets = tuple(i for i, group in enumerate(by_band)
-                        if (group and not any(line.number_readings or line.latin_runs_reread for line, _ in group))
+                        if (group and not any(line.number_readings or line.latin_runs_reread for line, _ in group)
+                            and not (skip_confident and len(group) == 1 and group[0][0].confidences
+                                     and min(group[0][0].confidences) >= _FAST_NATIVE_CONFIDENCE))
                         or (not group and used[0] < i < used[-1]))
     if not targets:
         return None

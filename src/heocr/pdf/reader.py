@@ -2477,7 +2477,8 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
     historical = None
     settings = doc._ocr_settings or {}
     layout = settings.get("layout") == "v1"
-    if layout and not (grids or rectified or page_failed or time_up(doc)):
+    phone_fast = settings.get("phone_fast", False)
+    if layout and not (grids or rectified or page_failed or phone_fast or time_up(doc)):
         padded = ocr_layout.clip_guard(engine, page_image, dpi, result)
         if padded is not None:
             result = padded
@@ -2499,7 +2500,7 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
                                            batch=bool(batch_numbers) and doc._deadline is None)
     page_numbers = None
     english_page = None
-    if number_words is not None and PAGE_NUMBER_PASS:
+    if number_words is not None and PAGE_NUMBER_PASS and not phone_fast:
         try:
             page_numbers, english_page = _page_number_pass(numbers, page_image, result, round(scale * 72))
         except OcrUnavailable:
@@ -2567,12 +2568,12 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
             and not (page_failed or unruled or grids or rectified or time_up(doc))):
         from heocr.ocr.phone_geometry import read_lines as read_phone_lines
 
+        line_options = {"skip_confident": True} if phone_fast else {}
         if "phone_model" in settings:
             from heocr.ocr.phone_profile import line_engine
 
-            corrected = read_phone_lines(engine, gray, result, line_engine=lambda: line_engine(doc))
-        else:
-            corrected = read_phone_lines(engine, gray, result)
+            line_options["line_engine"] = lambda: line_engine(doc)
+        corrected = read_phone_lines(engine, gray, result, **line_options)
         if corrected is not None:
             result = corrected
             short, outside_share = short_for_ink(gray, result)

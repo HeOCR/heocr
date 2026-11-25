@@ -183,6 +183,20 @@ In Python, pass `profile="phone-specialist"` and optionally
 and its configured line SHA-256. Accepted rectified reads also record
 `ocr_phone_geometry_line_sha256` in the page signals.
 
+#### Fast phone specialist profile
+
+```sh
+heocr photo.jpg --profile phone-specialist-fast
+```
+
+Use the experimental fast profile when you can trade some rereading for speed.
+It retains local phone geometry, layout and targeted number checks. It skips
+the edge-padding page retry and full-page English sweep for number and Latin
+corrections. When using the pinned modern_v1 weights with Tesseract 5.5.3,
+it also keeps a native line as read if the line maps to one rectified band and
+every word has confidence of at least 95. The profile accepts the same capture
+declaration and local line-model options as the phone specialist.
+
 ### Geometric OCR layout
 
 ```sh

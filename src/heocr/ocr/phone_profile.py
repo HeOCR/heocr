@@ -7,17 +7,19 @@ from heocr.models import MODELS, sha256_of
 from heocr.ocr.tesseract import OcrUnavailable, Tesseract
 
 PHONE_SPECIALIST = "phone-specialist"
+PHONE_SPECIALIST_FAST = "phone-specialist-fast"
+PHONE_PROFILES = (PHONE_SPECIALIST, PHONE_SPECIALIST_FAST)
 MODERN_MODEL = "heocr_modern_v1"
 SPECIALIST_LANG = "phone_specialist"
 
 
 def model_pin(profile, model, sha256):
-    if profile is not None and profile != PHONE_SPECIALIST:
-        raise ValueError(f"profile must be {PHONE_SPECIALIST!r}")
+    if profile is not None and profile not in PHONE_PROFILES:
+        raise ValueError(f"profile must be one of: {', '.join(PHONE_PROFILES)}")
     if model is None and sha256 is None:
         return None
     if profile is None or model is None or sha256 is None:
-        raise ValueError("phone_model and phone_model_sha256 must be supplied together with profile='phone-specialist'")
+        raise ValueError("phone_model and phone_model_sha256 must be supplied together with a phone-specialist profile")
     path = Path(model)
     if path.suffix != ".traineddata" or not isinstance(sha256, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", sha256):
         raise ValueError("phone_model needs a local .traineddata file and a 64-digit SHA-256")
