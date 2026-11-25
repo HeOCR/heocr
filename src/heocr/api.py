@@ -19,7 +19,7 @@ from heocr.contract import MAX_PAGES, Document, Unread
 from heocr.convert import CONVERSIONS, CONVERT_TIMEOUT
 from heocr.handwriting import HandwritingConfig, HandwritingReader
 from heocr.identify import identify
-from heocr.ocr.routes import FAST_MIX_PROFILES, FAST_MIX_V2, FAST_MIX_V3
+from heocr.ocr.routes import FAST_MIX_DOC_V1, FAST_MIX_PROFILES, FAST_MIX_TABLE_PROFILES, FAST_MIX_V2
 from heocr.ocr.tesseract import DEFAULT_LANG, DEFAULT_PSM, _temporary_models, check_settings
 from heocr.tableformer import TableFormerSession
 
@@ -247,7 +247,7 @@ def extract(
     fast_mix = fast_mix_profile is not None
     if (ocr_phone_latin_edges or ocr_oblique_rivok or ocr_issuer_staggered_lanes or ocr_footer_order) and not fast_mix:
         raise ValueError("the phone and issuer refinements need a fast-mix profile")
-    if fast_mix_profile in (FAST_MIX_V2, FAST_MIX_V3):
+    if fast_mix_profile in (FAST_MIX_V2, *FAST_MIX_TABLE_PROFILES):
         ocr_phone_latin_edges = ocr_oblique_rivok = ocr_issuer_staggered_lanes = True
     if fast_mix and (
         not ocr or ocr_lang != DEFAULT_LANG or ocr_psm != DEFAULT_PSM or ocr_model != DEFAULT_MODEL
@@ -330,9 +330,9 @@ def extract(
             if classified[0] not in PHOTO_CAPTURES:
                 raise ValueError(f"{fast_mix_profile} needs --ocr-capture-type for a scan or issuer render")
             ocr_capture_type = classified[0]
-        if fast_mix_profile == FAST_MIX_V3 and ocr_capture_type not in PHOTO_CAPTURES:
+        if fast_mix_profile in FAST_MIX_TABLE_PROFILES and ocr_capture_type not in PHOTO_CAPTURES:
             if tables_models is None:
-                raise ValueError("fast-mix-v3 office OCR needs the pinned --tables-models directory")
+                raise ValueError(f"{fast_mix_profile} office OCR needs the pinned --tables-models directory")
             ocr_footer_order = True
             tables = "tableformer"
         if ocr_capture_type in PHOTO_CAPTURES:
@@ -370,6 +370,10 @@ def extract(
                     "name": profile,
                     "line_model_sha256": pin[1] if pin is not None else MODELS[DEFAULT_MODEL].sha256,
                 }
+    whole_document = fast_mix_profile == FAST_MIX_DOC_V1
+    if whole_document:
+        document_roles = join_tables = form_fields = form_scan_marks = form_grid_recovery = True
+
     capture_reason = classified[1] if fast_mix and classified is not None else "declared_capture"
     if ocr_router is not None:
         from heocr.ocr.routes import RIVOK_FULL, classify_capture
@@ -461,6 +465,7 @@ def extract(
     if ocr and form_scan_marks:
         doc._ocr_settings["form_scan_marks"] = True
     doc._form_grid_recovery = ocr and form_grid_recovery
+    doc._join_form_pages = whole_document
     if (photo_preprocess is not None or ocr_phone_geometry or ocr_phone_max_edge is not None) and kind.format in IMAGE_FORMATS:
         from heocr.ocr.routes import PHOTO_CAPTURES, classify_capture
 

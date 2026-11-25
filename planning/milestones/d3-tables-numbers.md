@@ -52,6 +52,7 @@ Each slice is its own PR from main. None is stacked.
 | **D3h1** | **Opt-in hdoc_form.v1 export. Promote supported form fields, sections, groups and typed blank and marked values into a scorer-ready form tree.** | D3h |
 | **D3h2** | **Opt-in printed mark verification on scans. Use OCR word boxes and scan pixels to recover X-marked checkboxes and choices in the form export.** | D3h1 |
 | **D3h3** | **Opt-in grid recovery and continued form sections. Recover OCR label/value rows with corroborated geometry and join explicitly continued sections across adjacent pages.** | D3h1 |
+| **D3h4** | **Opt-in whole-document profile. Compose the fast-mix-v3 readers with local TableFormer, page roles, cross-page tables and structured forms.** | D3h3, D3g8 |
 | **D3g7** | **Fast-mix document integration.** Expose explicit local TableFormer proposals through the CLI and fast-mix profiles, using the existing table readers and exports. Check field recall with paired calibration documents. | D3g, D2e15 |
 | **D3g8** | **Additive cell reads on OCR pages.** Preserve the ordinary OCR reading around and under learned table proposals. Append proposed cells after that page's text and keep native grid precedence. Verify paired calibration field recall with no lost baseline values. | D3g3, D3g7 |
 | **D3g9** | **Opt-in multi-page table continuation. Link adjoining fragments with aligned columns and an exact repeated header. Join the CSV and XLSX exports while preserving the physical page record.** | D3g4, D3g8 |
