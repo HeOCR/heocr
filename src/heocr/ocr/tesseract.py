@@ -37,6 +37,8 @@ DEFAULT_LANG = "heb"
 DEFAULT_PSM = 3
 RENDER_DPI = 300
 TIMEOUT = 180.0
+# OCR inputs are local temporary PNGs. Prefer a quick lossless encode.
+_TEMP_PNG_COMPRESSION = 1
 _LANG = re.compile(r"[A-Za-z0-9_]+(\+[A-Za-z0-9_]+)*")
 _VERSION = re.compile(r"tesseract v?[A-Za-z0-9.+_~-]+")
 _LIST_LANGS = re.compile(r'List of available languages in "(.+?)"')
@@ -273,7 +275,7 @@ class Tesseract:
                 source = Path(temp) / "input.png"
                 if self.photo_gray_otsu and image.mode != "L":
                     image = image.convert("L")
-                image.save(source, dpi=(dpi, dpi))
+                image.save(source, dpi=(dpi, dpi), compress_level=_TEMP_PNG_COMPRESSION)
                 base = Path(temp) / "result"
                 done = self._recognize_call(source, base, dpi, psm)
                 if done.returncode < 0:
@@ -332,7 +334,7 @@ class Tesseract:
                 if self.photo_gray_otsu and image.mode != "L":
                     image = image.convert("L")
                 path = folder / f"{index:03d}.png"
-                image.save(path, dpi=(dpi, dpi))
+                image.save(path, dpi=(dpi, dpi), compress_level=_TEMP_PNG_COMPRESSION)
                 paths.append(str(path))
                 sizes.append(image.size)
             if not paths:
