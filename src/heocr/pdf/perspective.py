@@ -130,10 +130,11 @@ class RectifiedGrid:
     grid: Table
     mask: tuple
     inverse: tuple
+    cell_scale: float | None = None
 
     def source_box(self, box, scale):
         """Enclose the four projected corners in the original page coordinate system."""
-        xs, ys = zip(*_source_quad(self.inverse, [coordinate * scale for coordinate in box]))
+        xs, ys = zip(*_source_quad(self.inverse, [coordinate * (self.cell_scale or scale) for coordinate in box]))
         return [min(xs) / scale, min(ys) / scale, max(xs) / scale, max(ys) / scale]
 
 
