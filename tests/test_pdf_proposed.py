@@ -65,6 +65,29 @@ class GridTests(unittest.TestCase):
         self.assertEqual(t.rows[1][0]["rowspan"], 2)
         self.assertTrue(t.rows[2][0]["placeholder"])
 
+    def test_a_text_line_the_detector_skipped_becomes_its_own_row(self):
+        p = proposal()
+        y0, y1 = HEIGHT - YS[0], HEIGHT - YS[1]  # row 0 is [y0, y1]; push row 1 down to leave a gap
+        for c in p["cells"]:
+            if c["row"] >= 1:
+                c["box"] = [c["box"][0], c["box"][1] + 20, c["box"][2], c["box"][3] + 20]
+        label = (300.0, y1 + 4, 360.0, y1 + 14)  # a label line wholly in the gap
+        t = to_table(p, [label])
+        self.assertEqual(len(t.rows), 4)
+        self.assertIn("table_rows_added", t.flags)
+        added = t.rows[1][0]["box"]
+        self.assertLessEqual(added[1], label[1])
+        self.assertGreaterEqual(added[3], label[3])
+
+    def test_grid_lines_avoid_cutting_text(self):
+        p = proposal()
+        # a character straddling the plain midpoint between rows 0 and 1 (top-left frame)
+        mid = ((HEIGHT - YS[0]) + 30 - 6 + (HEIGHT - YS[1]) + 6) / 2
+        ink = [(300.0, mid - 3, 306.0, mid + 3)]
+        t = to_table(p, ink)
+        cut = t.rows[0][0]["box"][3]
+        self.assertTrue(cut <= ink[0][1] or cut >= ink[0][3])
+
     def test_small_proposals_are_not_tables(self):
         self.assertIsNone(to_table({"bbox": [0, 0, 10, 10], "rows": 1, "cols": 4, "cells": []}))
 
