@@ -6,3 +6,10 @@ This product includes code ported from internal tools of the Adanim Research Ins
 heocr runs, when they are installed, these separate programs, which it does not bundle:
 - Tesseract OCR (Apache License 2.0);
 - LibreOffice (Mozilla Public License 2.0).
+
+With the optional `tables` extra (pip install 'heocr[tables]'), heocr uses these separately installed components,
+which it does not bundle:
+- Docling and docling-ibm-models (MIT License);
+- the docling-layout-heron layout model weights (Apache License 2.0);
+- the TableFormer weights in docling-models (CDLA-Permissive-2.0 and Apache License 2.0).
+The weights are fetched by the user at pinned revisions and checked by sha256 (see heocr.tableformer).
