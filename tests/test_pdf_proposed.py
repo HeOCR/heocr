@@ -108,6 +108,78 @@ class ReaderTests(unittest.TestCase):
             heocr.extract(make_pdf([borderless_page()]), ocr=False, tables="tableformer")
 
 
+class TidyTests(unittest.TestCase):
+    def block(self, rows):
+        from heocr.contract import Block
+        return Block(kind="table", cells=rows, page=0, bbox=[0, 0, 1, 1], flags=["tableformer_proposed"])
+
+    def test_empty_columns_are_dropped_and_spans_shrink(self):
+        from heocr.contract import Cell
+        from heocr.pdf.tabletidy import tidy
+        b = self.block([[Cell("כותרת", colspan=3), Cell("")],
+                        [Cell("א"), Cell(""), Cell("1"), Cell("")],
+                        [Cell("ב"), Cell(""), Cell("2"), Cell("")]])
+        tidy(b)
+        self.assertEqual([[c.text for c in row] for row in b.cells], [["כותרת"], ["א", "1"], ["ב", "2"]])
+        self.assertEqual(b.cells[0][0].colspan, 2)
+        self.assertIn("table_empty_columns_dropped", b.flags)
+
+    def test_ruled_tables_are_never_reshaped(self):
+        from heocr.contract import Block, Cell
+        from heocr.pdf.tabletidy import tidy
+        b = Block(kind="table", cells=[[Cell("א"), Cell("")], [Cell("ב"), Cell("")]], page=0, bbox=[0, 0, 1, 1],
+                  flags=["ruled_table"])
+        tidy(b)
+        self.assertEqual(len(b.cells[0]), 2)
+
+    def test_a_section_label_merged_into_a_row_is_split_off(self):
+        from heocr.contract import Cell
+        from heocr.pdf.tabletidy import tidy
+        first = Cell("(1) קטע - קרקע\nיישוב", _lines=[["(1) קטע - קרקע", [300, 100, 400, 110]], ["יישוב", [350, 116, 400, 126]]])
+        value = Cell("46.74", _lines=[["46.74", [200, 116, 230, 126]]])
+        b = self.block([[Cell("שם"), Cell("סכום")], [first, value]])
+        tidy(b)
+        self.assertEqual([[c.text for c in row] for row in b.cells],
+                         [["שם", "סכום"], ["(1) קטע - קרקע", ""], ["יישוב", "46.74"]])
+        self.assertIn("table_section_rows_split", b.flags)
+
+    def test_margin_enumerators_join_their_labels_and_a_numbering_column_stays(self):
+        from heocr.contract import Cell
+        from heocr.pdf.tabletidy import tidy
+        rows = [[Cell(""), Cell("שם"), Cell("סכום")], [Cell(")1("), Cell("קטע"), Cell("")],
+                [Cell(""), Cell("יישוב"), Cell("5")], [Cell(""), Cell("חווה"), Cell("6")]]
+        b = self.block(rows)
+        tidy(b)
+        self.assertEqual([[c.text for c in row] for row in b.cells],
+                         [["שם", "סכום"], [")1( קטע", ""], ["יישוב", "5"], ["חווה", "6"]])
+        self.assertIn("table_enumerators_joined", b.flags)
+        numbered = self.block([[Cell(str(i)), Cell("א"), Cell("1")] for i in range(1, 5)])
+        tidy(numbered)
+        self.assertEqual(len(numbered.cells[0]), 3)  # a column with a number in every row is a column
+
+    def test_a_wrapped_label_is_not_split(self):
+        from heocr.contract import Cell
+        from heocr.pdf.tabletidy import tidy
+        # the value sits beside the label's first line: one wrapped label, not a section row
+        first = Cell("שם ארוך\nמאוד", _lines=[["שם ארוך", [300, 100, 400, 110]], ["מאוד", [350, 116, 400, 126]]])
+        value = Cell("12", _lines=[["12", [200, 100, 230, 110]]])
+        b = self.block([[first, value]])
+        tidy(b)
+        self.assertEqual(len(b.cells), 1)
+        self.assertNotIn("table_section_rows_split", b.flags)
+
+    def test_a_detector_column_over_blank_margin_is_dropped_in_the_reading(self):
+        p = proposal()
+        p["cols"] = 4  # an extra column over the blank margin left of the table
+        p["bbox"][0] = 40.0
+        p["cells"] = [dict(c, col=c["col"] + 1) for c in p["cells"]] + \
+            [{"row": r, "col": 0, "box": [45.0, HEIGHT - YS[r] + 6, 95.0, HEIGHT - YS[r + 1] - 6]} for r in range(3)]
+        doc = read(borderless_page(), Stub([p]))
+        (table,) = [b for b in doc.blocks if b.kind == "table"]
+        self.assertEqual([c.text for c in table.cells[0]], ["שם", "תפקיד", "סכום"])
+        self.assertIn("table_empty_columns_dropped", table.flags)
+
+
 class PinTests(unittest.TestCase):
     def test_missing_or_wrong_weights_are_refused(self):
         import tempfile

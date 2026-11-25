@@ -62,6 +62,7 @@ from heocr.pdf.ocrtables import (
 from heocr.pdf.perspective import rectify_grid
 from heocr.pdf.proposed import merge_proposals
 from heocr.pdf.tables import find_tables, rulings, table_blocks
+from heocr.pdf.tabletidy import tidy
 from heocr.textflags import is_private_use, text_flags
 
 TOOL = "heocr.pdf"
@@ -1220,7 +1221,8 @@ def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = froz
     table_flags = sorted({f for t in tables if not t.rows for f in t.flags if f == "table_grid_unresolved"})
     if doc._table_proposer is not None:
         # Learned proposals (D3g) for tables without rulings: native grids keep first claim, before arrange.
-        tables, proposal_flags = _table_proposals(doc, index, tables, width, height, layer.sideways)
+        ink = [(a.x0, a.y0, a.x1, a.y1) for a in text.atoms if not a.is_space]
+        tables, proposal_flags = _table_proposals(doc, index, tables, width, height, layer.sideways, ink)
         table_flags = table_flags + proposal_flags
     repairs_on = doc.options.get("repairs", True)
     # Two pages side by side are read as two, in the document's order (D4c).
@@ -1296,7 +1298,7 @@ def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = froz
     )
 
 
-def _table_proposals(doc: Document, index: int, tables, width: float, height: float, sideways: bool):
+def _table_proposals(doc: Document, index: int, tables, width: float, height: float, sideways: bool, ink=None):
     """Native ruled grids plus non-overlapping TableFormer proposals, and the page flags that say so."""
     if sideways:
         return tables, ["table_proposals_skipped_sideways"]
@@ -1307,7 +1309,7 @@ def _table_proposals(doc: Document, index: int, tables, width: float, height: fl
             doc.flags.append("table_proposer_failed")
         doc.unread.append(Unread(scope="page", reason="table_proposer_failed", page=index, detail=str(exc)[:200]))
         return tables, ["table_proposer_failed"]
-    merged = merge_proposals(tables, proposals)
+    merged = merge_proposals(tables, proposals, ink)
     return merged, (["tableformer_tables"] if len(merged) > len(tables) else [])
 
 
@@ -1352,6 +1354,7 @@ def _read_region(doc: Document, index: int, atoms: list[Atom], tables, built: Pa
             body_flags.append("reading_order_column_major_unverified")
     for table in t_blocks:
         _log_cell_repairs(doc, table)
+        tidy(table)  # D3g: learned proposals only, after arrange has extended them; ruled grids are never reshaped
     _place_tables(doc, first, t_blocks)
     return {
         "in_tables": in_tables,
