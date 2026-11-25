@@ -17,9 +17,12 @@ import hashlib
 import io
 import json
 import math
+import sys
 from copy import deepcopy
 from pathlib import Path
 from threading import Lock
+
+from heocr._ppdoclayout_plus import PpDocLayoutPlus, THRESHOLD as PP_THRESHOLD, VERSIONS as PP_VERSIONS
 
 STRUCTURE_DIR = "docling-project--docling-models/model_artifacts/tableformer/accurate"
 STRUCTURE_WEIGHTS = f"{STRUCTURE_DIR}/tableformer_accurate.safetensors"
@@ -38,7 +41,19 @@ DETECTOR_PINNED = {
     f"{DETECTOR_DIR}/config.json": "fdea30805ce2f5666b147fca941dcdd27ad468e27d6ed21902207d3da056a97d",
     f"{DETECTOR_DIR}/preprocessor_config.json": "cd38cd59999e7a95d68e487fbe5132df3d4e5c32a0836add57e6126ba0c4eaf1",
 }
-DETECTOR_VERSIONS = {"docling": "2.152.0", "docling-ibm-models": "4.0.4", "transformers": "5.24.1"}
+DIRECT_VERSIONS = {"docling": "2.152.0", "docling-ibm-models": "4.0.4"}
+DETECTOR_VERSIONS = {**DIRECT_VERSIONS, "transformers": "5.24.1"}
+PP_DETECTOR = "ppdoclayout_plus"
+PP_REPO = "PaddlePaddle/PP-DocLayout_plus-L"
+PP_DIR = "PaddlePaddle--PP-DocLayout_plus-L"
+PP_REVISION = "aa52b8528c84f9b1a34ac3a88fe0e576edb9d11d"
+PP_PINNED = {
+    STRUCTURE_WEIGHTS: PINNED[STRUCTURE_WEIGHTS],
+    STRUCTURE_CONFIG: DETECTOR_PINNED[STRUCTURE_CONFIG],
+    f"{PP_DIR}/inference.pdiparams": "24ca3e2e442164505e250deef59f7ee9a54ea12dd32875c9cd6155d959dc97da",
+    f"{PP_DIR}/inference.json": "99bd09c0a1b9e88d35c65c305b91711d98055fc94b4a6eecd50da02e04729384",
+    f"{PP_DIR}/inference.yml": "d60f782a16f96afb27e8280399899a94c3e9ffc694ffb2f913ea00af1c522f1e",
+}
 INSTALL_HINT = "the TableFormer proposer needs the optional extra: pip install 'heocr[tables]'"
 
 
@@ -68,33 +83,64 @@ class TableFormerSession:
     even if callers share the session across threads.
     """
 
-    def __init__(self, models: str | Path, *, detector: str | None = None):
-        if detector not in (None, DETECTOR_NAME):
+    def __init__(
+        self, models: str | Path, *, detector: str | None = None, detector_python: str | Path | None = None
+    ):
+        if detector not in (None, DETECTOR_NAME, PP_DETECTOR):
             raise ValueError(f"unknown table detector {detector!r}")
+        if detector_python is not None and detector != PP_DETECTOR:
+            raise ValueError("detector_python applies only to ppdoclayout_plus")
         try:
             import docling  # noqa: F401
             from importlib.metadata import version
         except ImportError as exc:  # pragma: no cover - depends on the extra
             raise ImportError(INSTALL_HINT) from exc
         self._models = Path(models).resolve()
-        self.detector = detector
-        weights = verify_models(self._models) if detector is None else _verify_files(self._models, DETECTOR_PINNED)
+        self._detector_name = detector
+        self._detector_python = None
+        if detector == PP_DETECTOR:
+            # Keep the virtualenv's executable path. Resolving its symlink can bypass the virtualenv.
+            self._detector_python = Path(detector_python or sys.executable).expanduser().absolute()
+            if not self._detector_python.is_file():
+                raise FileNotFoundError("missing local PP-DocLayout_plus-L Python executable")
+        if detector is None:
+            weights = verify_models(self._models)
+        else:
+            weights = _verify_files(self._models, PP_PINNED if detector == PP_DETECTOR else DETECTOR_PINNED)
         self._record = {"proposer": "tableformer", "docling": version("docling"),
                         "docling_ibm_models": version("docling-ibm-models"), "revisions": dict(REVISIONS),
                         "weights_sha256": {Path(k).name: v for k, v in weights.items()}}
         if detector is not None:
-            for package, expected in DETECTOR_VERSIONS.items():
+            versions = DIRECT_VERSIONS if detector == PP_DETECTOR else DETECTOR_VERSIONS
+            for package, expected in versions.items():
                 if version(package) != expected:
                     raise ValueError(f"table detector {detector} needs {package}=={expected}")
-            self._record.update(detector=detector, detector_base_revision=REVISIONS["docling-project/docling-layout-heron"],
-                                transformers=DETECTOR_VERSIONS["transformers"],
+            self._record.update(detector=detector,
                                 revisions={"docling-project/docling-models": REVISIONS["docling-project/docling-models"]},
-                                weights_sha256={Path(k).name: v for k, v in weights.items() if k.endswith(".safetensors")},
-                                config_sha256={Path(k).name: v for k, v in weights.items() if k.endswith(".json")})
+                                weights_sha256={Path(k).name: v for k, v in weights.items()
+                                                if k.endswith((".safetensors", ".pdiparams"))},
+                                config_sha256={Path(k).name: v for k, v in weights.items() if k.endswith((".json", ".yml"))})
+            if detector == PP_DETECTOR:
+                self._record["revisions"][PP_REPO] = PP_REVISION
+                self._record.update(detector_runtime=dict(PP_VERSIONS), detector_threshold=PP_THRESHOLD)
+            else:
+                self._record.update(detector_base_revision=REVISIONS["docling-project/docling-layout-heron"],
+                                    transformers=DETECTOR_VERSIONS["transformers"])
         self._converter = None
         self._box_detector = None
         self._predictor = None
         self._lock = Lock()
+
+    @property
+    def detector(self) -> str | None:
+        return self._detector_name
+
+    def close(self) -> None:
+        """Stop a warm PP+ worker. A later conversion can open another worker."""
+        with self._lock:
+            if self.detector == PP_DETECTOR and self._box_detector is not None:
+                self._box_detector.close()
+                self._box_detector = None
 
     def _make_converter(self):
         from docling.datamodel.base_models import InputFormat
@@ -137,9 +183,7 @@ class TableFormerSession:
                     bitmap.close()
             finally:
                 page.close()
-            if self._box_detector is None:
-                self._box_detector = _HeronDetector(self._models / DETECTOR_DIR)
-            boxes = self._box_detector(image, size)
+            boxes = self._detect(image, size)
             on_detection()
             if not boxes:
                 return []
@@ -147,6 +191,34 @@ class TableFormerSession:
                 self._predictor = _load_predictor(self._models)
             predictor, max_steps = self._predictor
             return _predict_structure(predictor, max_steps, body, index, size, boxes)
+
+    def _detect(self, image, size):
+        if self.detector == PP_DETECTOR:
+            if self._box_detector is None:
+                self._box_detector = PpDocLayoutPlus(self._models / PP_DIR, self._detector_python)
+            try:
+                raster_boxes = self._box_detector.boxes(image)
+            except RuntimeError:
+                self._box_detector = None
+                raise
+            sx, sy = size[0] / image.width, size[1] / image.height
+            return _clip_boxes(([l * sx, t * sy, r * sx, b * sy] for l, t, r, b in raster_boxes), size)
+        if self._box_detector is None:
+            self._box_detector = _HeronDetector(self._models / DETECTOR_DIR)
+        return self._box_detector(image, size)
+
+
+def _clip_boxes(boxes, size) -> list[list[float]]:
+    width, height = size
+    clipped = []
+    for box in boxes:
+        if not all(math.isfinite(value) for value in box):
+            continue
+        left, top, right, bottom = box
+        out = [max(0, left), max(0, top), min(width, right), min(height, bottom)]
+        if out[2] > out[0] and out[3] > out[1]:
+            clipped.append(out)
+    return clipped
 
 
 class _HeronDetector:
@@ -170,15 +242,9 @@ class _HeronDetector:
             decoded = self.processor.post_process_object_detection(
                 prediction, threshold=0.5, target_sizes=torch.tensor([[height, width]])
             )[0]
-        boxes = []
-        for label, box in zip(decoded["labels"].tolist(), decoded["boxes"].tolist(), strict=True):
-            if label not in self.labels or not all(math.isfinite(value) for value in box):
-                continue
-            left, top, right, bottom = box
-            clipped = [max(0, left), max(0, top), min(width, right), min(height, bottom)]
-            if clipped[2] > clipped[0] and clipped[3] > clipped[1]:
-                boxes.append(clipped)
-        return boxes
+        boxes = (box for label, box in zip(decoded["labels"].tolist(), decoded["boxes"].tolist(), strict=True)
+                 if label in self.labels)
+        return _clip_boxes(boxes, size)
 
 
 def _load_predictor(models: Path):
