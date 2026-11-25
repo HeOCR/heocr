@@ -150,7 +150,11 @@ class ModelRouteTest(unittest.TestCase):
         (self.cache / f"{name}.traineddata").write_bytes(data)
         pins[name] = models.ReleasedModel(name, hashlib.sha256(data).hexdigest(), len(data),
                                           "https://example.invalid/old", None, "Apache-2.0")
-        cases = (("modern-unpointed", None, "heocr_modern_v1", 3), ("pointed", "pixel", "heb_rivok", 7),
+        lite, data = "heb_rivok_lite", b"fake Rivok Lite"
+        (self.cache / f"{lite}.traineddata").write_bytes(data)
+        pins[lite] = models.ReleasedModel(lite, hashlib.sha256(data).hexdigest(), len(data),
+                                         "https://example.invalid/lite", None, "Apache-2.0")
+        cases = (("modern-unpointed", None, "heocr_modern_v1", 3), ("pointed", "pixel", lite, 7),
                  ("old-rabbinic", None, name, 3), (None, "iphone", "heocr_modern_v1", 3))
         with mock.patch.dict(models.MODELS, pins):
             for category, capture, model, psm in cases:
@@ -168,7 +172,6 @@ class ModelRouteTest(unittest.TestCase):
 
     def test_specialist_abstention_and_missing_model_keep_the_default_text(self) -> None:
         with mock.patch.dict(models.MODELS, self.capture_models()):
-            (self.cache / "heb_rivok.traineddata").unlink()
             args = dict(tesseract=FAKE, check_numbers=False)
             baseline = heocr.extract(SCAN, **args)
             for category, reason in ((None, "default"), ("pointed", "specialist_unavailable")):
@@ -181,8 +184,10 @@ class ModelRouteTest(unittest.TestCase):
     def test_specialist_config_checks_staged_codec_and_accepts_capture_override(self) -> None:
         root = Path(self.tmp.name)
         letters, recoder = b"invented unicharset", b"invented recoder"
+        lstm = b"invented network"
         start = 4 + 23 * 8
-        payload = struct.pack("<I23q", 23, *([-1] * 21), start, start + len(letters)) + letters + recoder
+        payload = (struct.pack("<I23q", 23, *([-1] * 17), start, -1, -1, -1,
+                               start + len(lstm), start + len(lstm) + len(letters)) + lstm + letters + recoder)
         model = root / "private.traineddata"
         model.write_bytes(payload)
         config = root / "routes.json"

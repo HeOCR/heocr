@@ -116,7 +116,7 @@ applies to the input. Supply pages or line crops separately when their categorie
 | Category | Built-in local model |
 | --- | --- |
 | `modern-unpointed` | HeOCR modern_v1 |
-| `pointed` | Rivok Full int8 |
+| `pointed` | Rivok Lite int8 |
 | `old-rabbinic` | HeOCR oldprint_v1 |
 | `phone` | HeOCR modern_v1 |
 
@@ -144,7 +144,7 @@ the generic category rule. Capture values include `iphone`, `pixel`, `phone`,
 A custom rule's `model` may also be an object with a `path` to a local
 `.traineddata` file and its full `sha256`. Relative paths are relative to
 the config file. Custom checkpoints must preserve the exact Rivok Full
-float LSTM unicharset and recoder. The named HeOCR models keep their original
+float LSTM unicharset and recoder. The named models keep their original
 codecs. The OCR record captures the config SHA-256, the actual model and the
 codec parent for a loaded custom checkpoint. [Built-in routing table](../src/heocr/models_data/specialists.json)
 

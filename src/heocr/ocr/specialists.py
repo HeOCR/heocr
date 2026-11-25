@@ -38,7 +38,8 @@ def codec_hashes(path):
         offsets = struct.unpack(f"<{count}q", directory)
         present = tuple(offset for offset in offsets if offset != -1)
         if (not present or present[0] < 4 + len(directory) or present[-1] >= size
-                or any(a >= b for a, b in zip(present, present[1:])) or offsets[21] < 0 or offsets[22] < 0):
+                or any(a >= b for a, b in zip(present, present[1:]))
+                or any(offsets[i] < 0 for i in (17, 21, 22))):
             raise ValueError("invalid traineddata component offsets")
         end = next((offset for offset in offsets[23:] if offset >= 0), size)
         hashes = []

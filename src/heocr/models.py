@@ -86,6 +86,15 @@ MODELS: dict[str, ReleasedModel] = {
             doi=None,
             licence="Apache-2.0",
         ),
+        ReleasedModel(
+            name="heb_rivok_lite",
+            sha256="59da073ad0bca9449fa5a965996e49d0e2bee3c17e8b0b4e2769d67a7ce34c40",
+            size=3_486_882,
+            url=("https://huggingface.co/Rivok/tesseract-heb-rivok/resolve/"
+                 "9253cacf097ab396a2fc36d633737c43af5c28a3/tessdata/heb_rivok_lite.traineddata"),
+            doi=None,
+            licence="Apache-2.0",
+        ),
     )
 }
 

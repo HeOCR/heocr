@@ -85,8 +85,8 @@ heocr runs these when they are installed. It never bundles them. See NOTICE.
 
 ## Optional OCR models
 
-The opt-in capture router can use Rivok Labs' Rivok Full v2.0 int8, licensed
-under Apache-2.0 and downloaded explicitly. Its
+The opt-in capture and specialist routers can use Rivok Labs' Rivok Full and
+Lite v2.0 int8, licensed under Apache-2.0 and downloaded explicitly. Their
 [component model card](src/heocr/models_data/MODEL_CARD.heb_rivok.md) records
 the weight pin and upstream attribution. The distribution preserves the
 upstream [LICENSE](src/heocr/models_data/LICENSE.heb_rivok) and
