@@ -216,7 +216,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"heocr: {exc}", file=sys.stderr)
         return 1
     if fmt == "csv":
-        out = _csv(doc, args.output)
+        text = _csv(doc, args.output)
+        out = None if text is None else text.encode("utf-8")  # bytes: CRLF stays CRLF on every platform
     elif fmt == "docx":
         out = doc.to_docx()
     elif fmt == "xlsx":
@@ -235,7 +236,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             sys.stdout.buffer.write(out)
     elif args.output:
-        args.output.write_text(out, encoding="utf-8", newline="" if fmt == "csv" else None)
+        args.output.write_text(out, encoding="utf-8")
     else:
         if hasattr(sys.stdout, "reconfigure"):
             sys.stdout.reconfigure(encoding="utf-8")
@@ -257,7 +258,7 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _csv(doc, output: Path | None) -> str | None:
+def _csv(doc, output: "Path | None") -> "str | None":
     """The tables as CSV: one file each when there are several and an output name is given (NAME-1.csv, ...;
     then None), else all of them in one text, separated by an empty line."""
     from heocr.table_export import tables, to_csv

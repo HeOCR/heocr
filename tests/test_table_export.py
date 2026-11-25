@@ -10,6 +10,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest import mock
 
 from defusedxml import ElementTree
 
@@ -123,6 +124,16 @@ class CliTest(unittest.TestCase):
         first = (self.dir / "t-1.csv").read_bytes().decode("utf-8")
         self.assertTrue(first.startswith("שם,,סכום\r\n"))
         self.assertTrue((self.dir / "t-2.csv").exists())
+
+    def test_csv_to_standard_output_keeps_crlf(self) -> None:
+        buffer = io.BytesIO()
+        stdout = mock.Mock(buffer=buffer, isatty=lambda: False)
+        with mock.patch("sys.stdout", stdout), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(main([str(self.input), "--no-ocr", "-f", "csv"]), 0)
+        text = buffer.getvalue().decode("utf-8")
+        self.assertTrue(text.startswith("שם,,סכום\r\n"))
+        self.assertNotIn("\r\r", text)
+        self.assertIn("\r\n\r\nCode,Date\r\n", text)  # tables separated by an empty line
 
 
 if __name__ == "__main__":
