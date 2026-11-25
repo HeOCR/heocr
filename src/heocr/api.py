@@ -75,6 +75,8 @@ def extract(
     tesseract: str | Sequence[str] | None = None,
     ocr_model: str | None = DEFAULT_MODEL,
     ocr_router: str | None = None,
+    ocr_category: str | None = None,
+    ocr_specialist_config: str | os.PathLike[str] | None = None,
     ocr_layout: str | None = None,
     ocr_old_print_model: str | os.PathLike[str] | None = None,
     ocr_hybrid: str | None = None,
@@ -144,6 +146,9 @@ def extract(
     ``ocr_router="v2"`` selects the capture route using a declaration when supplied, PDF rendering
     for document OCR, or exposure/focal-length metadata for JPEG photos. Inputs without a signal
     use the usual model. The option leaves text-layer handling unchanged.
+    ``ocr_router="specialist"`` selects one local model from the print category
+    (``ocr_category``), capture and optional JSON ``ocr_specialist_config``.
+    Without a matching or usable specialist, it uses the usual default.
     ``ocr_layout="v1"`` enables whole-page OCR column ordering, additional table
     evidence, logical mixed-script runs and guarded padding of inked crop edges.
     ``ocr_old_print_model`` adds a historical-print probe to router v2. It takes the local
@@ -259,8 +264,20 @@ def extract(
               ocr_line_v6, photo_preprocess, phone_model, phone_model_sha256, ocr_phone_max_edge))
     ):
         raise ValueError(f"{fast_mix_profile} fixes the Hebrew PSM 3 reader, layout, and reread settings")
-    if ocr_router is not None and ocr_router != "v2":
-        raise ValueError("ocr_router must be 'v2'")
+    if ocr_router not in (None, "v2", "specialist"):
+        raise ValueError("ocr_router must be 'v2' or 'specialist'")
+    specialist_config = None
+    if ocr_router == "specialist":
+        from heocr.ocr import specialists
+
+        if ocr_category is not None and ocr_category not in specialists.CATEGORIES:
+            raise ValueError(f"ocr_category must be one of: {', '.join(specialists.CATEGORIES)}")
+        if (profile is not None or ocr_old_print_model is not None or ocr_line_v6 is not None
+                or ocr_hybrid is not None or phone_model is not None or phone_model_sha256 is not None):
+            raise ValueError("specialist routing selects a single local OCR model and cannot combine with another model route")
+        specialist_config = specialists.load_config(ocr_specialist_config)
+    elif ocr_category is not None or ocr_specialist_config is not None:
+        raise ValueError("ocr_category and ocr_specialist_config need specialist routing")
     if ocr_layout is not None and (ocr_layout != "v1" or not ocr):
         raise ValueError("ocr_layout must be 'v1' and needs OCR")
     if ocr_old_print_model is not None and (
@@ -295,7 +312,9 @@ def extract(
             option = "ocr_router" if ocr_router is not None else "ocr_capture_type"
             raise ValueError(f"{option} needs Hebrew Tesseract OCR with the default model option")
         if ocr_capture_type is not None:
-            ocr_model = capture_model_for(ocr_capture_type)
+            capture_model = capture_model_for(ocr_capture_type)
+            if specialist_config is None:
+                ocr_model = capture_model
     if ocr_line_batch and ocr_line_v6 is None:
         raise ValueError("ocr_line_batch needs ocr_line_v6")
     if ocr_number_batch and not ocr:
@@ -379,7 +398,7 @@ def extract(
         document_roles = join_tables = form_fields = form_scan_marks = form_grid_recovery = True
 
     capture_reason = classified[1] if fast_mix and classified is not None else "declared_capture"
-    if ocr_router is not None:
+    if ocr_router == "v2":
         from heocr.ocr.routes import RIVOK_FULL, classify_capture
 
         if ocr_capture_type is None:
@@ -388,6 +407,16 @@ def extract(
                 ocr_model = model_override
         if ocr_model != RIVOK_FULL:
             ocr_line_v6 = None
+    if specialist_config is not None:
+        from heocr.ocr.routes import classify_capture
+
+        rules, config_sha256 = specialist_config
+        capture = ocr_capture_type
+        if capture is None and (ocr_category is None or any(c == ocr_category and s is not None for c, s in rules)):
+            capture, capture_reason, _ = classify_capture(body, kind.format)
+        elif capture is None:
+            capture_reason = "no_capture_evidence"
+        specialist_selection = specialists.select(rules, ocr_category, capture)
     doc = Document(
         sha256=hashlib.sha256(body).hexdigest(),
         size=len(body),
@@ -429,6 +458,9 @@ def extract(
         doc.options["ocr"]["layout"] = ocr_layout
     if ocr_router is not None:
         doc.options["ocr"]["router"] = {"version": ocr_router, "reason": capture_reason}
+    if specialist_config is not None:
+        doc._ocr_settings["specialist"] = specialist_selection
+        doc.options["ocr"]["router"]["config_sha256"] = config_sha256
     if ocr_capture_type is not None:
         doc.options["ocr"]["capture_type"] = ocr_capture_type
         doc._ocr_settings["capture_type"] = ocr_capture_type
@@ -501,7 +533,7 @@ def extract(
         return doc
     doc._hybrid = hybrid
     try:
-        with _temporary_models() if phone_profile is not None or fast_mix else nullcontext():
+        with _temporary_models() if phone_profile is not None or fast_mix or specialist_config is not None else nullcontext():
             reader(body, doc)
     finally:
         doc._hybrid = None

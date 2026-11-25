@@ -1,0 +1,9 @@
+{
+  "schema": "heocr.specialists.v1",
+  "routes": [
+    {"category": "modern-unpointed", "model": "heocr_modern_v1"},
+    {"category": "pointed", "model": "heb_rivok"},
+    {"category": "old-rabbinic", "model": "heocr_oldprint_v1"},
+    {"category": "phone", "model": "heocr_modern_v1"}
+  ]
+}

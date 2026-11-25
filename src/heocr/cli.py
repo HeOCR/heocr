@@ -13,6 +13,7 @@ from heocr.contract import MAX_PAGES
 from heocr.handwriting import HandwritingConfig
 from heocr.ocr.phone_profile import PHONE_PROFILES
 from heocr.ocr.routes import CAPTURE_MODELS, FAST_MIX_PROFILES, FAST_MIX_TABLE_PROFILES
+from heocr.ocr.specialists import CATEGORIES
 
 _FORMATS = ("text", "markdown", "json", "docx", "xlsx", "csv", "forms")
 _BY_SUFFIX = {".md": "markdown", ".markdown": "markdown", ".json": "json", ".txt": "text", ".docx": "docx", ".xlsx": "xlsx", ".csv": "csv"}
@@ -88,8 +89,10 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--ocr-capture-type", choices=CAPTURE_MODELS,
                         help="opt into experimental OCR routing for a declared capture")
-    parser.add_argument("--ocr-router", choices=("v2",),
-                        help="opt into OCR routing by capture type (declaration, PDF render or camera metadata)")
+    parser.add_argument("--ocr-router", choices=("v2", "specialist"),
+                        help="opt into capture routing or category specialist routing")
+    parser.add_argument("--ocr-category", choices=CATEGORIES, help="print category for specialist routing")
+    parser.add_argument("--ocr-specialist-config", type=Path, help="local JSON routing table for specialist routing")
     parser.add_argument("--ocr-layout", choices=("v1",),
                         help="enable geometric OCR layout for columns, cells, mixed runs and clipped edges")
     parser.add_argument("--tables", choices=("tableformer",),
@@ -214,6 +217,8 @@ def main(argv: list[str] | None = None) -> int:
             tesseract=args.tesseract,
             ocr_model=args.ocr_model,
             ocr_router=args.ocr_router,
+            ocr_category=args.ocr_category,
+            ocr_specialist_config=args.ocr_specialist_config,
             ocr_layout=args.ocr_layout,
             ocr_old_print_model=args.ocr_old_print_model,
             ocr_hybrid=args.ocr_hybrid,

@@ -65,4 +65,5 @@ heocr = [
   "models_data/NOTICE.*",
   "models_data/MODEL_CARD.*.md",
   "models_data/README.md",
+  "models_data/specialists.json",
 ]

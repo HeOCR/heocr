@@ -3,6 +3,7 @@ import hashlib
 import io
 import json
 import os
+import struct
 import subprocess
 import sys
 import tempfile
@@ -14,6 +15,7 @@ import heocr
 from heocr import models
 from heocr.cli import main
 from heocr.ocr import routes
+from heocr.ocr import specialists
 from tests.synth.pdf import PdfPage, lines_block, make_pdf
 
 FAKE = [sys.executable, str(Path(__file__).parent / "synth" / "fake_tesseract.py")]
@@ -141,6 +143,70 @@ class ModelRouteTest(unittest.TestCase):
         rivok = models.ReleasedModel(routes.RIVOK_FULL, hashlib.sha256(desktop).hexdigest(), len(desktop),
                                      "https://example.invalid/rivok", None, "Apache-2.0")
         return {modern.name: modern, rivok.name: rivok}
+
+    def test_specialist_categories_reuse_the_pinned_models_in_page_and_line_modes(self) -> None:
+        pins = self.capture_models()
+        name, data = "heocr_oldprint_v1", b"fake old print"
+        (self.cache / f"{name}.traineddata").write_bytes(data)
+        pins[name] = models.ReleasedModel(name, hashlib.sha256(data).hexdigest(), len(data),
+                                          "https://example.invalid/old", None, "Apache-2.0")
+        cases = (("modern-unpointed", None, "heocr_modern_v1", 3), ("pointed", "pixel", "heb_rivok", 7),
+                 ("old-rabbinic", None, name, 3), (None, "iphone", "heocr_modern_v1", 3))
+        with mock.patch.dict(models.MODELS, pins):
+            for category, capture, model, psm in cases:
+                with self.subTest(category=category, capture=capture, psm=psm):
+                    self.log.unlink(missing_ok=True)
+                    doc = heocr.extract(SCAN, ocr_router="specialist", ocr_category=category, ocr_capture_type=capture,
+                                        ocr_psm=psm, tesseract=FAKE, check_numbers=False)
+                    call = self.recognition_call()
+                    self.assertEqual(call[call.index("-l") + 1], model)
+                    self.assertEqual(call[call.index("--psm") + 1], str(psm))
+                    route = doc.blocks[0].ocr["model_route"]
+                    self.assertEqual((route["mode"], route["category"], route["model"]),
+                                     ("specialist", category or "phone", model))
+                    self.assertEqual(len(doc.options["ocr"]["router"]["config_sha256"]), 64)
+
+    def test_specialist_abstention_and_missing_model_keep_the_default_text(self) -> None:
+        with mock.patch.dict(models.MODELS, self.capture_models()):
+            (self.cache / "heb_rivok.traineddata").unlink()
+            args = dict(tesseract=FAKE, check_numbers=False)
+            baseline = heocr.extract(SCAN, **args)
+            for category, reason in ((None, "default"), ("pointed", "specialist_unavailable")):
+                doc = heocr.extract(SCAN, ocr_router="specialist", ocr_category=category, **args)
+                self.assertEqual(doc.text, baseline.text)
+                route = doc.blocks[0].ocr["model_route"]
+                self.assertEqual((route["model"], route["reason"]), ("heocr_modern_v1", reason))
+                self.assertEqual("ocr_specialist_unavailable" in doc.flags, category == "pointed")
+
+    def test_specialist_config_checks_staged_codec_and_accepts_capture_override(self) -> None:
+        root = Path(self.tmp.name)
+        letters, recoder = b"invented unicharset", b"invented recoder"
+        start = 4 + 23 * 8
+        payload = struct.pack("<I23q", 23, *([-1] * 21), start, start + len(letters)) + letters + recoder
+        model = root / "private.traineddata"
+        model.write_bytes(payload)
+        config = root / "routes.json"
+        config.write_text(json.dumps({"schema": "heocr.specialists.v1", "routes": [
+            {"category": "pointed", "model": "heb_rivok"},
+            {"category": "pointed", "capture": "scanner", "model": {
+                "path": model.name, "sha256": hashlib.sha256(payload).hexdigest()}},
+        ]}), encoding="utf-8")
+        codec = tuple(hashlib.sha256(data).hexdigest() for data in (letters, recoder))
+        args = dict(ocr_router="specialist", ocr_category="pointed", ocr_specialist_config=config,
+                    ocr_capture_type="scanner", tesseract=FAKE, check_numbers=False)
+        with mock.patch.dict(models.MODELS, self.capture_models()):
+            with mock.patch.object(specialists, "RIVOK_CODEC", codec):
+                doc = heocr.extract(SCAN, **args)
+                self.assertEqual(doc.blocks[0].ocr["lang"], "heocr_specialist")
+                self.assertEqual(doc.blocks[0].ocr["model_route"]["codec_parent_sha256"], specialists.RIVOK_FLOAT_SHA256)
+                self.assertNotIn(model.name, doc.to_json())
+            rejected = heocr.extract(SCAN, **args)
+            self.assertEqual(rejected.blocks[0].ocr["lang"], "heocr_modern_v1")
+            self.assertIn("ocr_specialist_unavailable", rejected.flags)
+
+    def test_specialist_options_need_the_opt_in(self) -> None:
+        with self.assertRaisesRegex(ValueError, "need specialist routing"):
+            heocr.extract(SCAN, ocr_category="pointed")
 
     def test_fast_mix_uses_the_pinned_single_pass_models(self) -> None:
         with mock.patch.dict(models.MODELS, self.capture_models()):
