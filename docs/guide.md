@@ -361,6 +361,16 @@ HeOCR checks the weight hashes and uses the local models. Installing the
 extra leaves the default table reader in use until you enable proposals.
 See the [model pins](../src/heocr/tableformer.py).
 
+### Form label and value associations
+
+Use `--form-fields -f json` (Python `form_fields=True`) to include
+`checks.form_fields` on supported form blocks. Each association gives the
+label, value, evidence method and originating row/column or line boxes.
+The reader uses explicit field and value headers, repeated status columns,
+or colon-labelled fields on the same line or aligned row. OCR text and
+table exports retain their original readings. The option adds structure
+to the existing reads and does not call another model.
+
 ### Historical print with router v2
 
 ```sh

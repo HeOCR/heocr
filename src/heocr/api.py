@@ -99,6 +99,7 @@ def extract(
     crnn_sha256: str | None = None,
     handwriting: HandwritingConfig | None = None,
     check_numbers: str | bool = "suspect",
+    form_fields: bool = False,
     convert: bool = True,
     soffice: str | Sequence[str] | None = None,
     convert_timeout: float | None = None,
@@ -487,6 +488,11 @@ def extract(
     from heocr.ocr import call_failures
 
     failed = call_failures(doc)
+    if form_fields:
+        from heocr.pdf.form_fields import mark
+
+        doc.options["form_fields"] = True
+        mark(doc)
     if failed:
         # Never silent: a failed or timed-out Tesseract call leaves its reading out wherever it happened.
         doc.flags.append("ocr_call_failed")
