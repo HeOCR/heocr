@@ -465,6 +465,33 @@ This requires `docling-ibm-models==4.0.4` and `transformers==5.24.1` alongside t
 including pages where it finds no regions. For phone images, also enable the
 [phone proposal route](https://github.com/HeOCR/heocr/pull/256).
 
+For PP-DocLayout_plus-L, fetch the pinned Apache-2.0 [model revision](https://huggingface.co/PaddlePaddle/PP-DocLayout_plus-L/tree/aa52b8528c84f9b1a34ac3a88fe0e576edb9d11d)
+into `PaddlePaddle--PP-DocLayout_plus-L/` under the same model directory.
+The required files are `inference.json`, `inference.pdiparams` and `inference.yml`.
+Install the pinned Paddle runtime in its own local environment:
+
+```sh
+python3.11 -m venv paddle-env
+paddle-env/bin/python -m pip install 'paddlepaddle==3.3.1' 'paddleocr==3.7.0' 'paddlex==3.7.2' \
+  'numpy==2.3.5' 'opencv-contrib-python==4.10.0.84'
+```
+
+```python
+from heocr.tableformer import TableFormerSession
+
+session = TableFormerSession("table-models", detector="ppdoclayout_plus",
+                             detector_python="paddle-env/bin/python")
+try:
+    doc = heocr.extract("tables.pdf", tables="tableformer", tables_models=session)
+finally:
+    session.close()
+```
+
+The local worker passes only the `table` class above 0.35 to stock TableFormer.
+HeOCR verifies the weight and config hashes before starting the worker. Pages
+where it runs carry `table_detector_ppdoclayout_plus`, including empty results.
+For phone pages, enable the phone proposal route as well.
+
 ### Form label and value associations
 
 Use `--form-fields -f json` (Python `form_fields=True`) to include

@@ -322,6 +322,54 @@ class TidyTests(unittest.TestCase):
 
 
 class PinTests(unittest.TestCase):
+    def test_ppdoclayout_opt_in_passes_page_boxes_to_stock_structure(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from types import ModuleType
+
+        from heocr.tableformer import DIRECT_VERSIONS, PP_DETECTOR, PP_DIR, PP_PINNED, PP_REPO
+        from heocr.tableformer import PP_REVISION, TableFormerSession
+
+        body = make_pdf([borderless_page()])
+        table = {**proposal(), "page_size": [595, HEIGHT]}
+        with (TemporaryDirectory() as models,
+              mock.patch.dict("sys.modules", {"docling": ModuleType("docling")}),
+              mock.patch("importlib.metadata.version", side_effect=DIRECT_VERSIONS.__getitem__),
+              mock.patch("heocr.tableformer._verify_files", return_value=PP_PINNED) as verify,
+              mock.patch.object(TableFormerSession, "_make_converter") as make_converter,
+              mock.patch("heocr.tableformer.PpDocLayoutPlus") as detector,
+              mock.patch("heocr.tableformer._load_predictor", return_value=("stock", 512)),
+              mock.patch("heocr.tableformer._predict_structure", return_value=[table]) as predict):
+            detector.return_value.boxes.return_value = [table["bbox"]]
+            session = TableFormerSession(models, detector=PP_DETECTOR)
+            try:
+                doc = heocr.extract(body, ocr=False, tables="tableformer", tables_models=session)
+            finally:
+                session.close()
+
+        verify.assert_called_once_with(Path(models).resolve(), PP_PINNED)
+        self.assertEqual(detector.call_args.args[0], Path(models).resolve() / PP_DIR)
+        detector.return_value.close.assert_called_once()
+        make_converter.assert_not_called()
+        predict.assert_called_once_with("stock", 512, body, 0, (595, HEIGHT), [table["bbox"]])
+        self.assertIn("table_detector_ppdoclayout_plus", doc.pages[0].flags)
+        self.assertIn("tableformer_tables", doc.pages[0].flags)
+        self.assertEqual(doc.options["tables"]["detector_threshold"], 0.35)
+        self.assertEqual(doc.options["tables"]["revisions"][PP_REPO], PP_REVISION)
+        self.assertEqual(heocr.validate(doc.to_dict()), [])
+
+    def test_ppdoclayout_keeps_only_tables_strictly_above_the_cut(self):
+        from heocr._ppdoclayout_plus import _table_boxes
+
+        predictor = mock.Mock()
+        predictor.predict.return_value = [{"boxes": [
+            {"label": "table", "score": 0.36, "coordinate": [1, 2, 3, 4]},
+            {"label": "table", "score": 0.35, "coordinate": [2, 3, 4, 5]},
+            {"label": "table_title", "score": 0.99, "coordinate": [3, 4, 5, 6]},
+        ]}]
+        self.assertEqual(_table_boxes(predictor, "fixture"), [[1., 2., 3., 4.]])
+        predictor.predict.assert_called_once_with("fixture", batch_size=1, threshold=0.01)
+
     def test_opt_in_detector_bypasses_converter_and_flags_only_pages_seen(self):
         from tempfile import TemporaryDirectory
         from types import ModuleType

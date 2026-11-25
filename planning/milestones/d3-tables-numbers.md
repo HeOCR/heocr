@@ -58,6 +58,7 @@ Each slice is its own PR from main. None is stacked.
 | **D3g8** | **Additive cell reads on OCR pages.** Preserve the ordinary OCR reading around and under learned table proposals. Append proposed cells after that page's text and keep native grid precedence. Verify paired calibration field recall with no lost baseline values. | D3g3, D3g7 |
 | **D3g11** | **Opt-in multi-page table continuation. Link adjoining fragments with aligned columns and an exact repeated header. Join the CSV and XLSX exports while preserving the physical page record.** | D3g4, D3g8 |
 | **D3g12** | **Opt-in TableFormer region detection. Use a locally pinned phone-adapted detector to supply page boxes directly to TableFormer, and flag pages where it runs.** | D3g, D3g3 |
+| **D3g13** | **Opt-in PP-DocLayout_plus-L table detection. Supply pinned table boxes to stock TableFormer through the D3g12 proposer.** | D3g12 |
 
 **Order:** D3a and D3f first, since they are small and independent. Then D3b and D3d in parallel, then D3c and D3e.
 

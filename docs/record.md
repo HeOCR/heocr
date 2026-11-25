@@ -88,6 +88,7 @@ Flags are open lists of strings: a later v1 may add more. The main ones, by what
   - `latin_from_second_reading` (an aligned Latin run from the English page pass was confirmed by a stock Hebrew/English line read; `ocr.latin_runs_reread` counts the replacements);
   - `from_image_region`, `layer_text_masked`, `repeated_image_text`.
 - **Tables:**
+  - `table_detector_ppdoclayout_plus` (the pinned PP-DocLayout_plus-L region detector ran on this page, including when it found no table);
   - `table_detector_heron_phone` (the opt-in region detector ran on this page, including when it found no table);
   - `table_native_lines_preserved` (a scan-form grid retained text corroborated by a native page read and an isolated crop; `ocr.native_lines_preserved` counts the added runs);
   - `ruled_table`, `unruled_table` (on a text layer, or on an OCR page, whose Tesseract columns are given back in rows; its `ocr.duplicate_lines_dropped` counts a number read twice), `ocr_tables`;
