@@ -60,6 +60,8 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--form-fields", action="store_true",
                         help="include supported label/value associations in JSON block checks")
+    parser.add_argument("--form-scan-marks", action="store_true",
+                        help="verify printed X marks on scanned forms for -f forms")
     parser.add_argument("--no-convert", action="store_true", help="do not convert DOC, RTF, ODT, ODS, XLS, ODP or PPT with LibreOffice; they are reported unread")
     parser.add_argument("--soffice", help="the LibreOffice program (soffice), when it is not on the PATH")
     parser.add_argument("--convert-timeout", type=float, metavar="SECONDS", help="time limit for one LibreOffice conversion (default: 180)")
@@ -233,6 +235,7 @@ def main(argv: list[str] | None = None) -> int:
             handwriting=handwriting,
             check_numbers=False if args.check_numbers == "off" else args.check_numbers,
             form_fields=args.form_fields or fmt == "forms",
+            form_scan_marks=args.form_scan_marks and fmt == "forms",
             convert=not args.no_convert,
             soffice=args.soffice,
             convert_timeout=args.convert_timeout,

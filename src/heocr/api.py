@@ -102,6 +102,7 @@ def extract(
     handwriting: HandwritingConfig | None = None,
     check_numbers: str | bool = "suspect",
     form_fields: bool = False,
+    form_scan_marks: bool = False,
     convert: bool = True,
     soffice: str | Sequence[str] | None = None,
     convert_timeout: float | None = None,
@@ -131,6 +132,8 @@ def extract(
     file is missing (an install from the repository), stock Tesseract reads instead and the document is
     flagged ``bundled_model_unavailable``. ``ocr_model="heb"`` (or ``"stock"``, or ``None``) reads with stock
     Tesseract ``ocr_lang``. A local ``.traineddata`` path runs that model instead of ``ocr_lang``.
+    ``form_scan_marks=True`` lets ``Document.to_forms()`` verify printed X marks using scan
+    pixels. Set ``form_fields=True`` to include the usual D3h label/value associations as well.
     Without Tesseract, or with ``ocr=False``, those pages are recorded as unread.
     ``ocr_capture_type`` opts into a single model for a declared capture. ``phone``, ``iphone`` and
     ``pixel`` use modern_v1; ``scanner`` and ``issuer-render`` use a pinned local Rivok Full model.
@@ -453,6 +456,8 @@ def extract(
         doc.options["ocr"]["line_v6_sha256"] = V6_SHA256
     if ocr_number_batch:
         doc._ocr_settings["number_batch"] = True
+    if ocr and form_scan_marks:
+        doc._ocr_settings["form_scan_marks"] = True
     if (photo_preprocess is not None or ocr_phone_geometry or ocr_phone_max_edge is not None) and kind.format in IMAGE_FORMATS:
         from heocr.ocr.routes import PHOTO_CAPTURES, classify_capture
 
