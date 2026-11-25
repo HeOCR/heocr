@@ -80,6 +80,7 @@ class Line:
     bbox: list[float]
     direction: str = "rtl"
     _pdf_punctuation: dict[int, str] = field(default_factory=dict, repr=False, compare=False)
+    _form_mark_reading: tuple[str, str] | None = field(default=None, repr=False, compare=False)
 
     def to_dict(self) -> dict[str, Any]:
         return {"text": self.text, "bbox": _round_box(self.bbox), "direction": self.direction}

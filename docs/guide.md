@@ -422,6 +422,13 @@ lists give the marked option. Explicit blank values use the empty string.
 The export uses the existing readings and leaves the text and document
 JSON intact.
 
+For scanned forms, add `--form-scan-marks` to verify printed X marks
+inside square brackets or parentheses. In Python, pass
+`form_scan_marks=True` to `extract()`. HeOCR checks ink in the OCR word
+boxes. When it confirms an X, the form export can recover a checked box
+or the selected option. The flag leaves plain text and document JSON
+intact.
+
 ### Historical print with router v2
 
 ```sh

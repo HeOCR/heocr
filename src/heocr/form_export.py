@@ -197,7 +197,13 @@ def export(doc: Document) -> list[dict]:
         for ordinal, (text, box) in enumerate(_lines(block)):
             if not text:
                 continue
-            if field := _line_field(block, text, pairs.get(ordinal), form_context):
+            pair = pairs.get(ordinal)
+            field = _line_field(block, text, pair, form_context)
+            if form_context and block.lines:
+                evidence = block.lines[ordinal]._form_mark_reading
+                if evidence and evidence[0].strip() == text:
+                    field = _line_field(block, evidence[1], None, form_context) or field
+            if field:
                 if field["kind"] == "signature" and current["title"] is not None and current["children"]:
                     end_section(None)
                 add(block, [field])
