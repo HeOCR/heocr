@@ -256,7 +256,7 @@ class PhoneGeometryTest(unittest.TestCase):
     def test_fast_mix_doc_keeps_the_v3_phone_recognizer_and_cap(self):
         image, _ = phone_page()
         payload = BytesIO()
-        image.save(payload, format="PNG")
+        image.resize((2000, 1300)).save(payload, format="PNG")
         with patch("heocr.pdf.reader._ocr_page") as read:
             before = extract(payload.getvalue(), profile="fast-mix-v3", ocr_capture_type="pixel")
             after = extract(payload.getvalue(), profile="fast-mix-doc-v1", ocr_capture_type="pixel")
