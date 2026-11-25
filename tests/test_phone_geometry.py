@@ -199,6 +199,37 @@ class PhoneGeometryTest(unittest.TestCase):
             geometry.assert_called_once()
             self.assertIn("ocr_phone_geometry_rectified", doc.pages[0].flags)
 
+    def test_phone_raster_limit_is_opt_in_and_keeps_source_page_size(self):
+        raster, _ = phone_page()
+        payload = BytesIO()
+        raster.save(payload, format="PNG", dpi=(300, 300))
+        edge = max(raster.size) // 2
+        with patch("heocr.pdf.reader._ocr_page") as read:
+            ordinary = extract(payload.getvalue(), ocr_capture_type="pixel", check_numbers=False)
+            source_args = read.call_args
+            limited = extract(payload.getvalue(), ocr_capture_type="pixel", check_numbers=False,
+                              ocr_phone_max_edge=edge)
+            limited_args = read.call_args
+            self.assertEqual(source_args.args[3:5], limited_args.args[3:5])
+            self.assertEqual(source_args.kwargs["rendered"][0].size, raster.size)
+            frame, scale = limited_args.kwargs["rendered"]
+            self.assertEqual(max(frame.size), edge)
+            self.assertAlmostEqual(scale, source_args.kwargs["rendered"][1] * edge / max(raster.size))
+            self.assertIn("ocr_phone_raster_downscaled", limited_args.args[8])
+            self.assertEqual(limited_args.args[6]["ocr_pixels"], list(frame.size))
+            self.assertEqual(limited.options["ocr"]["phone_max_edge"], edge)
+            self.assertNotIn("phone_max_edge", ordinary.options["ocr"])
+
+            scanned = extract(payload.getvalue(), ocr_capture_type="scanner", check_numbers=False,
+                              ocr_phone_max_edge=edge)
+            self.assertEqual(read.call_args.kwargs["rendered"][0].size, raster.size)
+            self.assertNotIn("phone_max_edge", scanned.options["ocr"])
+
+        self.assertEqual(_parser().parse_args(["photo.jpg", "--ocr-phone-max-edge", "1700"]).ocr_phone_max_edge, 1700)
+        for invalid in (0, -1, True, 1700.0):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(ValueError, "positive integer"):
+                extract(payload.getvalue(), ocr_phone_max_edge=invalid)
+
     def test_cli_exposes_explicit_opt_in(self):
         parser = _parser()
         self.assertFalse(parser.parse_args(["page.jpg"]).ocr_phone_geometry)
