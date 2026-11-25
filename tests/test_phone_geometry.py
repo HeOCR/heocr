@@ -109,6 +109,44 @@ class PhoneGeometryTest(unittest.TestCase):
         self.assertEqual(read_lines(engine, raster, native), old)
         self.assertEqual(lengths, [len(native.lines) + 1, len(native.lines)])
 
+        native.lines[0].confidences = [99] * len(native.lines[0].words)
+        read_lines(engine, raster, native, skip_confident=True)
+        self.assertEqual(lengths[-1], len(native.lines) - 1)
+
+    def test_fast_profile_skips_auxiliary_page_reads_on_phone_only(self):
+        raster, native = phone_page()
+        payload = BytesIO()
+        raster.save(payload, format="PNG")
+        engine = Mock(psm=3, lang="heb", route=None, version="tesseract 5.5.3")
+        engine.recognize.return_value = native
+        with (
+            patch("heocr.pdf.reader.engine_for", return_value=engine),
+            patch("heocr.pdf.reader.number_engine_for", return_value=object()),
+            patch("heocr.pdf.reader._reread_number_words", return_value=(0, 0)) as target,
+            patch("heocr.pdf.reader._page_number_pass", return_value=((0, 0), None)) as whole_page,
+            patch("heocr.ocr.layout.clip_guard", return_value=None) as clip,
+            patch("heocr.ocr.phone_geometry.read_lines", return_value=None) as rectify,
+        ):
+            fast = extract(payload.getvalue(), profile="phone-specialist-fast", ocr_capture_type="pixel")
+            self.assertEqual(fast.options["ocr"]["profile"]["name"], "phone-specialist-fast")
+            target.assert_called_once()
+            whole_page.assert_not_called()
+            clip.assert_not_called()
+            self.assertTrue(rectify.call_args.kwargs["skip_confident"])
+
+            extract(payload.getvalue(), profile="phone-specialist", ocr_capture_type="pixel")
+            whole_page.assert_called_once()
+            clip.assert_called_once()
+            self.assertNotIn("skip_confident", rectify.call_args.kwargs)
+
+            args = {"ocr_capture_type": "scanner", "ocr_layout": "v1"}
+            scan = extract(payload.getvalue(), **args)
+            scanned_with_fast = extract(payload.getvalue(), profile="phone-specialist-fast", **args)
+            self.assertEqual(scanned_with_fast.to_json(), scan.to_json())
+
+        self.assertEqual(_parser().parse_args(["photo.jpg", "--profile", "phone-specialist-fast"]).profile,
+                         "phone-specialist-fast")
+
     def test_phone_number_batching_respects_capture_opt_in_and_deadline(self):
         raster, native = phone_page()
         payload = BytesIO()

@@ -11,7 +11,7 @@ from heocr import __version__
 from heocr.api import extract
 from heocr.contract import MAX_PAGES
 from heocr.handwriting import HandwritingConfig
-from heocr.ocr.phone_profile import PHONE_SPECIALIST
+from heocr.ocr.phone_profile import PHONE_PROFILES
 from heocr.ocr.routes import CAPTURE_MODELS
 
 _FORMATS = ("text", "markdown", "json", "docx")
@@ -94,7 +94,7 @@ def _parser() -> argparse.ArgumentParser:
                         help="cap the Anthropic list-price cost per document (default: 1.00)")
     parser.add_argument("--ocr-hybrid-dry-run", action="store_true",
                         help="estimate the document's cost upper bound locally without sending anything")
-    parser.add_argument("--profile", choices=(PHONE_SPECIALIST,),
+    parser.add_argument("--profile", choices=PHONE_PROFILES,
                         help="use capture routing and rectified line OCR on standalone phone images")
     parser.add_argument("--phone-model", type=Path, metavar="FILE",
                         help="local .traineddata for the phone-specialist line slot")

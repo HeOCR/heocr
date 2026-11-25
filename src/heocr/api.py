@@ -145,7 +145,9 @@ def extract(
     ``profile="phone-specialist"`` activates capture routing, layout v1 and phone
     geometry for standalone phone images. A local ``phone_model`` and
     ``phone_model_sha256`` can replace modern v1 on rectified line crops.
-    The page read still uses modern v1. Other captures follow their usual route.
+    The page read still uses modern v1. The experimental
+    ``profile="phone-specialist-fast"`` skips the two auxiliary page rereads and
+    some high-confidence rectified line rereads. Other captures use their usual route.
     ``photo_preprocess="gray-otsu"`` sends grayscale rasters to the main Tesseract reader
     with internal Otsu thresholding on standalone photos. Use a phone capture declaration
     when camera metadata is unavailable.
@@ -293,7 +295,7 @@ def extract(
                     specialist.check_model(pin)
                 ocr_router, ocr_layout, ocr_phone_geometry = "v2", "v1", True
                 phone_profile = {
-                    "name": specialist.PHONE_SPECIALIST,
+                    "name": profile,
                     "line_model_sha256": pin[1] if pin is not None else MODELS[DEFAULT_MODEL].sha256,
                 }
     capture_reason = "declared_capture"
@@ -353,6 +355,8 @@ def extract(
         doc._ocr_settings["capture_reason"] = capture_reason
     if phone_profile is not None:
         doc.options["ocr"]["profile"] = phone_profile
+        if profile == specialist.PHONE_SPECIALIST_FAST:
+            doc._ocr_settings["phone_fast"] = True
         if pin is not None:
             doc._ocr_settings["phone_model"] = pin
     if ocr_old_print_model is not None:
