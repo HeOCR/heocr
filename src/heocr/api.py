@@ -184,9 +184,10 @@ def extract(
     default, since every page may cost an OCR run. The rest are recorded as one unread entry
     (``page_limit``) and the document is flagged ``page_limit_reached``.
 
-    ``tables="tableformer"`` (the optional ``tables`` extra) adds learned table proposals on
-    text-layer PDF pages: Docling's TableFormer proposes the structure of tables without rulings,
-    and heocr fills their cells from the page's own text layer; ruled tables keep first claim.
+    ``tables="tableformer"`` (the optional ``tables`` extra) adds learned table proposals:
+    Docling's TableFormer proposes the structure of tables without rulings, and heocr fills their
+    cells itself, from the page's text layer or, on a page read by OCR, cell by cell (camera photos
+    are skipped); ruled tables keep first claim.
     ``tables_models`` is the local directory holding the pinned weights (see ``heocr.tableformer``);
     nothing is downloaded.
     ``time_limit`` is a safety net, in seconds, for the whole document (conversion and OCR
