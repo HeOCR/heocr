@@ -2539,11 +2539,18 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
             and not (page_failed or unruled or grids or rectified or time_up(doc))):
         from heocr.ocr.phone_geometry import read_lines as read_phone_lines
 
-        corrected = read_phone_lines(engine, gray, result)
+        if "phone_model" in settings:
+            from heocr.ocr.phone_profile import line_engine
+
+            corrected = read_phone_lines(engine, gray, result, line_engine=lambda: line_engine(doc))
+        else:
+            corrected = read_phone_lines(engine, gray, result)
         if corrected is not None:
             result = corrected
             short, outside_share = short_for_ink(gray, result)
             flags = flags + ["ocr_phone_geometry_rectified"]
+            if profile := doc.options["ocr"].get("profile"):
+                signals["ocr_phone_geometry_line_sha256"] = profile["line_model_sha256"]
     columns = None
     if layout and doc._rtl:
         ltr_changes += ocr_layout.normalize_ltr(line for line in result.lines if id(line) not in taken)

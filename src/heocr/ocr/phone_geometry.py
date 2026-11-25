@@ -269,7 +269,7 @@ def _native_box(inverse, box, size):
     return [max(0, min(xs)), max(0, min(ys)), min(width, max(xs)), min(height, max(ys))]
 
 
-def read_lines(engine, image, result):
+def read_lines(engine, image, result, *, line_engine=None):
     """Reread a supported prose block and retain the original on uncertainty."""
     if engine.psm != 3 or not 5 <= len(result.lines) <= _MAX_LINES or not all(line.words for line in result.lines):
         return None
@@ -297,6 +297,8 @@ def read_lines(engine, image, result):
         spans = sorted((min(x for x, _ in points), max(x for x, _ in points)) for _, points in group)
         if any(b - a > .26 * (right - left) for (_, a), (b, _) in zip(spans, spans[1:])):
             return None
+    if line_engine is not None:
+        engine = line_engine()
     targets = range(len(boxes))
     # The pinned modern model uses only the LSTM recognizer. The audited
     # engine has no legacy cross-image adaptive classifier for this batch.
@@ -313,8 +315,12 @@ def read_lines(engine, image, result):
         readings = engine.recognize_line_batch(
             (ImageOps.expand(crop(boxes[i]), _CROP_PADDING, fill=255) for i in targets), _CROP_DPI)
     except OcrUnavailable:
+        if line_engine is not None:
+            raise ValueError("phone specialist line OCR failed with the pinned model") from None
         return None
     if len(readings) != len(targets):
+        if line_engine is not None:
+            raise ValueError("phone specialist line OCR returned an incomplete batch")
         return None
     by_slot = dict(zip(targets, readings, strict=True))
 

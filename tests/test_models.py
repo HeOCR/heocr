@@ -187,6 +187,54 @@ class ModelRouteTest(unittest.TestCase):
             self.assertEqual(call[call.index("-l") + 1], modern)
             self.assertNotIn("router", default.options["ocr"])
 
+    def test_phone_specialist_replaces_only_the_rectified_line_reader(self) -> None:
+        from heocr.ocr.phone_profile import SPECIALIST_LANG
+        from heocr.ocr.tesseract import OcrLine, OcrResult, OcrWord, Tesseract
+        from tests.test_phone_geometry import phone_page
+
+        raster, native = phone_page()
+        payload = io.BytesIO()
+        raster.save(payload, format="PNG")
+        model = Path(self.tmp.name) / "private name.traineddata"
+        model.write_bytes(b"local specialist model")
+        digest = hashlib.sha256(model.read_bytes()).hexdigest()
+        staged = []
+
+        def recognize(engine, image, dpi, psm=None):
+            self.assertEqual((engine.lang, engine.psm, psm), ("heocr_modern_v1", 3, None))
+            return native
+
+        def batch(engine, images, dpi):
+            self.assertEqual((engine.lang, dpi), (SPECIALIST_LANG, 300))
+            path = engine.tessdata / f"{SPECIALIST_LANG}.traineddata"
+            self.assertEqual(path.read_bytes(), model.read_bytes())
+            staged.append(path)
+            text = "קריאת מומחה"
+            return [OcrResult([OcrLine(text, [16, 14, 45, 22], [91],
+                                       words=[OcrWord(text, [16, 14, 45, 22], 91)])])
+                    for _ in images]
+
+        with (
+            mock.patch.dict(models.MODELS, self.capture_models()),
+            mock.patch.object(Tesseract, "recognize", recognize),
+            mock.patch.object(Tesseract, "recognize_line_batch", batch),
+            mock.patch("heocr.pdf.reader.table_rows", return_value=[]),
+            mock.patch("heocr.pdf.reader.skew_angle", return_value=0),
+        ):
+            doc = heocr.extract(payload.getvalue(), profile="phone-specialist", ocr_capture_type="pixel",
+                                phone_model=model, phone_model_sha256=digest.upper(),
+                                tesseract=FAKE, check_numbers=False)
+
+        self.assertEqual(len(staged), 1)
+        self.assertFalse(staged[0].exists())
+        self.assertEqual(doc.components["phone_specialist:line_model_sha256"], f"sha256:{digest}")
+        self.assertEqual(doc.components["tesseract:lang"], "heocr_modern_v1")
+        self.assertEqual(doc.pages[0].signals["ocr_phone_geometry_line_sha256"], digest)
+        self.assertIn("קריאת מומחה", doc.text)
+        self.assertNotIn(str(model), doc.to_json())
+        self.assertNotIn(model.name, doc.to_json())
+        self.assertEqual(heocr.validate(doc.to_dict()), [])
+
     def test_photo_preprocess_with_router_is_scoped_to_standalone_photos(self) -> None:
         from PIL import ExifTags, Image
         from PIL.TiffImagePlugin import IFDRational

@@ -7,6 +7,7 @@ import math
 import os
 from collections import deque
 from collections.abc import Callable, Iterable, Iterator, Sequence
+from contextlib import nullcontext
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 from functools import partial
@@ -84,6 +85,9 @@ def extract(
     ocr_number_batch: bool = False,
     photo_preprocess: str | None = None,
     ocr_phone_geometry: bool = False,
+    profile: str | None = None,
+    phone_model: str | os.PathLike[str] | None = None,
+    phone_model_sha256: str | None = None,
     force_ocr: bool = False,
     crnn_model: str | os.PathLike[str] | None = None,
     crnn_sha256: str | None = None,
@@ -138,6 +142,10 @@ def extract(
     The configured local OCR route handles pages where hosted reading is unavailable.
     ``ocr_phone_geometry=True`` enables perspective-corrected line OCR on phone images with
     supported page edges. Use a capture declaration or camera JPEG metadata.
+    ``profile="phone-specialist"`` activates capture routing, layout v1 and phone
+    geometry for standalone phone images. A local ``phone_model`` and
+    ``phone_model_sha256`` can replace modern v1 on rectified line crops.
+    The page read still uses modern v1. Other captures follow their usual route.
     ``photo_preprocess="gray-otsu"`` sends grayscale rasters to the main Tesseract reader
     with internal Otsu thresholding on standalone photos. Use a phone capture declaration
     when camera metadata is unavailable.
@@ -261,12 +269,38 @@ def extract(
     if crnn_model is not None and (not ocr or ocr_lang != DEFAULT_LANG):
         raise ValueError("CRNN needs Hebrew OCR (ocr_lang='heb')")
     kind = identify(body)
+    phone_profile = None
+    classified = None
+    if profile is not None or phone_model is not None or phone_model_sha256 is not None:
+        from heocr.models import MODELS
+        from heocr.ocr import phone_profile as specialist
+        from heocr.ocr.routes import PHOTO_CAPTURES, classify_capture
+
+        pin = specialist.model_pin(profile, phone_model, phone_model_sha256)
+        if kind.format in IMAGE_FORMATS:
+            capture = ocr_capture_type
+            if capture is None:
+                classified = classify_capture(body, kind.format)
+                capture = classified[0]
+            if capture in PHOTO_CAPTURES:
+                if (not ocr or ocr_lang != DEFAULT_LANG or ocr_psm != 3 or ocr_model != DEFAULT_MODEL
+                        or crnn_model is not None or handwriting is not None or hybrid is not None
+                        or ocr_old_print_model is not None):
+                    raise ValueError("phone-specialist needs local Hebrew Tesseract OCR in page mode 3 "
+                                     "with the default page model")
+                if pin is not None:
+                    specialist.check_model(pin)
+                ocr_router, ocr_layout, ocr_phone_geometry = "v2", "v1", True
+                phone_profile = {
+                    "name": specialist.PHONE_SPECIALIST,
+                    "line_model_sha256": pin[1] if pin is not None else MODELS[DEFAULT_MODEL].sha256,
+                }
     capture_reason = "declared_capture"
     if ocr_router is not None:
         from heocr.ocr.routes import RIVOK_FULL, classify_capture
 
         if ocr_capture_type is None:
-            ocr_capture_type, capture_reason, model_override = classify_capture(body, kind.format)
+            ocr_capture_type, capture_reason, model_override = classified or classify_capture(body, kind.format)
             if model_override is not None:
                 ocr_model = model_override
         if ocr_model != RIVOK_FULL:
@@ -316,6 +350,10 @@ def extract(
         doc.options["ocr"]["capture_type"] = ocr_capture_type
         doc._ocr_settings["capture_type"] = ocr_capture_type
         doc._ocr_settings["capture_reason"] = capture_reason
+    if phone_profile is not None:
+        doc.options["ocr"]["profile"] = phone_profile
+        if pin is not None:
+            doc._ocr_settings["phone_model"] = pin
     if ocr_old_print_model is not None:
         from heocr.ocr.old_print import PHIST_V2_SHA256
 
@@ -353,7 +391,8 @@ def extract(
         return doc
     doc._hybrid = hybrid
     try:
-        reader(body, doc)
+        with _temporary_models() if phone_profile is not None else nullcontext():
+            reader(body, doc)
     finally:
         doc._hybrid = None
     if repairs:
