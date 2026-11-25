@@ -2651,7 +2651,8 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
     margin_page = image.size if doc._rtl and not unruled and not (grids or rectified) else None
     record_lines = page is not None and page_class == "T5" and margin_page is not None
     scan_marks = settings.get("form_scan_marks") and page_class == "T5" and not camera_jpeg
-    line_records = _OcrLineRecords() if record_lines or gated or scan_marks else None
+    form_grid = doc._form_grid_recovery and page_class == "T5"
+    line_records = _OcrLineRecords() if record_lines or gated or scan_marks or form_grid else None
     read = _ocr_blocks(doc, index, engine, OcrResult([line for line in result.lines if id(line) not in taken]), scale,
                        form_tables=form_tables, margin_page=margin_page, line_records=line_records)
     if columns is None and _order_ocr_paragraphs(doc.blocks, first):
@@ -2723,6 +2724,11 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
         from heocr.pdf.form_marks import collect
 
         collect(doc, doc.blocks[first:], image, line_records.by_line)
+    if form_grid:
+        for block in doc.blocks[first:]:
+            for line in block.lines or ():
+                if reading := line_records.by_line.get(id(line)):
+                    line._form_grid_words = tuple((word.text, word.bbox) for word in reading.words)
     if deskew:
         center = (image.size[0] / 2 / scale, image.size[1] / 2 / scale)
         _unrotate_records(doc, first_block, first_unread, index, deskew, center)
