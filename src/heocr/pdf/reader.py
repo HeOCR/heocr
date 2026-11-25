@@ -1342,7 +1342,7 @@ def _table_proposals(doc: Document, index: int, tables, width: float, height: fl
 
 
 def _ocr_table_proposals(doc: Document, index: int, image, scale: float, grids, camera_jpeg: bool):
-    """Ruled grids found in a page image plus non-overlapping TableFormer proposals, and the page flags.
+    """Learned grids that do not overlap native grids, and the page flags.
 
     Docling sees the page image exactly as heocr reads it (after any straightening), wrapped in a one-page PDF of
     the same size in points, so the proposals' boxes meet the image. A camera photo is skipped: its warped rows do
@@ -1350,9 +1350,9 @@ def _ocr_table_proposals(doc: Document, index: int, image, scale: float, grids, 
     """
     settings = doc._ocr_settings or {}
     if camera_jpeg or settings.get("phone_geometry"):
-        return grids, ["table_proposals_skipped_camera"]
+        return [], ["table_proposals_skipped_camera"]
     if time_up(doc):
-        return grids, []
+        return [], []
     import io
 
     gray = image.convert("L")
@@ -1364,9 +1364,10 @@ def _ocr_table_proposals(doc: Document, index: int, image, scale: float, grids, 
         if "table_proposer_failed" not in doc.flags:
             doc.flags.append("table_proposer_failed")
         doc.unread.append(Unread(scope="page", reason="table_proposer_failed", page=index, detail=str(exc)[:200]))
-        return grids, ["table_proposer_failed"]
+        return [], ["table_proposer_failed"]
     merged = merge_proposals(grids, proposals, spans=lambda box: image_spans(gray, scale, box, INK_LEVEL))
-    return merged, (["tableformer_tables"] if len(merged) > len(grids) else [])
+    learned = merged[len(grids):]
+    return learned, (["tableformer_tables"] if learned else [])
 
 
 def _read_region(doc: Document, index: int, atoms: list[Atom], tables, built: PageLines | None, repairs_on: bool) -> dict:
@@ -2426,9 +2427,10 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
             deskew = 0.0
     # Ruled tables in the image are read cell by cell; the rest of the page once, without them (D3e).
     rectified = rectify_grid(image, scale, tolerate_gaps=camera_jpeg) if not grids else None
+    learned_grids = []
     if doc._table_proposer is not None and rectified is None:
-        # Learned proposals (D3g) read cell by cell like ruled grids; ruled grids keep first claim.
-        grids, proposal_flags = _ocr_table_proposals(doc, index, image, scale, grids, camera_jpeg)
+        # Keep learned proposals out of the page mask and the text-layout guards.
+        learned_grids, proposal_flags = _ocr_table_proposals(doc, index, image, scale, grids, camera_jpeg)
         flags = flags + proposal_flags
     rectified_read = None
     page_failed = False
@@ -2499,11 +2501,11 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
     except OcrUnavailable as exc:
         doc.unread.append(Unread(scope="page", reason="ocr_failed", page=index, detail=str(exc)))
         flags = flags + ["ocr_failed"]
-        if rectified_read is None:
+        if rectified_read is None and not learned_grids:
             doc.pages.append(Page(index, width, height, page_class, "none", signals,
                                   {"chars_total": text.chars_total, "chars_read": 0, "status": "unread"}, flags))
             return
-        # The isolated table is already read. Keep it even if OCR outside it failed.
+        # Keep isolated table reads even if the page-level read failed.
         result = OcrResult([])
         page_failed = True
     historical = None
@@ -2711,6 +2713,31 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
         read += hybrid.read_lines(doc, doc.blocks[first:], page_image, line_records, signals)
         if signals["ocr_hybrid_lines"]["changed"]:
             flags = flags + ["ocr_hybrid_unverified"]
+    if deskew:
+        center = (image.size[0] / 2 / scale, image.size[1] / 2 / scale)
+        _unrotate_records(doc, first_block, first_unread, index, deskew, center)
+    if settings.get("footer_order"):
+        from heocr.pdf.furniture import order_isolated_ocr_footer
+
+        if order_isolated_ocr_footer(doc.blocks, first, width, height):
+            flags = flags + ["ocr_footer_order_adjusted"]
+    if learned_grids and not time_up(doc):
+        # Let the plain page finish before appending cell readings. Interleaving
+        # these blocks could split a field that spans consecutive text blocks.
+        first_learned, first_cell_unread = len(doc.blocks), len(doc.unread)
+        learned_blocks, learned_chars = _ocr_tables(
+            doc, index, engine, image, scale, learned_grids, None if numbers is engine else numbers,
+        )
+        for block in learned_blocks:
+            tidy(block)
+            block.flags.append("ocr_table_supplement")
+        doc.blocks.extend(learned_blocks)
+        if deskew:
+            _unrotate_records(doc, first_learned, first_cell_unread, index, deskew, center)
+        read += learned_chars
+        flags = flags + ["ocr_tables"]
+        if any("table_cells_ink_unread" in block.flags for block in learned_blocks):
+            flags = flags + ["table_cells_ink_unread"]
     if page_class == "T4":
         flags = flags + ["text_layer_ignored"]
     elif page_class == "T3":
@@ -2723,14 +2750,6 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
         doc.unread.append(
             Unread(scope="page", reason="ocr_short_for_ink", page=index, detail=f"{outside_share:.0%} of the ink lies outside every OCR line")
         )
-    if deskew:
-        center = (image.size[0] / 2 / scale, image.size[1] / 2 / scale)
-        _unrotate_records(doc, first_block, first_unread, index, deskew, center)
-    if settings.get("footer_order"):
-        from heocr.pdf.furniture import order_isolated_ocr_footer
-
-        if order_isolated_ocr_footer(doc.blocks, first, width, height):
-            flags = flags + ["ocr_footer_order_adjusted"]
     doc.pages.append(
         Page(index, width, height, page_class, "ocr", signals,
              {"chars_total": text.chars_total, "chars_read": 0, "chars_ocr": read,
