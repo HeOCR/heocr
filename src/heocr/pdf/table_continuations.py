@@ -55,6 +55,8 @@ def _compatible(earlier: Block, later: Block, left: Page, right: Page) -> bool:
 
 def mark(doc: Document) -> None:
     """Attach stable group/part metadata, keeping physical table blocks as read."""
+    if len(doc.pages) < 2 or not any(b.kind == "table" for b in doc.blocks):
+        return
     pages = {p.index: p for p in doc.pages if p.width > 0 and p.height > 0}
     blocks = defaultdict(list)
     for block in doc.blocks:
