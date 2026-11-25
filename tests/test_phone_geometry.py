@@ -88,6 +88,49 @@ class PhoneGeometryTest(unittest.TestCase):
         self.assertLess(abs(new_box[1] - old_box[1]), 12)
         self.assertLess(abs(new_box[3] - old_box[3]), 12)
 
+    def test_pinned_lstm_skips_a_band_with_an_existing_number_reading(self):
+        from heocr.models import MODELS
+
+        raster, native = phone_page()
+        native.lines[1].number_readings.append({"first": "4", "second": "4"})
+        lengths = []
+
+        def batch(images, dpi):
+            crops = list(images)
+            lengths.append(len(crops))
+            return [OcrResult([OcrLine("בדיקה", [16, 14, 45, 22], [91],
+                                       words=[OcrWord("בדיקה", [16, 14, 45, 22], 91)])])
+                    for _ in crops]
+
+        engine = SimpleNamespace(psm=3, recognize_line_batch=batch)
+        old = read_lines(engine, raster, native)
+        engine.version = "tesseract 5.5.3"
+        engine.models = {"heocr_modern_v1": MODELS["heocr_modern_v1"].sha256}
+        self.assertEqual(read_lines(engine, raster, native), old)
+        self.assertEqual(lengths, [len(native.lines) + 1, len(native.lines)])
+
+    def test_phone_number_batching_respects_capture_opt_in_and_deadline(self):
+        raster, native = phone_page()
+        payload = BytesIO()
+        raster.save(payload, format="PNG")
+        engine = Mock(psm=3, lang="heb", route=None, version="tesseract 5.5.3")
+        engine.recognize.return_value = native
+        with (
+            patch("heocr.pdf.reader.engine_for", return_value=engine),
+            patch("heocr.pdf.reader.number_engine_for", return_value=object()),
+            patch("heocr.pdf.reader._reread_number_words", return_value=(0, 0)) as reread,
+            patch("heocr.pdf.reader._page_number_pass", return_value=((0, 0), None)),
+            patch("heocr.ocr.phone_geometry.read_lines", return_value=None),
+        ):
+            for capture, enabled, deadline, batch in (
+                ("pixel", True, None, True), ("pixel", False, None, False),
+                ("scanner", True, None, False), ("pixel", True, 60, False),
+            ):
+                with self.subTest(capture=capture, enabled=enabled, deadline=deadline):
+                    extract(payload.getvalue(), ocr_capture_type=capture, ocr_phone_geometry=enabled,
+                            time_limit=deadline)
+                    self.assertEqual(reread.call_args.kwargs["batch"], batch)
+
     def test_batch_failure_leaves_native_result_available(self):
         raster, native = phone_page()
         batch = Mock(side_effect=OcrUnavailable("local failure"))
