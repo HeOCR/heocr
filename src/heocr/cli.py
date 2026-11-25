@@ -58,6 +58,8 @@ def _parser() -> argparse.ArgumentParser:
         default="suspect",
         help="read numbers a second time by OCR: suspect digit groups only (default), also every table cell, all amounts and dates, or off",
     )
+    parser.add_argument("--form-fields", action="store_true",
+                        help="include supported label/value associations in JSON block checks")
     parser.add_argument("--no-convert", action="store_true", help="do not convert DOC, RTF, ODT, ODS, XLS, ODP or PPT with LibreOffice; they are reported unread")
     parser.add_argument("--soffice", help="the LibreOffice program (soffice), when it is not on the PATH")
     parser.add_argument("--convert-timeout", type=float, metavar="SECONDS", help="time limit for one LibreOffice conversion (default: 180)")
@@ -230,6 +232,7 @@ def main(argv: list[str] | None = None) -> int:
             crnn_sha256=args.crnn_sha256,
             handwriting=handwriting,
             check_numbers=False if args.check_numbers == "off" else args.check_numbers,
+            form_fields=args.form_fields,
             convert=not args.no_convert,
             soffice=args.soffice,
             convert_timeout=args.convert_timeout,

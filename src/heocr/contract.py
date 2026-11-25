@@ -360,14 +360,18 @@ def _path_like(value: Any, where: str):
 
 
 def _without_readings(checks: Any) -> Any:
-    """A block's ``checks`` for the path guard: each number reading without its OCR text (``READING_KEYS``)."""
-    if not isinstance(checks, dict) or not isinstance(checks.get("number_readings"), list):
+    """Keep machine metadata for the path guard, excluding copied document text."""
+    if not isinstance(checks, dict):
         return checks
-    readings = [
-        {key: value for key, value in entry.items() if key not in READING_KEYS} if isinstance(entry, dict) else entry
-        for entry in checks["number_readings"]
-    ]
-    return {**checks, "number_readings": readings}
+    filtered = dict(checks)
+    for name, text_keys in (("number_readings", READING_KEYS), ("form_fields", {"label", "value"})):
+        entries = checks.get(name)
+        if isinstance(entries, list):
+            filtered[name] = [
+                {key: value for key, value in entry.items() if key not in text_keys}
+                if isinstance(entry, dict) else entry for entry in entries
+            ]
+    return filtered
 
 
 def _is_box(value: Any) -> bool:
