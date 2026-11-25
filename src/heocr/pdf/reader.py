@@ -62,6 +62,7 @@ from heocr.pdf.ocrtables import (
 from heocr.pdf.perspective import rectify_grid
 from heocr.pdf.proposed import PROPOSED, image_spans, merge_proposals
 from heocr.pdf.tables import find_tables, rulings, table_blocks
+from heocr.pdf.desnake import desnake
 from heocr.pdf.tabletidy import tidy
 from heocr.textflags import is_private_use, text_flags
 
@@ -1414,6 +1415,7 @@ def _read_region(doc: Document, index: int, atoms: list[Atom], tables, built: Pa
     for table in t_blocks:
         _log_cell_repairs(doc, table)
         tidy(table)  # D3g: learned proposals only, after arrange has extended them; ruled grids are never reshaped
+        desnake(table)  # D3g: side-by-side blocks become one logical table, ruled or not
     _place_tables(doc, first, t_blocks)
     return {
         "in_tables": in_tables,
@@ -2689,6 +2691,7 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
                                             **({"form_probe": form_probe} if form_probe else {}))
         for block in t_blocks:
             tidy(block)  # D3g: learned proposals only; ruled grids are never reshaped
+            desnake(block)
         _place_tables(doc, first, t_blocks)
         read += in_cells
         flags = flags + ["ocr_tables"]
@@ -2732,6 +2735,7 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
         )
         for block in learned_blocks:
             tidy(block)
+            desnake(block)
             block.flags.append("ocr_table_supplement")
         doc.blocks.extend(learned_blocks)
         if deskew:
