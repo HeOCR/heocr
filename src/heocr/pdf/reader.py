@@ -1338,7 +1338,7 @@ def _table_proposals(doc: Document, index: int, tables, width: float, height: fl
             doc.flags.append("table_proposer_failed")
         doc.unread.append(Unread(scope="page", reason="table_proposer_failed", page=index, detail=str(exc)[:200]))
         return tables, ["table_proposer_failed"]
-    merged = merge_proposals(tables, proposals, ink)
+    merged = merge_proposals(tables, proposals, ink, regrid=getattr(doc, "_tables_regrid", False))
     return merged, (["tableformer_tables"] if len(merged) > len(tables) else [])
 
 

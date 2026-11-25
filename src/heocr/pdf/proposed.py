@@ -171,6 +171,79 @@ def _missing_rows(bands: list, spans_across: set[int], top: float, bottom: float
     return out
 
 
+def _line_groups(chars: list, usual: float | None = None) -> tuple[list[tuple[float, float]], float, float]:
+    """The text lines among ``chars`` (x0, top, x1, bottom, ...), top to bottom, with consecutive lines closer than
+    the usual line gap by LINE_BREAK line heights joined (a line break inside a cell); the median line height; and
+    the usual gap (the median one, unless given)."""
+    from heocr.pdf.tabletidy import LINE_BREAK
+
+    if not chars:
+        return [], 0.0, 0.0
+    heights = sorted(c[3] - c[1] for c in chars)
+    height = max(heights[len(heights) // 2], 1.0)
+    lines: list[list[float]] = []
+    for c in sorted(chars, key=lambda c: (c[1] + c[3]) / 2):
+        cy = (c[1] + c[3]) / 2
+        if lines and abs(cy - (lines[-1][0] + lines[-1][1]) / 2) < 0.5 * height:
+            lines[-1][0], lines[-1][1] = min(lines[-1][0], c[1]), max(lines[-1][1], c[3])
+        else:
+            lines.append([c[1], c[3]])
+    gaps = sorted(b[0] - a[1] for a, b in zip(lines, lines[1:]))
+    if usual is None:
+        usual = gaps[len(gaps) // 2] if gaps else 0.0
+    groups = [list(lines[0])]
+    for line in lines[1:]:
+        if line[0] - groups[-1][1] < usual - LINE_BREAK * height:
+            groups[-1][1] = max(groups[-1][1], line[1])
+        else:
+            groups.append(list(line))
+    return [tuple(g) for g in groups], height, usual
+
+
+# Which mixed cell triggers a regrid: "digits" = two printed rows that both carry a digit; "any" = any two line
+# groups a full row gap apart. Selected on synthgen tables-0032 TRAIN born-digital pages (rule #1318), not on DEV.
+REGRID_TRIGGER = "digits"
+
+
+def _regrid_rows(xs: list[float], ys: list[float], cells: list, chars: list) -> tuple[list[float], list] | None:
+    """Rows rebuilt from the text layer when one detected cell holds two printed rows (``table_rows_regridded``):
+    two line groups a full row gap apart inside a single grid cell, each with a digit. Then the table gets one row per line group of
+    the whole table, boundaries midway between them. A detected cell in a mixed row becomes one cell per printed
+    row; a cell that spans rows keeps spanning the printed rows inside it. None when no cell holds two rows."""
+    groups, _height, usual = _line_groups(chars)
+    if len(groups) < 2:
+        return None
+    mixed = False
+    for r in range(len(ys) - 1):
+        for c in range(len(xs) - 1):
+            own = [ch for ch in chars if xs[c] <= (ch[0] + ch[2]) / 2 < xs[c + 1] and ys[r] <= (ch[1] + ch[3]) / 2 < ys[r + 1]]
+            lines = _line_groups(own, usual)[0]
+            # two printed rows of values; a wrapped header or label has no digits on its lines
+            with_digits = [g for g in lines if any(g[0] <= (ch[1] + ch[3]) / 2 <= g[1] and str(ch[4] if len(ch) > 4 else "")[:1].isdigit()
+                                                   for ch in own)]
+            if len(with_digits if REGRID_TRIGGER == "digits" else lines) >= 2:
+                mixed = True
+                break
+        if mixed:
+            break
+    if not mixed:
+        return None
+    centers = [(g[0] + g[1]) / 2 for g in groups]
+    per_band = [[i for i, cy in enumerate(centers) if ys[r] <= cy < ys[r + 1]] for r in range(len(ys) - 1)]
+    new_ys = [ys[0]] + [(groups[i][1] + groups[i + 1][0]) / 2 for i in range(len(groups) - 1)] + [ys[-1]]
+    out = []
+    for r0, c0, rs, cs, box in cells:
+        inside = sorted({i for r in range(r0, r0 + rs) for i in per_band[r]})
+        if not inside:
+            continue
+        if rs == 1:
+            for i in inside:
+                out.append((i, c0, 1, cs, box if len(inside) == 1 else None))
+        else:
+            out.append((inside[0], c0, inside[-1] - inside[0] + 1, cs, box))
+    return new_ys, out
+
+
 TOP_ROW_WIDTH = 1.5  # in mean column widths: a lone line above the table no wider than this can be a missed row
 
 
@@ -202,17 +275,19 @@ def _row_above(ink: list, x0: float, x1: float, cols: int, bands: list) -> tuple
 MIN_COLUMN_GAP = 0.6  # share of the median character height: a narrower common gap is a word space
 
 
-def _column_split(a: float, b: float, rows: list[list[tuple]], height: float) -> float | None:
+def _column_split(a: float, b: float, rows: list[list[tuple]], height: float, letters_cross: bool = False) -> float | None:
     """A line inside the column (a, b) that the detector missed: the middle of the widest stretch no row's text
     crosses, but at most one (a label spilling over), with numbers on both sides of it in at least two rows and in at
-    least a third of the column's inked rows. None when there is none."""
+    least a third of the column's inked rows. With ``letters_cross`` (regrid) only digits must stay clear of the
+    stretch: labels may spill over a column line, as a matrix's diagonal labels do. None when there is none."""
     inked = [[c for c in row if a <= (c[0] + c[1]) / 2 <= b] for row in rows]
     inked = [row for row in inked if row]
     if len(inked) < 2:
         return None
     best = None
     for skip in [None, *range(len(inked))]:
-        ink = [(c[0], c[1]) for i, row in enumerate(inked) if i != skip for c in row]
+        ink = [(c[0], c[1]) for i, row in enumerate(inked) if i != skip for c in row
+               if not letters_cross or not c[2].isalpha()]
         for lo, hi in _free(a, b, ink):
             if hi - lo < MIN_COLUMN_GAP * height or lo <= a or hi >= b:
                 continue  # too narrow for a column gap, or the column's own margin
@@ -224,7 +299,8 @@ def _column_split(a: float, b: float, rows: list[list[tuple]], height: float) ->
     return best[1] if best else None
 
 
-def _recover_columns(xs: list[float], ys: list[float], cells: list, cols: int, boxes: list) -> tuple:
+def _recover_columns(xs: list[float], ys: list[float], cells: list, cols: int, boxes: list,
+                     letters_cross: bool = False) -> tuple:
     """Columns the detector merged, split again where the text layer shows a steady gap between numbers
     (``table_columns_recovered``). Each new line splits the cells in that column; a cell spanning it widens."""
     chars = [(b[0], b[2], (b[4] if len(b) > 4 else "0")[:1], (b[1] + b[3]) / 2) for b in boxes]
@@ -234,7 +310,7 @@ def _recover_columns(xs: list[float], ys: list[float], cells: list, cols: int, b
     recovered = 0
     k = 0
     while k < cols and recovered < cols:
-        cut = _column_split(xs[k], xs[k + 1], rows, height)
+        cut = _column_split(xs[k], xs[k + 1], rows, height, letters_cross)
         if cut is None:
             k += 1
             continue
@@ -277,7 +353,7 @@ def _split_spans(xs: list[float], ys: list[float], cells: list, boxes: list) -> 
     return out, split
 
 
-def to_table(proposal: dict, ink: list[Box] | None = None, spans=None) -> Table | None:
+def to_table(proposal: dict, ink: list[Box] | None = None, spans=None, regrid: bool = False) -> Table | None:
     """The proposal as a D3b grid, or None when it is not a table of at least 2 x 2 positions.
 
     ``ink`` holds the page's character boxes (x0, top, x1, bottom), used only to place grid lines. ``spans``, a
@@ -341,8 +417,14 @@ def to_table(proposal: dict, ink: list[Box] | None = None, spans=None) -> Table 
         rows, row_bands = len(bands), bands
     xs = _lines((x0, x1), _bands(cols, firsts_x, lasts_x), x_ink, exact=spans is None)
     ys = _lines((top, bottom), row_bands, y_ink)
+    if regrid and spans is None and inside:
+        rebuilt = _regrid_rows(xs, ys, cells, inside)
+        if rebuilt is not None:
+            ys, cells = rebuilt
+            rows = len(ys) - 1
+            flags.append("table_rows_regridded")
     if spans is None and inside:
-        xs, cells, cols, recovered = _recover_columns(xs, ys, cells, cols, inside)
+        xs, cells, cols, recovered = _recover_columns(xs, ys, cells, cols, inside, "table_rows_regridded" in flags)
         if recovered:
             flags.append("table_columns_recovered")
         cells, split = _split_spans(xs, ys, cells, inside)
@@ -378,11 +460,11 @@ def _overlaps(a, b) -> bool:
 
 
 def merge_proposals(native: list[Table], proposals: list[dict], ink: list[Box] | None = None,
-                    spans=None) -> list[Table]:
+                    spans=None, regrid: bool = False) -> list[Table]:
     """Native tables, then each usable proposal that overlaps neither a native table nor an earlier proposal."""
     out = list(native)
     for proposal in proposals:
-        table = to_table(proposal, ink, spans)
+        table = to_table(proposal, ink, spans, regrid)
         if table is not None and not any(_overlaps(table.bbox, t.bbox) for t in out):
             out.append(table)
     return out

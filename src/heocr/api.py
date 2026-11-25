@@ -114,6 +114,7 @@ def extract(
     time_limit: float | None = None,
     tables: str | None = None,
     tables_models: str | os.PathLike[str] | TableFormerSession | None = None,
+    tables_regrid: bool = False,
     join_tables: bool = False,
 ) -> Document:
     """Read a document and return its ``heocr_document.v1`` record.
@@ -197,6 +198,8 @@ def extract(
     ``profile="fast-mix-v3"`` keeps that phone route. For scanners and issuer renders
     it enables detached footer order and additive local learned cells, with
     ``tables_models`` naming the pinned local model directory.
+    ``tables_regrid=True`` (with ``tables``) rebuilds a text-layer proposal's rows from the page's text lines when
+    one detected row holds two or more printed rows (flag ``table_rows_regridded``).
 
     ``crnn_model`` and ``crnn_sha256`` opt OCR page prose into a local CPU ONNX line reader.
     Tesseract supplies the ordered boxes and reads tables, form entries and image regions.
@@ -242,6 +245,8 @@ def extract(
         raise ValueError("max_pages must be a positive integer")
     if tables is not None and (tables != "tableformer" or tables_models is None):
         raise ValueError("tables must be 'tableformer', with tables_models set to the pinned model directory")
+    if tables_regrid and tables is None:
+        raise ValueError("tables_regrid needs tables='tableformer'")
     if time_limit is not None and (
         isinstance(time_limit, bool) or not isinstance(time_limit, (int, float)) or not math.isfinite(time_limit) or time_limit <= 0
     ):
@@ -444,6 +449,9 @@ def extract(
 
         doc._table_proposer = TableFormerProposer(tables_models)
         doc.options["tables"] = doc._table_proposer.record
+        if tables_regrid:
+            doc._tables_regrid = True
+            doc.options["tables"] = {**doc.options["tables"], "regrid": True}
     if handwriting is not None:
         doc._handwriting = HandwritingReader(handwriting)
         doc.options["handwriting"] = handwriting.provenance()
