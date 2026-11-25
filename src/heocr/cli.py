@@ -84,6 +84,8 @@ def _parser() -> argparse.ArgumentParser:
                         help="enable geometric OCR layout for columns, cells, mixed runs and clipped edges")
     parser.add_argument("--tables", choices=("tableformer",),
                         help="opt into local TableFormer table proposals")
+    parser.add_argument("--join-tables", action="store_true",
+                        help="join verified table continuations in CSV/XLSX, keeping the first header")
     parser.add_argument("--tables-models", type=Path, metavar="DIR",
                         help="directory holding the pinned TableFormer and layout models")
     parser.add_argument("--ocr-old-print-model", metavar="MODEL",
@@ -232,6 +234,7 @@ def main(argv: list[str] | None = None) -> int:
             time_limit=args.time_limit,
             tables=args.tables,
             tables_models=args.tables_models,
+            join_tables=args.join_tables,
         )
     except ImportError as exc:
         if args.tables is None and args.profile != FAST_MIX_V3:

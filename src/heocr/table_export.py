@@ -16,7 +16,9 @@ the same record gives the same file.
 """
 from __future__ import annotations
 
+from collections import defaultdict
 import csv
+from dataclasses import replace
 import io
 import zipfile
 from typing import TYPE_CHECKING
@@ -29,8 +31,27 @@ if TYPE_CHECKING:  # pragma: no cover
 
 
 def tables(doc: "Document") -> list["Block"]:
-    """The document's table blocks, in reading order."""
-    return [b for b in doc.blocks if b.kind == "table" and b.cells]
+    """Return physical tables or their verified logical joins in reading order."""
+    blocks = [b for b in doc.blocks if b.kind == "table" and b.cells]
+    if not doc.options.get("join_tables"):
+        return blocks
+    groups = defaultdict(list)
+    output = []
+    for block in blocks:
+        link = (block.checks or {}).get("table_continuation")
+        if link is None:
+            output.append(block)
+            continue
+        key = link["group"]
+        if not groups[key]:
+            output.append(key)
+        groups[key].append((link["part"], link["repeated_header_rows"], block))
+    joined = {}
+    for key, parts in groups.items():
+        parts.sort(key=lambda part: part[0])
+        cells = [row for _, repeated, block in parts for row in block.cells[repeated:]]
+        joined[key] = replace(parts[0][2], cells=cells)
+    return [joined[entry] if isinstance(entry, str) else entry for entry in output]
 
 
 def table_grid(block: "Block") -> tuple[list[list[str]], list[tuple[int, int, int, int]]]:

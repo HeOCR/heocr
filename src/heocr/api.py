@@ -106,6 +106,7 @@ def extract(
     time_limit: float | None = None,
     tables: str | None = None,
     tables_models: str | os.PathLike[str] | None = None,
+    join_tables: bool = False,
 ) -> Document:
     """Read a document and return its ``heocr_document.v1`` record.
 
@@ -494,6 +495,11 @@ def extract(
             Unread(scope="document", reason="ocr_call_failed",
                    detail=f"{failed} Tesseract call(s) failed or timed out; what they would have read is missing")
         )
+    if join_tables:
+        from heocr.pdf.table_continuations import mark
+
+        doc.options["join_tables"] = True
+        mark(doc)
     return doc
 
 

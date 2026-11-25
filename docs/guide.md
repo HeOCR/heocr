@@ -320,6 +320,16 @@ The Python option is `ocr_layout="v1"`. It applies to OCR, and readable
 text layers use their usual route. The record flags accepted ordering and
 padding changes.
 
+### Tables continuing across pages
+
+Use `--join-tables` (Python `join_tables=True`) to export adjacent fragments
+of a supported table as one CSV or XLSX sheet. The join requires a repeated
+header, matching logical width and side bounds, and continuity at the page
+edges. The first header stays in the logical export. JSON retains each
+physical table, including the repeated header, with its group and part in
+`checks.table_continuation`. The ordinary text view preserves the physical
+page reading.
+
 ### Learned tables extra
 
 Use this experimental option for tables without visible rulings on PDF
