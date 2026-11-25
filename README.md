@@ -44,6 +44,22 @@ Image-only pages can also use the [experimental opt-in Kraken handwriting route]
 
 The CLI prints each `unread` entry on stderr (`-q` silences them). It exits with 1 only when the file cannot be opened or an option is invalid. A document read only in part, or not at all, exits with 0, and its `unread` entries say why.
 
+## Opt-in routes and profiles
+
+Use the default for routine reading. Choose an option below when the document
+needs a different route.
+
+| Document or goal | Option |
+| --- | --- |
+| Angled standalone phone photo | [`--profile phone-specialist`](docs/guide.md#phone-specialist-profile) uses local modern_v1 and guarded perspective correction. |
+| Scanned page with columns, mixed-direction lines or possible tables | [`--ocr-layout v1`](docs/guide.md#geometric-ocr-layout) enables geometric OCR layout. |
+| Borderless table in a text-layer PDF | The [`heocr[tables]` extra](docs/guide.md#learned-tables-extra) enables TableFormer through Python with pinned local weights. |
+| Historical Hebrew scan | [`--ocr-router v2 --ocr-old-print-model PATH`](docs/guide.md#historical-print-with-router-v2) tries the pinned local specialist when the page qualifies. |
+| Experimental hosted OCR | [Haiku hybrid](docs/guide.md#haiku-hybrid-ocr) is parked for launch. `--ocr-hybrid haiku --ocr-hybrid-dry-run` estimates cost locally. |
+
+See [which flags for which document](docs/guide.md#which-flags-for-which-document)
+for setup, capture overrides and route limits.
+
 ## Formats and routes
 
 The format is decided from the content, never from the file name. The file name is never recorded.

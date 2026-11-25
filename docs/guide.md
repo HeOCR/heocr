@@ -49,19 +49,40 @@ export TESSDATA_PREFIX=~/tessdata
 
 To check, run `tesseract --list-langs`: it should list `eng` and `heb`. heocr records the models it used, each with its sha256, in the record's `producer.components`.
 
-### Which OCR route when
+### LibreOffice
 
-| Input or need | Route |
-| --- | --- |
-| Readable text layers, routine scans, or files that must stay local | Start with the default. It reads usable text layers and uses the installed local OCR for image pages. |
-| A known scanner, issuer render, or phone capture | Use [capture router v2](#capture-router-v2). Declare the capture for images without usable metadata or phone photos wrapped in a PDF. |
-| Historical Hebrew print that must stay local | Use [router v2 with the pinned P-hist v2 model](#historical-print-with-router-v2) if you have the weights. |
-| Modern print cleared for sharing, when plain page text is enough | Use [Haiku hybrid OCR](#haiku-hybrid-ocr) with `--ocr-hybrid haiku`. It sends the page image. |
-| Old print cleared for sharing, when plain page text is enough | Add `--ocr-hybrid-old-print` to Haiku. It sends the page image and the local R8b draft. |
+**macOS:**
 
-Add [geometric layout v1](#geometric-ocr-layout) to local OCR when you need
-line boxes or structured cells. You can pair router v2 with Haiku to
-choose the local fallback.
+```sh
+brew install --cask libreoffice
+```
+
+heocr also finds it in `/Applications`.
+
+**Debian and Ubuntu:**
+
+```sh
+sudo apt install libreoffice-writer libreoffice-calc libreoffice-impress
+```
+
+**Windows:** install LibreOffice from [libreoffice.org](https://www.libreoffice.org/download/). If `soffice.exe` is not on the `PATH`, set `HEOCR_SOFFICE` to its path, or pass `soffice=` / `--soffice`.
+
+Each conversion runs with a throwaway profile and stops after 180 seconds (`convert_timeout` / `--convert-timeout`).
+
+## Which flags for which document
+
+Start with `heocr INPUT`. HeOCR reads usable text layers and uses local OCR
+where it needs to read pixels. Add a route when the input calls for one.
+
+| Document or goal | Flag or setup | What to expect |
+| --- | --- | --- |
+| Readable PDF, office file or routine scan | No route flags | The default chooses the text layer, format reader or installed local OCR. |
+| Angled standalone phone photo of printed Hebrew | `--profile phone-specialist` | Adds layout and guarded perspective correction. Add `--ocr-capture-type phone` if camera metadata is missing. Requires local modern_v1. [Phone specialist profile](#phone-specialist-profile) |
+| Known scanner or issuer-render capture | `--ocr-router v2 --ocr-capture-type scanner` or `--ocr-router v2 --ocr-capture-type issuer-render` | Uses pinned Rivok Full where OCR is needed. [Capture router v2](#capture-router-v2) |
+| Scan with columns, mixed-direction lines or possible tables | `--ocr-layout v1 -f json` | Applies geometric layout to OCR. JSON keeps the structure and flags. [Geometric OCR layout](#geometric-ocr-layout) |
+| Borderless table in a PDF with a usable text layer | Install `heocr[tables]`, then pass `tables="tableformer"` and `tables_models=path` to `heocr.extract` | Python API with local model weights. [Learned tables extra](#learned-tables-extra) |
+| Scanned book in historical Hebrew | `--ocr-router v2 --ocr-old-print-model PATH` | Tries the pinned local P-hist v2 on OCR pages with corroborating historical evidence. [Historical print](#historical-print-with-router-v2) |
+| Experimental hosted OCR for an approved document | Start with `--ocr-hybrid haiku --ocr-hybrid-dry-run` | Local cost estimate. The hybrid route is parked for launch. [Haiku hybrid OCR](#haiku-hybrid-ocr) |
 
 ### Capture router v2
 
@@ -128,7 +149,7 @@ readings would be discarded by the geometry checks. In Python, pass
 
 For internal capture checks, see the [DEV215 triad runbook](dev215-triads.md).
 
-#### Phone specialist profile
+### Phone specialist profile
 
 ```sh
 heocr photo.jpg --profile phone-specialist
@@ -136,16 +157,22 @@ heocr photo.jpg --profile phone-specialist --ocr-capture-type pixel \
   --phone-model /local/models/specialist.traineddata --phone-model-sha256 SHA256
 ```
 
-The profile activates router v2, layout v1 and phone perspective correction
-for standalone phone images. Router v2 recognizes camera JPEGs by exposure
-or focal-length EXIF. Declare `phone`, `iphone` or `pixel` for a standalone
-image without that evidence. Other inputs follow the same route and yield the
-same record with or without the profile.
+Use this local profile for standalone phone images. It combines capture
+routing, layout v1 and guarded perspective correction. Router v2 recognizes
+camera JPEGs by exposure or focal-length EXIF. Declare `phone`, `iphone` or
+`pixel` for a standalone image without that evidence. Other inputs follow the
+same route and yield the same record with or without the profile. For a phone
+photo wrapped in a PDF,
+[declare the capture with router v2](#capture-router-v2) to select modern_v1
+for OCR. The profile applies its geometry only to standalone images.
 
-The native page pass uses modern v1 (PSM 3). Supported rectified crops use
-modern v1 by default (PSM 7 at 300 DPI). Supply both the local traineddata
-path and its full SHA-256 to swap only the crop recognizer. HeOCR checks the
-file on routed phone inputs and rechecks the staged copy before recognition.
+The profile needs the pinned modern_v1 model locally. Put
+`heocr_modern_v1.traineddata` in the model cache or point `HEOCR_MODELS` at
+its directory. The native page pass uses modern v1 (PSM 3). Supported rectified
+crops use modern v1 by default (PSM 7 at 300 DPI). Supply both the local
+traineddata path and its full SHA-256 to swap only the crop recognizer. HeOCR
+checks the file on routed phone inputs and rechecks the staged copy before
+recognition.
 A bad pin or a failed custom recognition batch is an error. When geometry or
 individual line evidence is inconclusive, the profile keeps the native
 reading. The profile makes no downloads or hosted OCR calls.
@@ -158,8 +185,12 @@ and its configured line SHA-256. Accepted rectified reads also record
 ### Geometric OCR layout
 
 ```sh
-heocr scan.pdf --ocr-router v2 --ocr-layout v1
+heocr scan.pdf --ocr-layout v1 -f json
 ```
+
+Choose this stage for layout on OCR pages. Pair it with
+[`--ocr-router v2`](#capture-router-v2) if you also want capture-based model
+selection. The phone specialist profile enables layout v1 automatically.
 
 The optional layout stage uses OCR boxes to read sustained prose columns
 right to left and attach recurring narrow margin notes at adjacent rows.
@@ -180,14 +211,47 @@ The Python option is `ocr_layout="v1"`. It applies to OCR, and readable
 text layers use their usual route. The record flags accepted ordering and
 padding changes.
 
+### Learned tables extra
+
+Use this experimental Python option for tables without visible rulings
+on PDF pages with a usable text layer. TableFormer proposes table and
+cell boxes. HeOCR fills the cells from the page's own text and gives
+native ruled grids first claim. For tables in scanned pages, use
+[geometric OCR layout](#geometric-ocr-layout).
+
+Install the `tables` extra, which adds Docling and PyTorch. With the
+Hugging Face CLI (`hf`), fetch the two model bundles at the pinned revisions.
+
+```sh
+pip install 'heocr[tables] @ git+https://github.com/HeOCR/heocr.git'
+hf download docling-project/docling-models --revision fc0f2d45e2218ea24bce5045f58a389aed16dc23 \
+  --local-dir table-models/docling-project--docling-models
+hf download docling-project/docling-layout-heron --revision 8f39ad3c0b4c58e9c2d2c84a38465abf757272d8 \
+  --local-dir table-models/docling-project--docling-layout-heron
+```
+
+Pass the parent directory of the two bundles to the Python API.
+
+```python
+import heocr
+
+doc = heocr.extract("tables.pdf", tables="tableformer", tables_models="table-models")
+print(doc.markdown)
+```
+
+HeOCR checks the weight hashes and uses the local models. Enable TableFormer
+through these Python arguments. Installing the extra alone leaves the default
+table reader in use. See the [model pins](../src/heocr/tableformer.py).
+
 ### Historical print with router v2
 
 ```sh
 heocr book.pdf --ocr-router v2 --ocr-old-print-model /private/phist_v2.traineddata
 ```
 
-The optional branch probes whole-page OCR for historical Hebrew print. It
-looks for distinct classical-print terms on multiple lines of the local
+Set up the [local router v2 models](#capture-router-v2) first. The optional
+branch probes whole-page OCR for historical Hebrew print by looking for
+distinct classical-print terms on multiple lines of the local
 reading. It requires the P-hist v2 reread to corroborate the terms, text
 coverage and confidence. Digit-heavy pages, ruled tables, declared native
 issuer renders and pages with weak evidence keep the usual router v2
@@ -202,9 +266,14 @@ pass `ocr_router="v2"` and `ocr_old_print_model=path`.
 
 ### Haiku hybrid OCR
 
-`--ocr-hybrid haiku` explicitly authorizes HeOCR to send OCR images to
-Anthropic using `ANTHROPIC_API_KEY`. The feature is off by default. Use it only for
-documents you are authorized to share.
+**Experimental, parked for launch.** The line- and page-level routing trials
+missed the joint target of near-Haiku-only quality at half the API cost.
+Use the local routes for routine reading.
+
+The option remains available. `--ocr-hybrid haiku` explicitly authorizes
+HeOCR to send OCR images to Anthropic using `ANTHROPIC_API_KEY`. Use it only
+for documents you are authorized to share. For an estimate without sending
+anything, add `--ocr-hybrid-dry-run`.
 
 ```sh
 heocr scan.pdf --ocr-hybrid haiku --ocr-hybrid-max-usd 1.00 --ocr-hybrid-dry-run
@@ -283,27 +352,6 @@ can have different costs. Local routes use $0 in API charges and still use CPU
 time. Use the dry run for the conservative reservation and check each
 successful page's `signals.ocr_hybrid_usage.list_price_usd` in the JSON record for its
 reported token cost.
-
-
-### LibreOffice
-
-**macOS:**
-
-```sh
-brew install --cask libreoffice
-```
-
-heocr also finds it in `/Applications`.
-
-**Debian and Ubuntu:**
-
-```sh
-sudo apt install libreoffice-writer libreoffice-calc libreoffice-impress
-```
-
-**Windows:** install LibreOffice from [libreoffice.org](https://www.libreoffice.org/download/). If `soffice.exe` is not on the `PATH`, set `HEOCR_SOFFICE` to its path, or pass `soffice=` / `--soffice`.
-
-Each conversion runs with a throwaway profile and stops after 180 seconds (`convert_timeout` / `--convert-timeout`).
 
 ## From Python
 
