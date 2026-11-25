@@ -25,6 +25,7 @@ from unittest import mock
 import heocr
 from heocr.cli import main as cli
 from heocr.ocr import tesseract
+from tests.synth import fake_tesseract
 
 # (the function the call is made from, its module, an existing test that reaches it, whether the call is
 # made while a page is read, so the page itself is flagged)
@@ -72,6 +73,15 @@ def _replay(test_id: str, function: str | None = None, module: str = "", mode: s
             if mode == "timeout":
                 raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout") or 180)
             return subprocess.CompletedProcess(cmd, 1, b"", b"forced failure")
+        # The original tests already exercise the subprocess boundary. In the
+        # replays, run successful fixture calls in-process to avoid spawning a
+        # Python interpreter for each call while keeping its TSV and call log.
+        if isinstance(cmd, list) and len(cmd) > 1 and cmd[1] == fake_tesseract.__file__:
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with (mock.patch.dict(os.environ, kwargs["env"], clear=True),
+                  redirect_stdout(stdout), redirect_stderr(stderr)):
+                status = fake_tesseract.main(cmd[2:])
+            return subprocess.CompletedProcess(cmd, status, stdout.getvalue().encode(), stderr.getvalue().encode())
         return real_run(cmd, *args, **kwargs)
 
     def extract(*args, **kwargs):
