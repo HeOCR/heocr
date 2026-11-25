@@ -414,11 +414,18 @@ def extract(
 
         doc._crnn = CrnnReader(crnn_model, crnn_sha256)
         doc.options["crnn"] = {"engine": "crnn", "model_sha256": doc._crnn.sha256}
+    detector_pages: set[int] = set()
+    table_detector = None
     if tables is not None:
         from heocr.tableformer import TableFormerProposer
 
         doc._table_proposer = TableFormerProposer(tables_models)
         doc.options["tables"] = doc._table_proposer.record
+        table_detector = doc._table_proposer.record.get("detector")
+        if table_detector is not None:
+            # Both readers append their final Page after the proposal call.
+            # OCR passes a one-page PDF whose local index is always zero.
+            doc._table_proposer._on_detection = lambda: detector_pages.add(len(doc.pages))
     if handwriting is not None:
         doc._handwriting = HandwritingReader(handwriting)
         doc.options["handwriting"] = handwriting.provenance()
@@ -513,6 +520,11 @@ def extract(
             reader(body, doc)
     finally:
         doc._hybrid = None
+        if table_detector is not None:
+            doc._table_proposer._on_detection = None
+    for index in detector_pages:
+        if index < len(doc.pages):
+            doc.pages[index].flags.append(f"table_detector_{table_detector}")
     if repairs:
         from heocr.repairs import repair_hebrew_commas, repair_ocr_date_brackets, repair_ocr_ellipses
 
