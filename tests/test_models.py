@@ -187,6 +187,28 @@ class ModelRouteTest(unittest.TestCase):
             self.assertEqual(call[call.index("-l") + 1], modern)
             self.assertNotIn("router", default.options["ocr"])
 
+    def test_v2_routes_a_metadata_free_photo_with_page_perspective(self) -> None:
+        from tests.test_phone_geometry import phone_page
+
+        image, _ = phone_page()
+        capture_models = self.capture_models()
+        for image_format in ("PNG", "JPEG"):
+            buffer = io.BytesIO()
+            image.convert("RGB").save(buffer, format=image_format)
+            payload = buffer.getvalue()
+            with self.subTest(image_format=image_format), mock.patch.dict(models.MODELS, capture_models):
+                options = dict(tesseract=FAKE, ocr_router="v2", profile="phone-specialist", check_numbers=False)
+                photo = heocr.extract(payload, **options)
+                self.assertEqual(heocr.validate(photo.to_dict()), [])
+                self.assertEqual(photo.options["ocr"]["router"]["reason"], "camera_perspective")
+                self.assertEqual(photo.options["ocr"]["capture_type"], "camera-photo")
+                self.assertEqual(photo.options["ocr"]["profile"]["name"], "phone-specialist")
+                self.assertEqual(photo.options["ocr"]["model"], "heocr_modern_v1")
+                scanner = heocr.extract(payload, **options, ocr_capture_type="scanner")
+                self.assertEqual(scanner.options["ocr"]["router"]["reason"], "declared_capture")
+                self.assertEqual(scanner.options["ocr"]["model"], routes.RIVOK_FULL)
+                self.assertNotIn("profile", scanner.options["ocr"])
+
     def test_phone_specialist_replaces_only_the_rectified_line_reader(self) -> None:
         from heocr.ocr.phone_profile import SPECIALIST_LANG
         from heocr.ocr.tesseract import OcrLine, OcrResult, OcrWord, Tesseract
