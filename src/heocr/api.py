@@ -21,6 +21,7 @@ from heocr.handwriting import HandwritingConfig, HandwritingReader
 from heocr.identify import identify
 from heocr.ocr.routes import FAST_MIX_PROFILES, FAST_MIX_V2, FAST_MIX_V3
 from heocr.ocr.tesseract import DEFAULT_LANG, DEFAULT_PSM, _temporary_models, check_settings
+from heocr.tableformer import TableFormerSession
 
 # The default OCR model: HeOCR's modern-print model, bundled in the package (``heocr.models``).
 DEFAULT_MODEL = "heocr_modern_v1"
@@ -107,7 +108,7 @@ def extract(
     max_pages: int = MAX_PAGES,
     time_limit: float | None = None,
     tables: str | None = None,
-    tables_models: str | os.PathLike[str] | None = None,
+    tables_models: str | os.PathLike[str] | TableFormerSession | None = None,
     join_tables: bool = False,
 ) -> Document:
     """Read a document and return its ``heocr_document.v1`` record.
@@ -214,6 +215,8 @@ def extract(
     are skipped). OCR cell readings supplement the ordinary page text. Ruled tables keep first claim.
     ``tables_models`` is the local directory holding the pinned weights (see ``heocr.tableformer``);
     nothing is downloaded. Explicit table proposals can be combined with the fast-mix profiles.
+    To opt into model reuse in a batch, pass a ``heocr.tableformer.TableFormerSession`` as
+    ``tables_models``. Each document still has its own proposals and output.
     ``time_limit`` is a safety net, in seconds, for the whole document (conversion and OCR
     included); there is none by default, so a record does not depend on the machine's speed.
     It is checked before each page, image frame, embedded image and page of number checks: a

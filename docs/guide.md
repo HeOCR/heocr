@@ -382,6 +382,20 @@ HeOCR checks the weight hashes and uses the local models. Installing the
 extra leaves the default table reader in use until you enable proposals.
 See the [model pins](../src/heocr/tableformer.py).
 
+For a local Python batch, pass a shared session in `tables_models` to
+keep the converter and pinned models warm across documents. Each
+extraction still computes its own table proposals. Keep the model
+directory fixed during the batch. A shared session serializes Docling
+conversions when called from several threads.
+
+```python
+from heocr.tableformer import TableFormerSession
+
+session = TableFormerSession("table-models")
+for path in paths:
+    doc = heocr.extract(path, tables="tableformer", tables_models=session)
+```
+
 ### Form label and value associations
 
 Use `--form-fields -f json` (Python `form_fields=True`) to include

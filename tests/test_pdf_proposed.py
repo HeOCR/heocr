@@ -286,6 +286,59 @@ class TidyTests(unittest.TestCase):
 
 
 class PinTests(unittest.TestCase):
+    def test_shared_session_loads_one_converter_and_keeps_document_proposals_isolated(self):
+        import sys
+        from types import ModuleType, SimpleNamespace
+
+        from heocr.tableformer import TableFormerSession
+
+        class Stream(SimpleNamespace):
+            pass
+
+        class NativeTable:
+            def __init__(self, info):
+                x0, y0, x1, y1 = info["bbox"]
+                bbox = SimpleNamespace(l=x0, t=y0, r=x1, b=y1)
+                bbox.to_top_left_origin = lambda height: bbox
+                self.prov = [SimpleNamespace(page_no=1, bbox=bbox)]
+                cells = []
+                for c in info["cells"]:
+                    l, t, r, b = c["box"]
+                    cell_box = SimpleNamespace(l=l, t=t, r=r, b=b)
+                    cell_box.to_top_left_origin = lambda height, box=cell_box: box
+                    cells.append(SimpleNamespace(bbox=cell_box, start_row_offset_idx=c["row"],
+                                                 end_row_offset_idx=c["row"] + 1, start_col_offset_idx=c["col"],
+                                                 end_col_offset_idx=c["col"] + 1))
+                self.data = SimpleNamespace(num_rows=info["rows"], num_cols=info["cols"], table_cells=cells)
+
+        tabular = make_pdf([borderless_page()])
+        paragraph = make_pdf([PdfPage(lines=[TextLine("מסמך בדיקה", 520, 700)])])
+        page = SimpleNamespace(size=SimpleNamespace(width=595, height=HEIGHT))
+
+        def convert(stream):
+            tables = [NativeTable(proposal())] if stream.stream.read() == tabular else []
+            return SimpleNamespace(document=SimpleNamespace(tables=tables, pages={1: page}))
+
+        fake = mock.Mock()
+        fake.convert.side_effect = convert
+        modules = {"docling": ModuleType("docling"),
+                   "docling.datamodel.base_models": SimpleNamespace(DocumentStream=Stream)}
+        with (mock.patch.dict(sys.modules, modules),
+              mock.patch("importlib.metadata.version", return_value="fixture"),
+              mock.patch("heocr.tableformer.verify_models", return_value={"model": "fixture"}) as verify,
+              mock.patch.object(TableFormerSession, "_make_converter", return_value=fake) as load):
+            session = TableFormerSession("unused")
+            options = dict(ocr=False, tables="tableformer", tables_models=session)
+            first = heocr.extract(tabular, **options)
+            middle = heocr.extract(paragraph, **options)
+            repeat = heocr.extract(tabular, **options)
+        verify.assert_called_once()
+        load.assert_called_once()
+        self.assertEqual(fake.convert.call_count, 3)
+        self.assertIn("tableformer_tables", first.pages[0].flags)
+        self.assertNotIn("tableformer_tables", middle.pages[0].flags)
+        self.assertEqual(first.to_dict(), repeat.to_dict())
+
     def test_missing_or_wrong_weights_are_refused(self):
         import tempfile
         from pathlib import Path

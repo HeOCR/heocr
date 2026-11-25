@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import hashlib
 import io
+from copy import deepcopy
 from pathlib import Path
+from threading import Lock
 
 PINNED = {
     "docling-project--docling-models/model_artifacts/tableformer/accurate/tableformer_accurate.safetensors":
@@ -43,8 +45,12 @@ def verify_models(models: str | Path) -> dict[str, str]:
     return found
 
 
-class TableFormerProposer:
-    """Proposals for one document at a time: Docling runs once per document, on first use."""
+class TableFormerSession:
+    """Reuse pinned, local Docling models across documents in one process.
+
+    Keep the local model directory fixed for the session. Conversion is serial
+    even if callers share the session across threads.
+    """
 
     def __init__(self, models: str | Path):
         try:
@@ -52,27 +58,49 @@ class TableFormerProposer:
             from importlib.metadata import version
         except ImportError as exc:  # pragma: no cover - depends on the extra
             raise ImportError(INSTALL_HINT) from exc
-        self.models = Path(models)
-        self.weights = verify_models(self.models)
-        self.record = {"proposer": "tableformer", "docling": version("docling"),
-                       "docling_ibm_models": version("docling-ibm-models"), "revisions": dict(REVISIONS),
-                       "weights_sha256": {Path(k).name: v for k, v in self.weights.items()}}
+        self._models = Path(models).resolve()
+        weights = verify_models(self._models)
+        self._record = {"proposer": "tableformer", "docling": version("docling"),
+                        "docling_ibm_models": version("docling-ibm-models"), "revisions": dict(REVISIONS),
+                        "weights_sha256": {Path(k).name: v for k, v in weights.items()}}
         self._converter = None
+        self._lock = Lock()
+
+    def _make_converter(self):
+        from docling.datamodel.base_models import InputFormat
+        from docling.datamodel.pipeline_options import PdfPipelineOptions, TableFormerMode
+        from docling.document_converter import DocumentConverter, PdfFormatOption
+
+        opts = PdfPipelineOptions(do_ocr=False, do_table_structure=True, artifacts_path=str(self._models))
+        opts.table_structure_options.mode = TableFormerMode.ACCURATE
+        opts.table_structure_options.do_cell_matching = False  # structure only; heocr reads the text
+        return DocumentConverter(format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=opts)})
+
+    def _convert(self, body: bytes):
+        from docling.datamodel.base_models import DocumentStream
+
+        with self._lock:
+            if self._converter is None:
+                self._converter = self._make_converter()
+            try:
+                return self._converter.convert(DocumentStream(name="document.pdf", stream=io.BytesIO(body))).document
+            except Exception:
+                # A failed backend may leave its pipeline in a bad state.
+                self._converter = None
+                raise
+
+
+class TableFormerProposer:
+    """Document-scoped proposal cache. Only the model runtime can be shared."""
+
+    def __init__(self, models: str | Path | TableFormerSession):
+        self._session = models if isinstance(models, TableFormerSession) else TableFormerSession(models)
+        self.record = deepcopy(self._session._record)
         self._key: str | None = None
         self._pages: dict[int, list[dict]] = {}
 
     def _convert(self, body: bytes) -> None:
-        from docling.datamodel.base_models import DocumentStream, InputFormat
-        from docling.datamodel.pipeline_options import PdfPipelineOptions, TableFormerMode
-        from docling.document_converter import DocumentConverter, PdfFormatOption
-
-        if self._converter is None:
-            opts = PdfPipelineOptions(do_ocr=False, do_table_structure=True, artifacts_path=str(self.models))
-            opts.table_structure_options.mode = TableFormerMode.ACCURATE
-            opts.table_structure_options.do_cell_matching = False  # structure only; heocr reads the text
-            self._converter = DocumentConverter(format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=opts)})
-        result = self._converter.convert(DocumentStream(name="document.pdf", stream=io.BytesIO(body)))
-        doc = result.document
+        doc = self._session._convert(body)
         pages: dict[int, list[dict]] = {}
         for table in doc.tables:
             if not table.prov:
