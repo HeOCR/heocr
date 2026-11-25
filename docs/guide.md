@@ -229,6 +229,27 @@ These scans and renders keep geometric layout and use a single page model.
 Use the regular number checks when digits, amounts, or clause labels need
 independent verification.
 
+#### Fast mix v1
+
+```sh
+heocr photo.jpg --profile fast-mix-v1 --ocr-capture-type pixel
+heocr scan.pdf --profile fast-mix-v1 --ocr-capture-type scanner
+heocr issuer.pdf --profile fast-mix-v1 --ocr-capture-type issuer-render
+```
+
+The named profile pins the mixed recipe for local Hebrew OCR in PSM 3.
+The phone route combines modern v1, fast phone geometry, a 1,700-pixel working
+edge, and targeted number crops. Declared scans use Rivok Full, and declared
+issuer renders use modern v1. Both use layout v1 and skip number rereads.
+PDFs use their text layer where the regular reader accepts it. Declare a
+capture for scans and renders. Phone metadata or perspective evidence can
+also select the phone route for a standalone image.
+
+Place the checksum-verified `heocr_modern_v1.traineddata` and
+`heb_rivok.traineddata` in `HEOCR_MODELS`. Phone number crops also use the
+installed Tesseract English data. A missing primary model produces an unread
+diagnostic. In Python pass `profile="fast-mix-v1"` and `ocr_capture_type=...`.
+
 ### Geometric OCR layout
 
 ```sh
