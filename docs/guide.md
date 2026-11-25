@@ -455,6 +455,16 @@ for path in paths:
     doc = heocr.extract(path, tables="tableformer", tables_models=session)
 ```
 
+An experimental session can supply TableFormer regions from the phone-adapted
+Heron detector. Set `detector="heron_phone"` on `TableFormerSession` and pass it
+only for documents you want to route through that detector. The session verifies
+all local weights and configurations against the [detector pins](../src/heocr/tableformer.py).
+Place the candidate files in `heocr--heron-phone/` under the same model directory.
+This requires `docling-ibm-models==4.0.4` and `transformers==5.24.1` alongside the
+`tables` extra. Pages where the detector runs carry `table_detector_heron_phone`,
+including pages where it finds no regions. This option depends on the caller's
+table-proposal route; enabling it does not enable phone proposals by itself.
+
 ### Form label and value associations
 
 Use `--form-fields -f json` (Python `form_fields=True`) to include
