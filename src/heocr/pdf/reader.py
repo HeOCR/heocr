@@ -2466,8 +2466,9 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
     numbers = number_engine_for(doc) if doc.options.get("check_numbers", "suspect") else None
     number_words = None
     if numbers is not None and numbers is not engine:
+        batch_numbers = settings.get("number_batch") or (page is None and settings.get("phone_geometry"))
         number_words = _reread_number_words(numbers, page_image, result, dpi,
-                                           batch=settings.get("number_batch", False) and doc._deadline is None)
+                                           batch=bool(batch_numbers) and doc._deadline is None)
     page_numbers = None
     english_page = None
     if number_words is not None and PAGE_NUMBER_PASS:

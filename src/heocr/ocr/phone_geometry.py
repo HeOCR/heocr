@@ -6,6 +6,7 @@ from statistics import median
 
 from PIL import Image, ImageChops, ImageFilter, ImageOps
 
+from heocr.models import MODELS
 from heocr.ocr.tesseract import OcrLine, OcrResult, OcrUnavailable, OcrWord
 from heocr.pdf.ocrlines import _bands
 from heocr.pdf.perspective import _projection, _source_quad
@@ -296,23 +297,37 @@ def read_lines(engine, image, result):
         spans = sorted((min(x for x, _ in points), max(x for x, _ in points)) for _, points in group)
         if any(b - a > .26 * (right - left) for (_, a), (b, _) in zip(spans, spans[1:])):
             return None
+    targets = range(len(boxes))
+    # The pinned modern model uses only the LSTM recognizer. The audited
+    # engine has no legacy cross-image adaptive classifier for this batch.
+    # Keep the original slot sequence for other engines and weights.
+    modern = MODELS["heocr_modern_v1"]
+    if (getattr(engine, "version", None) == "tesseract 5.5.3"
+            and getattr(engine, "models", None) == {modern.name: modern.sha256}):
+        targets = tuple(i for i, group in enumerate(by_band)
+                        if (group and not any(line.number_readings or line.latin_runs_reread for line, _ in group))
+                        or (not group and used[0] < i < used[-1]))
+    if not targets:
+        return None
     try:
         readings = engine.recognize_line_batch(
-            (ImageOps.expand(crop(box), _CROP_PADDING, fill=255) for box in boxes), _CROP_DPI)
+            (ImageOps.expand(crop(boxes[i]), _CROP_PADDING, fill=255) for i in targets), _CROP_DPI)
     except OcrUnavailable:
         return None
-    if len(readings) != len(boxes):
+    if len(readings) != len(targets):
         return None
+    by_slot = dict(zip(targets, readings, strict=True))
 
     restored = []
     changes = 0
     paragraph = native[0].paragraph
-    for i, (read, box, group) in enumerate(zip(readings, boxes, by_band, strict=True)):
+    for i, (box, group) in enumerate(zip(boxes, by_band, strict=True)):
+        read = by_slot.get(i)
         seen = [line for line, _ in group]
         y = (box[1] + box[3]) / 2
         if seen:
             paragraph = seen[0].paragraph
-        if len(read.lines) != 1 or not read.lines[0].words:
+        if read is None or len(read.lines) != 1 or not read.lines[0].words:
             restored.extend((y, line) for line in seen)
             continue
         line = read.lines[0]

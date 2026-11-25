@@ -119,7 +119,10 @@ The reader uses supported paper edges and native OCR word positions to find
 the text plane. It rereads individual straightened lines at a common sampling
 scale and maps their positions back to the source image. The route keeps the
 native reading when the paper or line geometry is uncertain. Declared scanner
-and issuer-render inputs bypass this option. In Python, pass
+and issuer-render inputs bypass this option. On enabled phone pages, individual
+number crops can share an OCR batch when no document time limit is set. The
+pinned modern v1 recognizer with Tesseract 5.5.3 omits rectified crops whose
+readings would be discarded by the geometry checks. In Python, pass
 `ocr_phone_geometry=True`. A page with an accepted reread records
 `ocr_phone_geometry_rectified` in its flags.
 
