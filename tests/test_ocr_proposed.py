@@ -3,10 +3,13 @@
 The fake engine reads a cell by its grey level, and a stub stands in for TableFormer. Synthetic fixtures only.
 """
 
+from io import StringIO
 import unittest
 from unittest import mock
 
 import heocr
+from heocr.cli import _parser, main
+from heocr.ocr.tesseract import Tesseract
 from heocr.pdf.proposed import image_spans
 from tests import test_ocr_tables as d3e  # its OcrTableTest is not imported by name: it would run here again
 from tests.test_ocr_tables import DPI, FAKE, LEVELS, XS, YS, px, scan, scanned_pdf
@@ -86,6 +89,32 @@ class OcrProposedTest(unittest.TestCase):
         self.assertIn("table_proposer_failed", [u.reason for u in doc.unread])
         self.assertEqual(doc.pages[0].route, "ocr")
         self.assertEqual([b for b in doc.blocks if b.kind == "table"], [])
+
+    def test_fast_mix_runs_the_explicit_table_stage_on_a_scanned_pdf(self):
+        stub = Stub()
+        with mock.patch("heocr.tableformer.TableFormerProposer", return_value=stub):
+            with mock.patch("heocr.pdf.reader.engine_for", return_value=Tesseract.find(FAKE, lang="heb")):
+                doc = heocr.extract(scanned_pdf(borderless()), profile="fast-mix-v2", ocr_capture_type="scanner",
+                                     tesseract=FAKE, tables="tableformer", tables_models="unused")
+        self.assertEqual(doc.options["ocr"]["profile"]["name"], "fast-mix-v2")
+        self.assertEqual(doc.options["tables"], stub.record)
+        table, = [block for block in doc.blocks if "tableformer_proposed" in block.flags]
+        self.assertEqual(table.cells[1][2].text, "100")
+        self.assertIn("100", doc.tables_csv()[0])
+        self.assertEqual(heocr.validate(doc.to_dict()), [])
+
+    def test_cli_forwards_the_opt_in_and_local_model_directory(self):
+        args = ["scan.pdf", "--profile", "fast-mix-v2", "--ocr-capture-type", "scanner",
+                "--tables", "tableformer", "--tables-models", "local-models"]
+        model_dir = _parser().parse_args(args).tables_models
+        with (
+            mock.patch("heocr.cli.extract", side_effect=ImportError("install the tables extra")) as extract,
+            mock.patch("sys.stderr", new_callable=StringIO) as stderr,
+        ):
+            self.assertEqual(main(args), 1)
+            self.assertIn("install the tables extra", stderr.getvalue())
+        self.assertEqual(extract.call_args.kwargs["tables"], "tableformer")
+        self.assertEqual(extract.call_args.kwargs["tables_models"], model_dir)
 
 
 class ImageSpansTest(unittest.TestCase):

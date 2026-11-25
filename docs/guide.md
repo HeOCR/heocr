@@ -90,7 +90,7 @@ where it needs to read pixels. Add a route when the input calls for one.
 | Angled standalone phone photo of printed Hebrew | `--profile phone-specialist` | Adds layout and guarded perspective correction. Declare `--ocr-capture-type phone` if automatic detection misses the photo. Requires local modern_v1. [Phone specialist profile](#phone-specialist-profile) |
 | Known scanner or issuer-render capture | `--ocr-router v2 --ocr-capture-type scanner` or `--ocr-router v2 --ocr-capture-type issuer-render` | Uses pinned Rivok Full where OCR is needed. [Capture router v2](#capture-router-v2) |
 | Scan with columns, mixed-direction lines or possible tables | `--ocr-layout v1 -f json` | Applies geometric layout to OCR. JSON keeps the structure and flags. [Geometric OCR layout](#geometric-ocr-layout) |
-| Borderless table in a PDF with a usable text layer | Install `heocr[tables]`, then pass `tables="tableformer"` and `tables_models=path` to `heocr.extract` | Python API with local model weights. [Learned tables extra](#learned-tables-extra) |
+| Borderless table in a PDF, including a scanned PDF | Install `heocr[tables]`, then use `--tables tableformer --tables-models DIR` | Local model weights. [Learned tables extra](#learned-tables-extra) |
 | Scanned book in historical Hebrew | `--ocr-router v2 --ocr-old-print-model PATH` | Tries the pinned local P-hist v2 on OCR pages with corroborating historical evidence. [Historical print](#historical-print-with-router-v2) |
 | Experimental hosted OCR for an approved document | Start with `--ocr-hybrid haiku --ocr-hybrid-dry-run` | Local cost estimate. The hybrid route is parked for launch. [Haiku hybrid OCR](#haiku-hybrid-ocr) |
 
@@ -304,11 +304,10 @@ padding changes.
 
 ### Learned tables extra
 
-Use this experimental Python option for tables without visible rulings
-on PDF pages with a usable text layer. TableFormer proposes table and
-cell boxes. HeOCR fills the cells from the page's own text and gives
-native ruled grids first claim. For tables in scanned pages, use
-[geometric OCR layout](#geometric-ocr-layout).
+Use this experimental option for tables without visible rulings on PDF
+text layers and OCR pages. TableFormer proposes table and cell boxes.
+HeOCR fills the cells from its text layer or OCR reading and gives native
+ruled grids first claim. Perspective-distorted phone images skip proposals.
 
 Install the `tables` extra, which adds Docling and PyTorch. With the
 Hugging Face CLI (`hf`), fetch the two model bundles at the pinned revisions.
@@ -321,7 +320,14 @@ hf download docling-project/docling-layout-heron --revision 8f39ad3c0b4c58e9c2d2
   --local-dir table-models/docling-project--docling-layout-heron
 ```
 
-Pass the parent directory of the two bundles to the Python API.
+Pass the parent directory of the two bundles to the CLI or Python API.
+To combine table proposals with fast mix v2 on a scanned document, use
+its scanner capture declaration:
+
+```sh
+heocr scan.pdf --profile fast-mix-v2 --ocr-capture-type scanner \
+  --tables tableformer --tables-models table-models -f xlsx -o tables.xlsx
+```
 
 ```python
 import heocr
@@ -330,9 +336,9 @@ doc = heocr.extract("tables.pdf", tables="tableformer", tables_models="table-mod
 print(doc.markdown)
 ```
 
-HeOCR checks the weight hashes and uses the local models. Enable TableFormer
-through these Python arguments. Installing the extra alone leaves the default
-table reader in use. See the [model pins](../src/heocr/tableformer.py).
+HeOCR checks the weight hashes and uses the local models. Installing the
+extra leaves the default table reader in use until you enable proposals.
+See the [model pins](../src/heocr/tableformer.py).
 
 ### Historical print with router v2
 
