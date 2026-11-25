@@ -110,6 +110,7 @@ class OcrCallFailureTest(unittest.TestCase):
                 ("empty", "ocr_failed", "tesseract produced invalid TSV output"),
                 ("malformed", "ocr_failed", "tesseract produced invalid TSV output"),
                 ("nonfinite", "ocr_failed", "tesseract produced invalid TSV output"),
+                ("inverted", "ocr_failed", "tesseract produced invalid TSV output"),
             ):
                 with self.subTest(mode=mode):
                     out, err = io.StringIO(), io.StringIO()
@@ -131,11 +132,12 @@ class OcrCallFailureTest(unittest.TestCase):
                         tsv = Path(argv[2]).with_suffix(".tsv")
                         if mode == "empty":
                             tsv.touch()
-                        if mode in {"malformed", "nonfinite"}:
-                            left = "?" if mode == "malformed" else "NaN"
+                        if mode in {"malformed", "nonfinite", "inverted"}:
+                            left = {"malformed": "?", "nonfinite": "NaN", "inverted": "1"}[mode]
+                            width = -18 if mode == "inverted" else 18
                             tsv.write_text("level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\t"
                                            "top\twidth\theight\tconf\ttext\n"
-                                           f"5\t1\t1\t1\t1\t1\t{left}\t2\t18\t23\t90\tabc\n", encoding="utf-8")
+                                           f"5\t1\t1\t1\t1\t1\t{left}\t2\t{width}\t23\t90\tabc\n", encoding="utf-8")
                         return subprocess.CompletedProcess(argv, 0, b"", b"")
 
                     with (mock.patch.dict(os.environ, {"TESSDATA_PREFIX": tmp}),

@@ -394,8 +394,8 @@ def parse_tsv(tsv: str) -> OcrResult:
         except ValueError:
             conf = -1.0
         box = [left, top, left + width, top + height]
-        if not all(map(isfinite, box)):
-            raise ValueError("non-finite TSV coordinates")
+        if width < 0 or height < 0 or not all(map(isfinite, box)):
+            raise ValueError("invalid TSV coordinates")
         if not isfinite(conf):
             conf = -1.0
         if key not in lines:
