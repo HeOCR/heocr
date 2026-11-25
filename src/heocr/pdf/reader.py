@@ -1242,7 +1242,7 @@ def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = froz
     table_flags = sorted({f for t in tables if not t.rows for f in t.flags if f == "table_grid_unresolved"})
     if doc._table_proposer is not None:
         # Learned proposals (D3g) for tables without rulings: native grids keep first claim, before arrange.
-        ink = [(a.x0, a.y0, a.x1, a.y1) for a in text.atoms if not a.is_space]
+        ink = [(a.x0, a.y0, a.x1, a.y1, a.text) for a in text.atoms if not a.is_space]
         tables, proposal_flags = _table_proposals(doc, index, tables, width, height, layer.sideways, ink)
         table_flags = table_flags + proposal_flags
     repairs_on = doc.options.get("repairs", True)
