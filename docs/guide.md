@@ -312,7 +312,10 @@ padding changes.
 Use this experimental option for tables without visible rulings on PDF
 text layers and OCR pages. TableFormer proposes table and cell boxes.
 HeOCR fills the cells from its text layer or OCR reading and gives native
-ruled grids first claim. Perspective-distorted phone images skip proposals.
+ruled grids first claim. On OCR pages, learned cells are appended after the
+ordinary page reading. Values present in both readings can appear twice in
+text exports. CSV and XLSX still contain the structured table. Perspective-
+distorted phone images skip proposals.
 
 Install the `tables` extra, which adds Docling and PyTorch. With the
 Hugging Face CLI (`hf`), fetch the two model bundles at the pinned revisions.

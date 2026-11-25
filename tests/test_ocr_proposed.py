@@ -9,7 +9,7 @@ from unittest import mock
 
 import heocr
 from heocr.cli import _parser, main
-from heocr.ocr.tesseract import Tesseract
+from heocr.ocr.tesseract import OcrLine, OcrResult, Tesseract
 from heocr.pdf.proposed import image_spans
 from tests import test_ocr_tables as d3e  # its OcrTableTest is not imported by name: it would run here again
 from tests.test_ocr_tables import DPI, FAKE, LEVELS, XS, YS, px, scan, scanned_pdf
@@ -75,6 +75,38 @@ class OcrProposedTest(unittest.TestCase):
         self.assertAlmostEqual(width, 595, delta=1)
         self.assertAlmostEqual(height, 842, delta=1)
         self.assertEqual(heocr.validate(doc.to_dict()), [])
+
+    def test_learned_cells_supplement_unmasked_page_text(self) -> None:
+        image = borderless()
+        reader = Tesseract.recognize
+
+        def recognize(engine, raster, *args, **kwargs):
+            def scaled(v):
+                return round(v * raster.width / 595)
+
+            cell_center = (scaled(XS[0] + 65), scaled(YS[0] + 20))
+            if (raster.width >= image.width - 2 and raster.height >= image.height - 2
+                    and raster.convert("L").getpixel(cell_center) < 200):
+                # The bottom two values are inside the proposal. Its border
+                # would also erase the right edge of the first line.
+                boxes = [[XS[0] - 25, YS[0] + 4, XS[0] + 20, YS[0] + 10],
+                         [XS[0] + 32, YS[0] + 12, XS[0] + 96, YS[0] + 29],
+                         [XS[0] + 32, YS[1] + 12, XS[0] + 96, YS[1] + 29]]
+                values = ["gloss 457", "original 675", "continued 982"]
+                return OcrResult([OcrLine(value, [scaled(v) for v in box], [95])
+                                  for box, value in zip(boxes, values, strict=True)])
+            return reader(engine, raster, *args, **kwargs)
+
+        with mock.patch.object(Tesseract, "recognize", recognize):
+            plain = heocr.extract(scanned_pdf(image), tesseract=FAKE, check_numbers=False)
+            doc = self.read(image, Stub())
+        supplements = [b for b in doc.blocks if "ocr_table_supplement" in b.flags]
+        self.assertEqual(len(supplements), 1)
+        self.assertEqual(doc.blocks[:-1], plain.blocks)
+        self.assertTrue(doc.text.startswith(plain.text))
+        self.assertIn("675", doc.text)
+        self.assertIn("982", doc.text)
+        self.assertIn("100", doc.tables_csv()[0])
 
     def test_a_ruled_grid_keeps_first_claim(self) -> None:
         doc = self.read(scan(LEVELS), Stub())

@@ -205,7 +205,7 @@ def extract(
     ``tables="tableformer"`` (the optional ``tables`` extra) adds learned table proposals:
     Docling's TableFormer proposes the structure of tables without rulings, and heocr fills their
     cells itself, from the page's text layer or, on a page read by OCR, cell by cell (camera photos
-    are skipped); ruled tables keep first claim.
+    are skipped). OCR cell readings supplement the ordinary page text. Ruled tables keep first claim.
     ``tables_models`` is the local directory holding the pinned weights (see ``heocr.tableformer``);
     nothing is downloaded. Explicit table proposals can be combined with the fast-mix profiles.
     ``time_limit`` is a safety net, in seconds, for the whole document (conversion and OCR
