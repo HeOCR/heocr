@@ -4,8 +4,9 @@ import unittest
 from unittest import mock
 
 import heocr
-from heocr.pdf.proposed import merge_proposals, to_table
-from heocr.pdf.tables import Table
+from heocr.pdf.proposed import _cut, merge_proposals, to_table
+from heocr.pdf.lines import Atom
+from heocr.pdf.tables import Table, _whole_words
 from tests.synth.pdf import PdfPage, TextLine, lines_block, make_pdf
 
 HEIGHT = 842.0
@@ -88,6 +89,15 @@ class GridTests(unittest.TestCase):
         cut = t.rows[0][0]["box"][3]
         self.assertTrue(cut <= ink[0][1] or cut >= ink[0][3])
 
+    def test_overlapping_detector_columns_cut_where_fewest_characters_cross(self):
+        # Two columns whose detector boxes overlap (a wide label in one row): numbers fill 100-140 and 165-200, and
+        # the label alone crosses 130-175.
+        ink = [(100.0 + 4 * i, 103.0 + 4 * i) for i in range(10)] + [(165.0 + 4 * i, 168.0 + 4 * i) for i in range(9)]
+        ink.append((130.0, 175.0))
+        cut = _cut((100.0, 160.0), (150.0, 200.0), ink, exact=True)
+        self.assertTrue(140.0 < cut < 165.0)
+        self.assertEqual(_cut((100.0, 160.0), (150.0, 200.0), ink), 155.0)  # an image profile: the plain middle
+
     def test_small_proposals_are_not_tables(self):
         self.assertIsNone(to_table({"bbox": [0, 0, 10, 10], "rows": 1, "cols": 4, "cells": []}))
 
@@ -111,6 +121,28 @@ class ReaderTests(unittest.TestCase):
         self.assertIn("tableformer_tables", doc.pages[0].flags)
         self.assertNotIn("ספק", " ".join(b.text for b in doc.blocks if b.kind != "table"))
         self.assertEqual(doc.options["tables"], {"proposer": "stub"})
+
+    def test_a_word_wider_than_its_column_stays_whole(self):
+        # A diagonal-matrix label: one word printed across the line between its column and the next one.
+        word = "א" * 15
+        lines = lines_block(["פסקה לפני הטבלה"], top=760) + lines_block(["פסקה אחרי הטבלה"], top=560)
+        visual = [["סכום", "תפקיד", "שם"], ["100", None, word], ["200", "עובד", "ספק ב"]]
+        for r, row in enumerate(visual):
+            for c, text in enumerate(row):
+                if text:
+                    lines.append(TextLine(text, XS[c + 1] - 8, YS[r] - 20))
+        doc = read(PdfPage(lines=lines), Stub())
+        (table,) = [b for b in doc.blocks if b.kind == "table"]
+        self.assertEqual([[c.text for c in row] for row in table.cells][1], [word, "", "100"])
+
+    def test_letters_of_a_cut_word_go_to_the_cell_holding_most_of_them(self):
+        left, right = [0.0, 0.0, 100.0, 20.0], [100.0, 0.0, 200.0, 20.0]
+        word = [Atom("א", 76.0 + 6 * i, 5.0, 82.0 + 6 * i, 15.0, 10.0, i) for i in range(10)]  # 4 letters | 6 letters
+        number = [Atom(ch, 60.0 + 6 * i, 5.0, 66.0 + 6 * i, 15.0, 10.0, 20 + i) for i, ch in enumerate("10.5")]
+        number = [Atom(a.text, a.x0, a.y0 + 30, a.x1, a.y1 + 30, a.size, a.index) for a in number]
+        points = _whole_words(word + number, [left, right])
+        self.assertEqual({points[id(a)] for a in word}, {(word[4].cx, word[4].cy)})
+        self.assertFalse(any(id(a) in points for a in number))  # digits keep their own places
 
     def test_without_the_option_nothing_changes(self):
         doc = heocr.extract(make_pdf([borderless_page()]), ocr=False)

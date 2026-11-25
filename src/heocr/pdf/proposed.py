@@ -92,15 +92,42 @@ def _free(lo: float, hi: float, ink: list[tuple[float, float]]) -> list[tuple[fl
     return free
 
 
-def _cut(before: tuple[float, float], after: tuple[float, float], ink: list[tuple[float, float]]) -> float:
+def _fewest(lo: float, hi: float, ink: list[tuple[float, float]]) -> float | None:
+    """The middle of the longest stretch of (lo, hi) that crosses the fewest ink intervals, or None for an empty
+    window."""
+    if hi <= lo:
+        return None
+    edges = sorted({lo, hi, *(v for a, b in ink for v in (a, b) if lo < v < hi)})
+    runs: list[list[float]] = []  # [start, end, count], neighbouring stretches of one count merged
+    for a, b in zip(edges, edges[1:]):
+        m = (a + b) / 2
+        count = sum(1 for x0, x1 in ink if x0 < m < x1)
+        if runs and runs[-1][2] == count:
+            runs[-1][1] = b
+        else:
+            runs.append([a, b, count])
+    if not runs:
+        return None
+    a, b, _ = min(runs, key=lambda r: (r[2], -(r[1] - r[0])))
+    return (a + b) / 2
+
+
+def _cut(before: tuple[float, float], after: tuple[float, float], ink: list[tuple[float, float]],
+         exact: bool = False) -> float:
     """A boundary between two neighbouring bands (each (start, end)): the middle of the widest part of the gap
-    between them that no ink crosses, or the gap's plain middle when ink fills it or the detector's boxes overlap."""
+    between them that no ink crosses. When ink fills the gap or the detector's boxes overlap, it is the gap's
+    middle; with ``exact`` ink (character boxes, not an image profile) it is instead the stretch between the two
+    bands' middles that crosses the fewest characters."""
     lo, hi = before[1], after[0]
     if hi > lo:
         free = _free(lo, hi, ink)
         if free:
             a, b = max(free, key=lambda f: f[1] - f[0])
             return (a + b) / 2
+    if exact:
+        cut = _fewest((before[0] + before[1]) / 2, (after[0] + after[1]) / 2, ink)
+        if cut is not None:
+            return cut
     return (lo + hi) / 2
 
 
@@ -108,14 +135,14 @@ def _bands(n: int, firsts: dict[int, float], lasts: dict[int, float]) -> list[tu
     return [(firsts[k], lasts[k]) if k in firsts and k in lasts else None for k in range(n)]
 
 
-def _lines(outer: tuple[float, float], bands: list, ink: list[tuple[float, float]]) -> list[float]:
+def _lines(outer: tuple[float, float], bands: list, ink: list[tuple[float, float]], exact: bool = False) -> list[float]:
     """len(bands) + 1 increasing boundaries: the outer ends, and each inner one cut in the gap between neighbouring
     bands (interpolated where a band has no evidence)."""
     n = len(bands)
     lines: list[float | None] = [outer[0]] + [None] * (n - 1) + [outer[1]]
     for k in range(1, n):
         if bands[k - 1] is not None and bands[k] is not None:
-            lines[k] = _cut(bands[k - 1], bands[k], ink)
+            lines[k] = _cut(bands[k - 1], bands[k], ink, exact)
     known = [i for i, v in enumerate(lines) if v is not None]
     for i, v in enumerate(lines):
         if v is None:
@@ -201,7 +228,7 @@ def to_table(proposal: dict, ink: list[Box] | None = None, spans=None) -> Table 
         cells = [(new_index[r0], c0, new_index[r0 + rs - 1] - new_index[r0] + 1, cs, box)
                  for r0, c0, rs, cs, box in cells]
         rows, row_bands = len(bands), bands
-    xs = _lines((x0, x1), _bands(cols, firsts_x, lasts_x), x_ink)
+    xs = _lines((x0, x1), _bands(cols, firsts_x, lasts_x), x_ink, exact=spans is None)
     ys = _lines((top, bottom), row_bands, y_ink)
     origin: dict[tuple[int, int], tuple[int, int, int, int]] = {}
     for r0, c0, rs, cs, _box in cells:
