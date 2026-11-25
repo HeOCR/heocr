@@ -2726,6 +2726,11 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
     if deskew:
         center = (image.size[0] / 2 / scale, image.size[1] / 2 / scale)
         _unrotate_records(doc, first_block, first_unread, index, deskew, center)
+    if settings.get("footer_order"):
+        from heocr.pdf.furniture import order_isolated_ocr_footer
+
+        if order_isolated_ocr_footer(doc.blocks, first, width, height):
+            flags = flags + ["ocr_footer_order_adjusted"]
     doc.pages.append(
         Page(index, width, height, page_class, "ocr", signals,
              {"chars_total": text.chars_total, "chars_read": 0, "chars_ocr": read,

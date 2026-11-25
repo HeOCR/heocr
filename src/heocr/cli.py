@@ -110,6 +110,8 @@ def _parser() -> argparse.ArgumentParser:
                         help="use local Rivok Full on supported rectified phone lines with fast-mix")
     parser.add_argument("--ocr-issuer-staggered-lanes", action="store_true",
                         help="split overlapping OCR lines at a supported issuer lane boundary with fast-mix")
+    parser.add_argument("--ocr-footer-order", action="store_true",
+                        help="finish the body before an isolated footer on fast-mix scan and issuer OCR pages")
     parser.add_argument("--ocr-phone-geometry", action="store_true",
                         help="reread isolated lines on angled phone images with supported paper edges")
     parser.add_argument("--ocr-phone-max-edge", type=int, metavar="PX",
@@ -215,6 +217,7 @@ def main(argv: list[str] | None = None) -> int:
             ocr_phone_latin_edges=args.ocr_phone_latin_edges,
             ocr_oblique_rivok=args.ocr_oblique_rivok,
             ocr_issuer_staggered_lanes=args.ocr_issuer_staggered_lanes,
+            ocr_footer_order=args.ocr_footer_order,
             phone_model=args.phone_model,
             phone_model_sha256=args.phone_model_sha256,
             force_ocr=args.force_ocr,

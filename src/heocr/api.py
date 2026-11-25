@@ -91,6 +91,7 @@ def extract(
     ocr_phone_latin_edges: bool = False,
     ocr_oblique_rivok: bool = False,
     ocr_issuer_staggered_lanes: bool = False,
+    ocr_footer_order: bool = False,
     phone_model: str | os.PathLike[str] | None = None,
     phone_model_sha256: str | None = None,
     force_ocr: bool = False,
@@ -161,6 +162,8 @@ def extract(
     ``profile="fast-mix-v2"`` enables three refinements to that recipe. Use
     ``ocr_phone_latin_edges``, ``ocr_oblique_rivok`` or
     ``ocr_issuer_staggered_lanes`` with fast-mix-v1 to exercise each refinement alone.
+    ``ocr_footer_order=True`` moves an isolated footer after the body on fast-mix
+    scanner and issuer OCR pages.
     ``photo_preprocess="gray-otsu"`` sends grayscale rasters to the main Tesseract reader
     with internal Otsu thresholding on standalone photos. Use a phone capture declaration
     when camera metadata is unavailable.
@@ -228,7 +231,7 @@ def extract(
     ocr_model = MODEL_ALIASES.get(ocr_model, ocr_model) if isinstance(ocr_model, str) else ocr_model
     fast_mix_profile = profile if profile in FAST_MIX_PROFILES else None
     fast_mix = fast_mix_profile is not None
-    if (ocr_phone_latin_edges or ocr_oblique_rivok or ocr_issuer_staggered_lanes) and not fast_mix:
+    if (ocr_phone_latin_edges or ocr_oblique_rivok or ocr_issuer_staggered_lanes or ocr_footer_order) and not fast_mix:
         raise ValueError("the phone and issuer refinements need a fast-mix profile")
     if fast_mix_profile == FAST_MIX_V2:
         ocr_phone_latin_edges = ocr_oblique_rivok = ocr_issuer_staggered_lanes = True
@@ -420,6 +423,9 @@ def extract(
         if ocr_issuer_staggered_lanes and ocr_capture_type == "issuer-render":
             doc._ocr_settings["issuer_staggered_lanes"] = True
             doc.options["ocr"]["issuer_staggered_lanes"] = True
+        if ocr_footer_order and ocr_capture_type in ("issuer-render", "scanner"):
+            doc._ocr_settings["footer_order"] = True
+            doc.options["ocr"]["footer_order"] = True
     if ocr_old_print_model is not None:
         from heocr.ocr.old_print import PHIST_V2_SHA256
 
