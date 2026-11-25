@@ -388,6 +388,7 @@ print(doc.text)
 - `doc.text`: the plain text in reading order. Pages are separated by a form feed (`\f`). Headers, footers, notes and navigation follow the body, in their own sections.
 - `doc.markdown`: headings, numbered sections and tables kept, with a comment marking each page.
 - `doc.to_json()` / `doc.to_dict()`: the `heocr_document.v1` record.
+- `doc.to_xlsx()` (bytes) / `heocr.write_xlsx(doc, path)`, and `doc.tables_csv()` (one CSV text per table): the tables as data, 1 to 1 (`heocr.table_export`). Every position is written in logical order, column 0 first (the rightmost one in a right-to-left table). A spanning cell's text sits at its first position: in XLSX the span is a merge, and in CSV the positions it covers are empty. Text is written as read, always as a string, so "007" or "12.3.1980" stays as printed. A right-to-left table gets a right-to-left sheet. There is one sheet per table, named "Table N pP".
 - `doc.to_docx()` (bytes) / `heocr.write_docx(doc, path)`: a Word file. Paragraphs are right to left, with Hebrew runs marked right to left, in Arial (which has Hebrew letters in Word, LibreOffice and Google Docs). Headings use Word's Heading 1–6 styles. List items keep their labels as read, written as text. Tables are Word tables, right to left when the table is. Each new page starts on a new page. Notes, comments, headers and footers follow the body in their own sections, as in `doc.text`, under Hebrew titles when most of the body is Hebrew. Footnote references are not marked in the body (as in `doc.text`). Figures that were not read leave no trace, as in `doc.text`.
 - `doc.blocks`, `doc.pages`, `doc.unread`, `doc.flags`: the same record as Python objects.
 
@@ -426,6 +427,8 @@ The options, all keyword-only:
 heocr notice.pdf                     # text to standard output
 heocr letter.docx -o letter.md       # the format follows the suffix: .md, .json, .docx, else text
 heocr scan.pdf -o scan.docx          # a Word file (or -f docx > scan.docx)
+heocr scan.pdf -o tables.xlsx        # the tables, a sheet each (or -f xlsx > tables.xlsx)
+heocr scan.pdf -o t.csv              # the tables as CSV: t.csv for one table, else t-1.csv, t-2.csv...
 heocr notice.pdf -f json             # the record
 heocr scan.pdf --ocr-lang heb+eng    # Tesseract's languages
 heocr notice.pdf --no-ocr            # never run OCR; pages that need it are reported unread

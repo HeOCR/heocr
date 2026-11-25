@@ -16,4 +16,13 @@ def write_docx(doc: Document, path) -> None:
     Path(path).write_bytes(doc.to_docx())
 
 
-__all__ = ["SCHEMA_ID", "ContractError", "Document", "HandwritingConfig", "__version__", "extract", "extract_images", "validate", "write_docx"]
+def write_xlsx(doc: Document, path) -> None:
+    """Write the tables of ``doc`` as an Excel workbook at ``path``: a sheet per table, every position as
+    read (text, never reparsed), merges for spans, right-to-left sheets for right-to-left tables."""
+    from pathlib import Path
+
+    Path(path).write_bytes(doc.to_xlsx())
+
+
+__all__ = ["SCHEMA_ID", "ContractError", "Document", "HandwritingConfig", "__version__", "extract", "extract_images", "validate", "write_docx",
+           "write_xlsx"]

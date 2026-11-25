@@ -14,8 +14,8 @@ from heocr.handwriting import HandwritingConfig
 from heocr.ocr.phone_profile import PHONE_PROFILES
 from heocr.ocr.routes import CAPTURE_MODELS
 
-_FORMATS = ("text", "markdown", "json", "docx")
-_BY_SUFFIX = {".md": "markdown", ".markdown": "markdown", ".json": "json", ".txt": "text", ".docx": "docx"}
+_FORMATS = ("text", "markdown", "json", "docx", "xlsx", "csv")
+_BY_SUFFIX = {".md": "markdown", ".markdown": "markdown", ".json": "json", ".txt": "text", ".docx": "docx", ".xlsx": "xlsx", ".csv": "csv"}
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -30,7 +30,7 @@ def _parser() -> argparse.ArgumentParser:
         "-f",
         "--format",
         choices=_FORMATS,
-        help="output format: text, markdown, json, or docx (a Word file) (default: from the output suffix, else text)",
+        help="output format: text, markdown, json, docx (a Word file), xlsx (the tables, a sheet each) or csv (the tables: one file each with -o NAME.csv as NAME-1.csv, NAME-2.csv..., else separated by an empty line) (default: from the output suffix, else text)",
     )
     parser.add_argument(
         "--no-repairs",
@@ -158,8 +158,8 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         return 0
     fmt = args.format or (_BY_SUFFIX.get(args.output.suffix.lower(), "text") if args.output else "text")
-    if fmt == "docx" and not args.output and sys.stdout.isatty():
-        parser.error("a Word file is not shown on a terminal: give -o FILE.docx, or redirect the output")
+    if fmt in ("docx", "xlsx") and not args.output and sys.stdout.isatty():
+        parser.error(f"a {'Word' if fmt == 'docx' else 'workbook'} file is not shown on a terminal: give -o FILE.{fmt}, or redirect the output")
     try:
         handwriting = None
         if args.handwriting is not None:
@@ -215,21 +215,27 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError) as exc:
         print(f"heocr: {exc}", file=sys.stderr)
         return 1
-    if fmt == "docx":
+    if fmt == "csv":
+        out = _csv(doc, args.output)
+    elif fmt == "docx":
         out = doc.to_docx()
+    elif fmt == "xlsx":
+        out = doc.to_xlsx()
     elif fmt == "json":
         out = doc.to_json() + "\n"
     elif fmt == "markdown":
         out = doc.markdown
     else:
         out = doc.text
-    if isinstance(out, bytes):
+    if out is None:
+        pass  # written already, one file per table
+    elif isinstance(out, bytes):
         if args.output:
             args.output.write_bytes(out)
         else:
             sys.stdout.buffer.write(out)
     elif args.output:
-        args.output.write_text(out, encoding="utf-8")
+        args.output.write_text(out, encoding="utf-8", newline="" if fmt == "csv" else None)
     else:
         if hasattr(sys.stdout, "reconfigure"):
             sys.stdout.reconfigure(encoding="utf-8")
@@ -249,6 +255,22 @@ def main(argv: list[str] | None = None) -> int:
             detail = f" ({item.detail})" if item.detail else ""
             print(f"heocr: unread: {where}{item.reason}{detail}", file=sys.stderr)
     return 0
+
+
+def _csv(doc, output: Path | None) -> str | None:
+    """The tables as CSV: one file each when there are several and an output name is given (NAME-1.csv, ...;
+    then None), else all of them in one text, separated by an empty line."""
+    from heocr.table_export import tables, to_csv
+
+    found = tables(doc)
+    if not found:
+        print("heocr: no tables were found", file=sys.stderr)
+    if output is not None and len(found) > 1:
+        for i, block in enumerate(found, 1):
+            output.with_name(f"{output.stem}-{i}{output.suffix or '.csv'}").write_text(
+                to_csv(block), encoding="utf-8", newline="")
+        return None
+    return "\r\n".join(to_csv(block) for block in found)
 
 
 def _model_warnings(doc) -> list[str]:
