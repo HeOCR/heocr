@@ -172,6 +172,61 @@ def column_order(lines, page_width: int) -> list | None:
             for band, side in enumerate(grouped) for line in sorted(side, key=lambda item: item.bbox[1])]
 
 
+def _line_fragment(line, words):
+    return replace(line, text=" ".join(word.text for word in words), words=words,
+                   confidences=[word.confidence for word in words],
+                   bbox=[min(word.bbox[0] for word in words), min(word.bbox[1] for word in words),
+                         max(word.bbox[2] for word in words), max(word.bbox[3] for word in words)])
+
+
+def staggered_lanes(lines, page_width):
+    """Split merged OCR lines where two RTL lanes meet across a wide central gutter."""
+    if len(lines) < 20 or not all(line.words for line in lines):
+        return None
+    height = median(line.bbox[3] - line.bbox[1] for line in lines)
+    if height <= 0:
+        return None
+    seam = page_width / 2
+    left, right, bridges = [], [], []
+    for line in lines:
+        if line.bbox[2] <= seam:
+            left.append(line)
+        elif line.bbox[0] >= seam:
+            right.append(line)
+        else:
+            a = [word for word in line.words if word.bbox[2] <= seam]
+            b = [word for word in line.words if word.bbox[0] >= seam]
+            if min(len(a), len(b)) < 2 or len(a) + len(b) != len(line.words):
+                return None
+            if min(word.bbox[0] for word in b) - max(word.bbox[2] for word in a) < 3 * height:
+                return None
+            if line.text != " ".join(word.text for word in line.words):
+                return None
+            bridges.append((line, a, b))
+    if not 2 <= len(bridges) <= 4 or min(len(left), len(right)) < 8:
+        return None
+    if any(sum(len(line.words) >= 3 for line in lane) < 6 for lane in (left, right)):
+        return None
+
+    def center(line):
+        return (line.bbox[1] + line.bbox[3]) / 2
+
+    ltop, lbottom = min(map(center, left)), max(map(center, left))
+    rtop, rbottom = min(map(center, right)), max(map(center, right))
+    joint = [center(line) for line, _, _ in bridges]
+    if (rtop - ltop < 8 * height or rbottom - lbottom < 8 * height
+            or abs(rtop - lbottom) > 4 * height or max(joint) - min(joint) > 5 * height
+            or abs(rtop - max(joint)) > 4 * height or abs(lbottom - max(joint)) > 4 * height):
+        return None
+    if lines.index(left[0]) > lines.index(right[0]):
+        return None
+    for line, left_words, right_words in bridges:
+        left.append(_line_fragment(line, left_words))
+        right.append(_line_fragment(line, right_words))
+    return [replace(line, paragraph=(f"staggered:{lane}:{line.paragraph[0]}", line.paragraph[1]))
+            for lane, group in enumerate((right, left)) for line in sorted(group, key=center)]
+
+
 def _edge_ink(image):
     w, h = image.size
     if min(w, h) < 6:

@@ -175,6 +175,20 @@ class PhoneGeometryTest(unittest.TestCase):
         self.assertIsNone(read_lines(SimpleNamespace(psm=3, recognize_line_batch=batch), raster, native))
         batch.assert_called_once()
 
+    def test_alternate_line_reader_is_lazy_and_falls_back_on_an_incomplete_batch(self):
+        raster, native = phone_page()
+        batch = Mock(return_value=[])
+        original = Mock(return_value=[])
+        base = SimpleNamespace(psm=3, recognize_line_batch=original)
+        alternate = SimpleNamespace(recognize_line_batch=batch, failures=0)
+        choose = Mock(return_value=alternate)
+        self.assertIsNone(read_lines(base, Image.new("L", raster.size, 255), native, alternate_engine=choose))
+        choose.assert_not_called()
+        self.assertIsNone(read_lines(base, raster, native, alternate_engine=choose))
+        choose.assert_called_once()
+        self.assertEqual(alternate.failures, 1)
+        original.assert_called_once()
+
     def test_normal_image_entry_point_gates_by_flag_and_capture(self):
         raster, native = phone_page()
         payload = BytesIO()
@@ -211,6 +225,21 @@ class PhoneGeometryTest(unittest.TestCase):
             self.assertTrue(doc._ocr_settings["phone_geometry"])
             self.assertEqual(max(read.call_args.kwargs["rendered"][0].size), 1700)
         self.assertEqual(_parser().parse_args(["page.jpg", "--profile", "fast-mix-v1"]).profile, "fast-mix-v1")
+
+    def test_fast_mix_v2_settings_follow_the_capture(self):
+        image, _ = phone_page()
+        payload = BytesIO()
+        image.save(payload, format="PNG")
+        with patch("heocr.pdf.reader._ocr_page"):
+            for capture in ("pixel", "issuer-render", "scanner"):
+                with self.subTest(capture=capture):
+                    doc = extract(payload.getvalue(), profile="fast-mix-v2", ocr_capture_type=capture)
+                    self.assertEqual(doc.options["ocr"]["profile"]["name"], "fast-mix-v2")
+                    self.assertEqual(bool(doc._ocr_settings.get("phone_latin_edges")), capture == "pixel")
+                    self.assertEqual(bool(doc._ocr_settings.get("oblique_rivok")), capture == "pixel")
+                    self.assertEqual(bool(doc._ocr_settings.get("issuer_staggered_lanes")), capture == "issuer-render")
+        args = _parser().parse_args(["page.jpg", "--profile", "fast-mix-v2"])
+        self.assertEqual(args.profile, "fast-mix-v2")
 
     def test_phone_raster_limit_is_opt_in_and_keeps_source_page_size(self):
         raster, _ = phone_page()

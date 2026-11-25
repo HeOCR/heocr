@@ -71,6 +71,7 @@ class OcrLine:
 @dataclass
 class OcrResult:
     lines: list[OcrLine]
+    line_model_sha256: str | None = None
 
     @property
     def words(self) -> int:

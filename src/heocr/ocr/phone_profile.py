@@ -36,6 +36,23 @@ def check_model(pin):
         raise ValueError("phone model is unavailable or does not match its SHA-256")
 
 
+def oblique_engine(doc):
+    """Load the optional rectified-line reader without changing primary provenance."""
+    from heocr.ocr.routes import RIVOK_FULL
+
+    key = ("oblique_line_model", RIVOK_FULL)
+    if key not in doc._ocr_engines:
+        try:
+            engine = Tesseract.find(doc._ocr_settings["cmd"], psm=3, model=RIVOK_FULL)
+        except OcrUnavailable:
+            doc.flags.append("ocr_oblique_line_model_unavailable")
+            engine = None
+        doc._ocr_engines[key] = engine
+        if engine is not None:
+            doc.components[f"tesseract:{RIVOK_FULL}.traineddata"] = f"sha256:{engine.models[RIVOK_FULL]}"
+    return doc._ocr_engines[key]
+
+
 def line_engine(doc):
     """Stage and verify the line model once, when geometry has crops to read."""
     path, sha256 = doc._ocr_settings["phone_model"]

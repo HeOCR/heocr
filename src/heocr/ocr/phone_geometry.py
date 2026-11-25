@@ -270,7 +270,7 @@ def _native_box(inverse, box, size):
     return [max(0, min(xs)), max(0, min(ys)), min(width, max(xs)), min(height, max(ys))]
 
 
-def read_lines(engine, image, result, *, line_engine=None, skip_confident=False):
+def read_lines(engine, image, result, *, line_engine=None, skip_confident=False, alternate_engine=None):
     """Reread a supported prose block and retain the original on uncertainty."""
     if engine.psm != 3 or not 5 <= len(result.lines) <= _MAX_LINES or not all(line.words for line in result.lines):
         return None
@@ -301,11 +301,28 @@ def read_lines(engine, image, result, *, line_engine=None, skip_confident=False)
     if line_engine is not None:
         engine = line_engine()
     targets = range(len(boxes))
+    alternate = alternate_engine() if alternate_engine is not None else None
+    alternate_sha256 = None
+    readings = None
+
+    def read(reader, slots):
+        crops = (ImageOps.expand(crop(boxes[i]), _CROP_PADDING, fill=255) for i in slots)
+        return reader.recognize_line_batch(crops, _CROP_DPI)
+
+    if alternate is not None:
+        try:
+            readings = read(alternate, targets)
+            if len(readings) != len(targets):
+                raise OcrUnavailable("oblique line reader returned an incomplete batch")
+            alternate_sha256 = alternate.models[alternate.lang]
+        except OcrUnavailable:
+            alternate.failures += 1
+            readings = None
     # The pinned modern model uses only the LSTM recognizer. The audited
     # engine has no legacy cross-image adaptive classifier for this batch.
     # Keep the original slot sequence for other engines and weights.
     modern = MODELS["heocr_modern_v1"]
-    if (getattr(engine, "version", None) == "tesseract 5.5.3"
+    if (readings is None and getattr(engine, "version", None) == "tesseract 5.5.3"
             and getattr(engine, "models", None) == {modern.name: modern.sha256}):
         targets = tuple(i for i, group in enumerate(by_band)
                         if (group and not any(line.number_readings or line.latin_runs_reread for line, _ in group)
@@ -314,13 +331,13 @@ def read_lines(engine, image, result, *, line_engine=None, skip_confident=False)
                         or (not group and used[0] < i < used[-1]))
     if not targets:
         return None
-    try:
-        readings = engine.recognize_line_batch(
-            (ImageOps.expand(crop(boxes[i]), _CROP_PADDING, fill=255) for i in targets), _CROP_DPI)
-    except OcrUnavailable:
-        if line_engine is not None:
-            raise ValueError("phone specialist line OCR failed with the pinned model") from None
-        return None
+    if readings is None:
+        try:
+            readings = read(engine, targets)
+        except OcrUnavailable:
+            if line_engine is not None:
+                raise ValueError("phone specialist line OCR failed with the pinned model") from None
+            return None
     if len(readings) != len(targets):
         if line_engine is not None:
             raise ValueError("phone specialist line OCR returned an incomplete batch")
@@ -359,4 +376,5 @@ def read_lines(engine, image, result, *, line_engine=None, skip_confident=False)
     if not changes:
         return None
     restored.extend(keep)
-    return OcrResult([line for _, line in sorted(restored, key=lambda row: row[0])])
+    return OcrResult([line for _, line in sorted(restored, key=lambda row: row[0])],
+                     line_model_sha256=alternate_sha256)

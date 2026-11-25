@@ -250,6 +250,29 @@ Place the checksum-verified `heocr_modern_v1.traineddata` and
 installed Tesseract English data. A missing primary model produces an unread
 diagnostic. In Python pass `profile="fast-mix-v1"` and `ocr_capture_type=...`.
 
+#### Fast mix v2
+
+```sh
+heocr photo.jpg --profile fast-mix-v2 --ocr-capture-type pixel
+heocr issuer.pdf --profile fast-mix-v2 --ocr-capture-type issuer-render
+```
+
+This opt-in profile uses the same page models and raster cap as fast mix v1.
+It accepts an English identifier on an isolated near-phone header or footer
+when two crop reads agree on the letters and digits. Supported oblique
+phone crops use the pinned local Rivok Full line reader. The JSON page
+signals give the effective model hash for rectified lines. A missing model
+or failed batch leaves the regular phone line reader available and produces
+a diagnostic.
+
+For OCR on issuer renders, v2 can split lines at a wide central gutter when
+several lines and their words support two staggered RTL lanes. The regular
+layout checks still handle tables and ordinary parallel columns.
+
+To use one refinement with `--profile fast-mix-v1`, pass
+`--ocr-phone-latin-edges`, `--ocr-oblique-rivok` or
+`--ocr-issuer-staggered-lanes`. Each flag applies only to its capture route.
+
 ### Geometric OCR layout
 
 ```sh

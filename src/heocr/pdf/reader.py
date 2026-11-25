@@ -54,7 +54,7 @@ from heocr.pdf.ocrrows import TableRows, table_rows
 from heocr.pdf.ocrfragments import join_camera_line_fragments, recover_narrow_lines, suppress_contained_fragments
 from heocr.pdf.ocrpixel import recover_pixel_lines
 from heocr.pdf.ocrsparse import recover_scan_lines
-from heocr.pdf.ocrlatin import reread_latin_runs
+from heocr.pdf.ocrlatin import reread_latin_edges, reread_latin_runs
 from heocr.pdf.ocrtables import (
     CELL_TEXT_PAGE_EDGE, cell_crop, cell_has_faint_ink, cell_has_ink, cell_psm, faint_cell_image,
     image_rulings, isolated_cell_text, tables_in,
@@ -2537,6 +2537,14 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
             page_numbers, english_page = _page_number_pass(numbers, page_image, result, round(scale * 72))
         except OcrUnavailable:
             page_numbers = None
+    if (settings.get("phone_latin_edges") and number_words is not None and numbers.lang == "eng"
+            and not (grids or rectified or page_failed or time_up(doc))):
+        from heocr.ocr.phone_geometry import _sheet
+
+        if _sheet(page_image.convert("L")) is None:
+            edges_read = reread_latin_edges(page_image, dpi, result.lines, numbers)
+            if edges_read:
+                signals["ocr_phone_latin_edges"] = edges_read
     # An unruled table is read by Tesseract column by column; its cells are given back in rows.
     ltr_changes = ocr_layout.normalize_ltr(result.lines) if layout and doc._rtl else 0
     unruled = table_rows(result.lines, scale, doc._rtl, layout=layout) if OCR_TABLE_ROWS else []
@@ -2605,12 +2613,18 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
             from heocr.ocr.phone_profile import line_engine
 
             line_options["line_engine"] = lambda: line_engine(doc)
+        if settings.get("oblique_rivok"):
+            from heocr.ocr.phone_profile import oblique_engine
+
+            line_options["alternate_engine"] = lambda: oblique_engine(doc)
         corrected = read_phone_lines(engine, gray, result, **line_options)
         if corrected is not None:
             result = corrected
             short, outside_share = short_for_ink(gray, result)
             flags = flags + ["ocr_phone_geometry_rectified"]
-            if profile := doc.options["ocr"].get("profile"):
+            if corrected.line_model_sha256:
+                signals["ocr_phone_geometry_line_sha256"] = corrected.line_model_sha256
+            elif profile := doc.options["ocr"].get("profile"):
                 signals["ocr_phone_geometry_line_sha256"] = profile["line_model_sha256"]
     columns = None
     if layout and doc._rtl:
@@ -2622,6 +2636,11 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
             if columns is not None:
                 result = OcrResult(columns)
                 flags = flags + ["ocr_layout_rtl_columns"]
+            elif settings.get("issuer_staggered_lanes"):
+                columns = ocr_layout.staggered_lanes(result.lines, page_image.width)
+                if columns is not None:
+                    result = OcrResult(columns)
+                    flags = flags + ["ocr_layout_issuer_staggered_lanes"]
     form_tables = [t.bbox for t in grids if "table_open_sides_inferred" in t.flags]
     margin_page = image.size if doc._rtl and not unruled and not (grids or rectified) else None
     record_lines = page is not None and page_class == "T5" and margin_page is not None
