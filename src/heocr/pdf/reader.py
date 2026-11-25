@@ -1347,10 +1347,11 @@ def _ocr_table_proposals(doc: Document, index: int, image, scale: float, grids, 
 
     Docling sees the page image exactly as heocr reads it (after any straightening), wrapped in a one-page PDF of
     the same size in points, so the proposals' boxes meet the image. A camera photo is skipped: its warped rows do
-    not fit an upright grid, and the phone geometry path reads it.
+    not fit an upright grid, and the phone geometry path reads it. ``ocr_phone_table_proposals`` runs them on
+    phone photos too.
     """
     settings = doc._ocr_settings or {}
-    if camera_jpeg or settings.get("phone_geometry"):
+    if (camera_jpeg or settings.get("phone_geometry")) and not settings.get("phone_table_proposals"):
         return [], ["table_proposals_skipped_camera"]
     if time_up(doc):
         return [], []

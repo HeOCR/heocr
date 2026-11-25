@@ -122,6 +122,33 @@ class OcrProposedTest(unittest.TestCase):
         self.assertEqual(doc.pages[0].route, "ocr")
         self.assertEqual([b for b in doc.blocks if b.kind == "table"], [])
 
+    def test_phone_photos_skip_proposals_unless_opted_in(self) -> None:
+        from io import BytesIO
+
+        body = BytesIO()
+        borderless().save(body, "PNG", dpi=(DPI, DPI))
+
+        engine = mock.Mock(psm=3, lang="heb", route=None, version="tesseract 5.5.3")
+        engine.recognize.return_value = OcrResult([OcrLine("בדיקה", [10, 12, 34, 25], [91])])
+
+        def read(stub, **options):
+            # A declared phone capture routes to a downloaded model; the engine is stubbed instead.
+            with mock.patch("heocr.tableformer.TableFormerProposer", lambda models: stub), \
+                    mock.patch("heocr.pdf.reader.engine_for", return_value=engine):
+                return heocr.extract(body.getvalue(), check_numbers=False, tables="tableformer",
+                                     tables_models="unused", ocr_capture_type="phone", ocr_phone_geometry=True,
+                                     **options)
+        skipped = Stub()
+        doc = read(skipped)
+        self.assertEqual(skipped.calls, [])
+        self.assertIn("table_proposals_skipped_camera", doc.pages[0].flags)
+        opted = Stub()
+        doc = read(opted, ocr_phone_table_proposals=True)
+        self.assertEqual(len(opted.calls), 1)
+        self.assertNotIn("table_proposals_skipped_camera", doc.pages[0].flags)
+        self.assertTrue(doc.options["ocr"]["phone_table_proposals"])
+        self.assertEqual(heocr.validate(doc.to_dict()), [])
+
     def test_fast_mix_runs_the_explicit_table_stage_on_a_scanned_pdf(self):
         stub = Stub()
         with mock.patch("heocr.tableformer.TableFormerProposer", return_value=stub):
