@@ -171,6 +171,84 @@ def _missing_rows(bands: list, spans_across: set[int], top: float, bottom: float
     return out
 
 
+MIN_COLUMN_GAP = 0.6  # share of the median character height: a narrower common gap is a word space
+
+
+def _column_split(a: float, b: float, rows: list[list[tuple]], height: float) -> float | None:
+    """A line inside the column (a, b) that the detector missed: the middle of the widest stretch no row's text
+    crosses, but at most one (a label spilling over), with numbers on both sides of it in at least two rows and in at
+    least a third of the column's inked rows. None when there is none."""
+    inked = [[c for c in row if a <= (c[0] + c[1]) / 2 <= b] for row in rows]
+    inked = [row for row in inked if row]
+    if len(inked) < 2:
+        return None
+    best = None
+    for skip in [None, *range(len(inked))]:
+        ink = [(c[0], c[1]) for i, row in enumerate(inked) if i != skip for c in row]
+        for lo, hi in _free(a, b, ink):
+            if hi - lo < MIN_COLUMN_GAP * height or lo <= a or hi >= b:
+                continue  # too narrow for a column gap, or the column's own margin
+            m = (lo + hi) / 2
+            both = sum(1 for row in inked if any(c[1] <= m and c[2].isdigit() for c in row)
+                       and any(c[0] >= m and c[2].isdigit() for c in row))
+            if both >= max(2, len(inked) / 3) and (best is None or (both, hi - lo) > best[0]):
+                best = ((both, hi - lo), m)
+    return best[1] if best else None
+
+
+def _recover_columns(xs: list[float], ys: list[float], cells: list, cols: int, boxes: list) -> tuple:
+    """Columns the detector merged, split again where the text layer shows a steady gap between numbers
+    (``table_columns_recovered``). Each new line splits the cells in that column; a cell spanning it widens."""
+    chars = [(b[0], b[2], (b[4] if len(b) > 4 else "0")[:1], (b[1] + b[3]) / 2) for b in boxes]
+    rows = [[c[:3] for c in chars if ys[r] <= c[3] < ys[r + 1]] for r in range(len(ys) - 1)]
+    heights = sorted(b[3] - b[1] for b in boxes)
+    height = heights[len(heights) // 2] if heights else 10.0
+    recovered = 0
+    k = 0
+    while k < cols and recovered < cols:
+        cut = _column_split(xs[k], xs[k + 1], rows, height)
+        if cut is None:
+            k += 1
+            continue
+        xs = xs[:k + 1] + [cut] + xs[k + 1:]
+        out = []
+        for r0, c0, rs, cs, box in cells:
+            if c0 > k:
+                out.append((r0, c0 + 1, rs, cs, box))
+            elif c0 + cs - 1 < k:
+                out.append((r0, c0, rs, cs, box))
+            elif cs == 1:  # the merged column's cell becomes two
+                out.append((r0, c0, rs, 1, None))
+                out.append((r0, c0 + 1, rs, 1, None))
+            else:
+                out.append((r0, c0, rs, cs + 1, box))
+        cells, cols, recovered = out, cols + 1, recovered + 1
+        # the same column is checked again: it may hold more than two
+    return xs, cells, cols, recovered
+
+
+def _split_spans(xs: list[float], ys: list[float], cells: list, boxes: list) -> tuple[list, int]:
+    """A detector cell spanning columns that holds numbers in two or more of them, none of its text crossing the lines
+    between, is that many cells (``table_spans_split``): a merge the detector made over separate values. A heading
+    (words, whose gaps can fall on an inner line) stays."""
+    out, split = [], 0
+    for r0, c0, rs, cs, box in cells:
+        if cs < 2:
+            out.append((r0, c0, rs, cs, box))
+            continue
+        top, bottom = ys[r0], ys[r0 + rs]
+        mine = [b for b in boxes if top <= (b[1] + b[3]) / 2 < bottom and xs[c0] <= (b[0] + b[2]) / 2 < xs[c0 + cs]]
+        inner = xs[c0 + 1:c0 + cs]
+        numbers = {sum(1 for x in inner if x <= (b[0] + b[2]) / 2) for b in mine
+                   if len(b) > 4 and b[4][:1].isdigit()}
+        if len(numbers) < 2 or any(b[0] < x < b[2] for b in mine for x in inner):
+            out.append((r0, c0, rs, cs, box))
+            continue
+        out.extend((r0, c, rs, 1, None) for c in range(c0, c0 + cs))
+        split += 1
+    return out, split
+
+
 def to_table(proposal: dict, ink: list[Box] | None = None, spans=None) -> Table | None:
     """The proposal as a D3b grid, or None when it is not a table of at least 2 x 2 positions.
 
@@ -230,6 +308,13 @@ def to_table(proposal: dict, ink: list[Box] | None = None, spans=None) -> Table 
         rows, row_bands = len(bands), bands
     xs = _lines((x0, x1), _bands(cols, firsts_x, lasts_x), x_ink, exact=spans is None)
     ys = _lines((top, bottom), row_bands, y_ink)
+    if spans is None and inside:
+        xs, cells, cols, recovered = _recover_columns(xs, ys, cells, cols, inside)
+        if recovered:
+            flags.append("table_columns_recovered")
+        cells, split = _split_spans(xs, ys, cells, inside)
+        if split:
+            flags.append("table_spans_split")
     origin: dict[tuple[int, int], tuple[int, int, int, int]] = {}
     for r0, c0, rs, cs, _box in cells:
         span = (r0, c0, rs, cs)

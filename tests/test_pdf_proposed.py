@@ -98,6 +98,44 @@ class GridTests(unittest.TestCase):
         self.assertTrue(140.0 < cut < 165.0)
         self.assertEqual(_cut((100.0, 160.0), (150.0, 200.0), ink), 155.0)  # an image profile: the plain middle
 
+    def test_a_column_the_detector_merged_is_recovered(self):
+        # One detector column holds two numbers per row, 20 points apart; one row's label spills across the gap.
+        def chars(text, x, y):
+            return [(x + 4 * i, y, x + 4 * i + 4, y + 10, ch) for i, ch in enumerate(text)]
+        ink = []
+        for r in range(4):
+            y = 105 + 20 * r
+            ink += chars("א" * 6, 10, y)  # the label column, 0-40
+            ink += chars("12.5", 60, y) + chars("7.5", 96, y) if r != 2 else chars("א" * 14, 60, y)
+        spans = [(8, 36), (58, 110)]  # the detector's two columns, left to right
+        p = {"bbox": [0, 100, 140, 180], "rows": 4, "cols": 2,
+             "cells": [{"row": r, "col": c, "box": [spans[c][0], 104 + 20 * r, spans[c][1], 116 + 20 * r]}
+                       for r in range(4) for c in range(2)]}
+        t = to_table(p, ink)
+        self.assertIn("table_columns_recovered", t.flags)
+        self.assertEqual(len(t.xs), 4)
+        self.assertTrue(76 < t.xs[2] < 96)
+
+    def test_a_detector_span_over_separate_numbers_is_split_and_a_heading_is_not(self):
+        def chars(text, x, y):
+            return [(x + 4 * i, y, x + 4 * i + 4, y + 10, ch) for i, ch in enumerate(text)]
+        boxes = [[[8, 104, 36, 116], [58, 104, 80, 116], [100, 104, 120, 116]],
+                 [[8, 124, 36, 136], [58, 124, 80, 136], [100, 124, 120, 136]]]
+        cells = [{"row": r, "col": c, "box": boxes[r][c]} for r in range(2) for c in range(3)]
+        cells = [c for c in cells if not (c["row"] == 1 and c["col"] == 2)]
+        cells[-1]["colspan"] = 2  # the detector merged row 1's two values
+        p = {"bbox": [0, 100, 130, 140], "rows": 2, "cols": 3, "cells": cells}
+        ink = chars("אבג", 10, 105) + chars("ראשון", 58, 105) + chars("שני", 100, 105)
+        ink += chars("אבג", 10, 125) + chars("1.5", 60, 125) + chars("2.5", 102, 125)
+        t = to_table(p, ink)
+        self.assertIn("table_spans_split", t.flags)
+        self.assertEqual([len(row) for row in t.rows], [3, 3])
+        cells[-1]["colspan"], cells[-1]["row"] = 2, 0  # the same span over two words of a heading
+        p["cells"] = [c for c in cells if not (c["row"] == 0 and c["col"] == 2)]
+        ink = chars("אבג", 10, 105) + chars("כותרת", 58, 105) + chars("ארוכה", 100, 105)
+        ink += chars("אבג", 10, 125) + chars("1.5", 60, 125) + chars("2.5", 102, 125)
+        self.assertNotIn("table_spans_split", to_table(p, ink).flags)
+
     def test_small_proposals_are_not_tables(self):
         self.assertIsNone(to_table({"bbox": [0, 0, 10, 10], "rows": 1, "cols": 4, "cells": []}))
 
@@ -178,6 +216,18 @@ class TidyTests(unittest.TestCase):
         self.assertEqual([[c.text for c in row] for row in b.cells], [["כותרת"], ["א", "1"], ["ב", "2"]])
         self.assertEqual(b.cells[0][0].colspan, 2)
         self.assertIn("table_empty_columns_dropped", b.flags)
+
+    def test_empty_rows_are_dropped_but_spanned_rows_stay(self):
+        from heocr.contract import Cell
+        from heocr.pdf.tabletidy import tidy
+        b = self.block([[Cell("א"), Cell("1")],
+                        [Cell(""), Cell("")],
+                        [Cell("ב", rowspan=2), Cell("2")],
+                        [Cell("", flags=["merged_above"]), Cell("")],
+                        [Cell("ג"), Cell("3")]])
+        tidy(b)
+        self.assertEqual([[c.text for c in row] for row in b.cells], [["א", "1"], ["ב", "2"], ["", ""], ["ג", "3"]])
+        self.assertIn("table_empty_rows_dropped", b.flags)
 
     def test_ruled_tables_are_never_reshaped(self):
         from heocr.contract import Block, Cell

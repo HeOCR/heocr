@@ -5,6 +5,8 @@ reshaped. Each step is a listed rule, flagged on the table:
 
 - ``table_empty_columns_dropped``: a column whose own (single-column) cells are all empty is removed, and a cell
   spanning it loses one column. Without rulings an all-empty column cannot be seen on the page; it is the detector's.
+- ``table_empty_rows_dropped``: a row whose cells are all empty, with no cell spanning into or out of it, is removed:
+  without rulings a blank row cannot be seen on the page either.
 - ``table_enumerators_joined``: a first column that holds only margin enumerators ("(1)", "2.", "(א)") in a
   minority of rows is joined to the label column: each enumerator prefixes the label beside it, and the column goes
   (0032 gold convention d: an enumerator printed outside the grid joins its row label).
@@ -63,6 +65,22 @@ def drop_empty_columns(block: Block) -> int:
             rows[r] = out
         dropped += 1
     return dropped
+
+
+def drop_empty_rows(block: Block) -> int:
+    rows = block.cells
+    spanned = set()  # rows a cell from above reaches into
+    for r, row in enumerate(rows):
+        for cell in row:
+            if cell.rowspan > 1 and "merged_above" not in cell.flags:
+                spanned.update(range(r + 1, r + cell.rowspan))
+    keep = [row for r, row in enumerate(rows)
+            if r in spanned or any(c.text.strip() or c.rowspan > 1 or "merged_above" in c.flags for c in row)]
+    dropped = len(rows) - len(keep)
+    if dropped and keep:
+        block.cells = keep
+        return dropped
+    return 0
 
 
 def _line_box(line):
@@ -131,3 +149,5 @@ def tidy(block: Block) -> None:
         block.flags.append("table_section_rows_split")
     if drop_empty_columns(block):
         block.flags.append("table_empty_columns_dropped")
+    if drop_empty_rows(block):
+        block.flags.append("table_empty_rows_dropped")
