@@ -62,6 +62,7 @@ FLOW_LINES = 0.6  # and at least this share of a band's lines are such lines
 FLOW_BAND = 0.25  # every band of running text is at least this share of the run's width (not page numbers)
 GUTTER_SHARE = 0.5  # a gutter is at least this share of the column gap that split the rows
 NEAR = 1.5  # line heights: rows this close to each other, or to a table's edge, belong together
+FOOTER_BAND = 0.1  # share of the page height at its bottom: the furniture band (furniture.BAND)
 EDGE = 3.0  # pt: tolerance on a ruled table's column positions
 CONTINUATION = 0.75  # a lone line closer than this share of the usual row gap continues the cell above
 ALIGN = 0.5  # line heights: a neighbouring line lines up with a band's piece when an edge or the centre is this close
@@ -122,6 +123,7 @@ def arrange(
     page_index: int,
     ruled: list[tuple[Block, list[float]]],
     repairs_on: bool = True,
+    page_height: float | None = None,
 ) -> tuple[list[Segment], list[Block], int]:
     """Split a page's body characters into segments in reading order.
 
@@ -137,7 +139,7 @@ def arrange(
     median_height = statistics.median(heights) if heights else 0.0
     gap_limit = max(COLUMN_GAP_MIN, median_height * COLUMN_GAP_HEIGHTS)
     consumed: set[int] = set()
-    tables, moved = _extend_ruled(rows, ruled, median_height, consumed, page_index)
+    tables, moved = _extend_ruled(rows, ruled, median_height, consumed, page_index, page_height)
     runs = _runs(rows, consumed, gap_limit)
     segments: list[Segment] = []
     pending: list[Atom] = []
@@ -190,8 +192,11 @@ def _fits(row: _Row, xs: list[float]) -> list[tuple[int, int]] | None:
     return out
 
 
-def _extend_ruled(rows, ruled, median_height, consumed, page_index) -> tuple[list[Block], int]:
+def _extend_ruled(rows, ruled, median_height, consumed, page_index, page_height=None) -> tuple[list[Block], int]:
     near = NEAR * median_height + 2.0
+    # The page's bottom margin band (as furniture.BAND): a row there below a table is a footer, not a table row,
+    # unless a ruled table resumes after it.
+    footer_top = page_height * (1 - FOOTER_BAND) if page_height else None
     order = sorted(range(len(ruled)), key=lambda k: ruled[k][0].bbox[1])
     blocks = [ruled[k][0] for k in order]
     grids = [ruled[k][1] for k in order]
@@ -222,6 +227,9 @@ def _extend_ruled(rows, ruled, median_height, consumed, page_index) -> tuple[lis
             ),
             None,
         )
+        if follower is None and footer_top is not None:
+            while taken and rows[taken[-1]].top >= footer_top:
+                taken.pop()  # a running footer under the table: furniture decides it, not this table
         if follower is None:
             while taken and not rows[taken[-1]].multi:
                 taken.pop()

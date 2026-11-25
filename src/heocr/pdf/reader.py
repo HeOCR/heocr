@@ -1268,7 +1268,7 @@ def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = froz
     all_tables: list[Block] = []
     for half, atoms, region_tables in parts:
         first = len(doc.blocks)
-        region = _read_region(doc, index, atoms, region_tables, built if half is None else None, repairs_on)
+        region = _read_region(doc, index, atoms, region_tables, built if half is None else None, repairs_on, height)
         if half is not None:
             for block in doc.blocks[first:]:
                 block.half = half
@@ -1370,7 +1370,8 @@ def _ocr_table_proposals(doc: Document, index: int, image, scale: float, grids, 
     return learned, (["tableformer_tables"] if learned else [])
 
 
-def _read_region(doc: Document, index: int, atoms: list[Atom], tables, built: PageLines | None, repairs_on: bool) -> dict:
+def _read_region(doc: Document, index: int, atoms: list[Atom], tables, built: PageLines | None, repairs_on: bool,
+                 page_height: float | None = None) -> dict:
     """Read one region of a text-layer page (the page, or one half of a spread): ruled tables,
     side-by-side rows, then lines. Blocks are appended in reading order, tables by their top edge."""
     t_blocks, body_atoms, in_tables, rejected, grids = table_blocks(index, atoms, tables, doc._rtl, repairs_on)
@@ -1378,7 +1379,8 @@ def _read_region(doc: Document, index: int, atoms: list[Atom], tables, built: Pa
         built = build_lines(body_atoms, default_rtl=doc._rtl)
     # Side-by-side rows: rows of a ruled table, unruled tables, column flows (D3c).
     if t_blocks or built.has_columns:
-        segments, t_blocks, moved = arrange(body_atoms, doc._rtl, index, list(zip(t_blocks, grids)), repairs_on)
+        segments, t_blocks, moved = arrange(body_atoms, doc._rtl, index, list(zip(t_blocks, grids)), repairs_on,
+                                            page_height=page_height)
         in_tables += moved
     else:
         segments = [Segment("lines", body_atoms)]
