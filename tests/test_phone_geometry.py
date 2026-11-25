@@ -9,7 +9,7 @@ from PIL import Image, ImageDraw
 
 from heocr import extract
 from heocr.cli import _parser
-from heocr.ocr.phone_geometry import _sheet, read_lines
+from heocr.ocr.phone_geometry import _analysis_raster, _edge_samples, _sheet, read_lines
 from heocr.ocr.tesseract import OcrLine, OcrResult, OcrUnavailable, OcrWord
 from heocr.pdf.perspective import _projection, _source_quad
 
@@ -36,6 +36,25 @@ def phone_page():
 
 
 class PhoneGeometryTest(unittest.TestCase):
+    def test_analysis_resize_matches_thumbnail_pixels(self):
+        for size in ((203, 234), (1001, 2047), (3072, 1777), (1442, 1442), (2048, 1)):
+            with self.subTest(size=size):
+                raster = Image.linear_gradient("L").resize(size)
+                thumbnail = raster.copy()
+                thumbnail.thumbnail((480, 480), Image.Resampling.BOX)
+                analysis = _analysis_raster(raster)
+                self.assertEqual(analysis.size, thumbnail.size)
+                self.assertEqual(analysis.tobytes(), thumbnail.tobytes())
+                self.assertEqual(raster.size, size)
+
+    def test_edge_samples_keep_the_innermost_equal_step(self):
+        raster = Image.new("L", (140, 120), 40)
+        raster.paste(200, (20, 0, 140, 120))
+        self.assertEqual(_edge_samples(raster), (0, 23))
+        flipped = raster.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+        self.assertEqual(_edge_samples(flipped, reverse=True), (0, 116))
+        self.assertIsNone(_edge_samples(flipped))
+
     def test_sheet_detection_rejects_flat_or_incomplete_edges(self):
         raster, _ = phone_page()
         self.assertIsNotNone(_sheet(raster))

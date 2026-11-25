@@ -4,7 +4,7 @@ import math
 import re
 from statistics import median
 
-from PIL import Image, ImageFilter, ImageOps
+from PIL import Image, ImageChops, ImageFilter, ImageOps
 
 from heocr.ocr.tesseract import OcrLine, OcrResult, OcrUnavailable, OcrWord
 from heocr.pdf.ocrlines import _bands
@@ -22,19 +22,23 @@ def _edge_fit(points, span):
     """Fit a straight edge only when independent samples agree along its length."""
     if len(points) < 8:
         return None
-    hypotheses = []
+    minimum_span = span * .35
+    inliers = []
     for i, (u, v) in enumerate(points):
         for x, y in points[i + 1:]:
-            if x - u < span * .35:
+            if x - u < minimum_span:
                 continue
             slope = (y - v) / (x - u)
             if abs(slope) <= .65:
                 intercept = v - slope * u
-                inliers = [(a, b) for a, b in points if abs(b - (slope * a + intercept)) <= 2.5]
-                hypotheses.append((len(inliers), inliers))
-    if not hypotheses:
-        return None
-    count, inliers = max(hypotheses, key=lambda item: item[0])
+                support = [(a, b) for a, b in points if abs(b - (slope * a + intercept)) <= 2.5]
+                if len(support) > len(inliers):
+                    inliers = support
+                if len(inliers) == len(points):
+                    break
+        if len(inliers) == len(points):
+            break
+    count = len(inliers)
     if count < max(8, .66 * len(points)) or inliers[-1][0] - inliers[0][0] < span * .48:
         return None
     center_x = sum(x for x, _ in inliers) / count
@@ -51,36 +55,60 @@ def _edge_samples(raster, *, horizontal=False, reverse=False):
     if reverse:
         raster = raster.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
     width, height = raster.size
-    pixels = raster.load()
     start, stop = ((.24, .76) if horizontal else (.10, .43))
     first, last = int(height * start), int(height * stop)
+    columns = int(width * (.24 if horizontal else .34)) - 4
+    if columns <= 0 or last <= first:
+        return None
+    # These luminance steps are the shifted pixels from the original rays.
+    # Differences below zero can be clamped because only strong increases qualify.
+    after = raster.crop((8, first, 8 + columns, last))
+    before = raster.crop((0, first, columns, last))
+    differences = ImageChops.subtract(after, before).tobytes()
     points = []
     for row in range(first, last, max(1, (last - first) // 28)):
-        differences = []
-        for col in range(4, int(width * (.24 if horizontal else .34))):
-            # Blur was applied before the rays. Look for a transition extending
-            # several pixels to each side, rather than an isolated ink streak.
-            before = pixels[col - 4, row]
-            after = pixels[col + 4, row]
-            differences.append((after - before, col))
-        strength, position = max(differences, default=(0, 0))
+        offset = (row - first) * columns
+        values = differences[offset:offset + columns]
+        strength = max(values)
         if strength >= 16:
+            position = 4 + values.rfind(bytes((strength,)))
             points.append((row, width - 1 - position if reverse else position))
     return _edge_fit(points, last - first)
 
 
+def _analysis_raster(image):
+    # Preserve Pillow's thumbnail size and reduction, without copying the
+    # already-decoded source before resizing. In an aspect tie use the floor.
+    edge = _ANALYSIS_EDGE
+    if max(image.size) <= edge:
+        return image
+    aspect = image.width / image.height
+    if aspect <= 1:
+        size = edge * aspect
+        width = min(math.floor(size), math.ceil(size), key=lambda w: abs(aspect - w / edge))
+        target = (max(1, width), edge)
+    else:
+        size = edge / aspect
+        height = min(math.floor(size), math.ceil(size), key=lambda h: abs(aspect - edge / h) if h else 0)
+        target = (edge, max(1, height))
+    return image.resize(target, Image.Resampling.BOX, reducing_gap=2.0)
+
+
 def _sheet(image):
-    raster = image.copy()
-    raster.thumbnail((_ANALYSIS_EDGE, _ANALYSIS_EDGE), Image.Resampling.BOX)
+    raster = _analysis_raster(image)
     if min(raster.size) < 96:
         return None
     # Ignore the exact intensity of the sheet. Fit its three visible edges,
     # with the bottom of the plane defined within the photographed field.
     smooth = raster.filter(ImageFilter.GaussianBlur(1.1))
     left = _edge_samples(smooth)
+    if left is None:
+        return None
     right = _edge_samples(smooth, reverse=True)
+    if right is None:
+        return None
     top = _edge_samples(smooth, horizontal=True)
-    if left is None or right is None or top is None:
+    if top is None:
         return None
     top_slope, top_offset = top
     if abs(top_slope) > .20:
@@ -171,17 +199,22 @@ def _rectangles(image, lines, quad):
     if forward is None:
         return None
     native = lines
-    if not 5 <= len(native) <= _MAX_LINES or not all(line.words for line in native):
-        return None
     inverse = _level_text(inverse, forward, width, height, native)
     forward = _inverse(inverse)
     if forward is None or min(1 + forward[6] * x + forward[7] * y
                               for x in (0, image.width) for y in (0, image.height)) < .2:
         return None
-    mapped = [[_point(forward, *_center(word.bbox)) for word in line.words] for line in native]
-    word_heights = [math.dist(_point(forward, *_center(word.bbox)),
-                             _point(forward, _center(word.bbox)[0], word.bbox[3])) * 2
-                    for line in native for word in line.words if word.bbox[3] > word.bbox[1]]
+    mapped = []
+    word_heights = []
+    for line in native:
+        points = []
+        for word in line.words:
+            x, y = _center(word.bbox)
+            center = _point(forward, x, y)
+            points.append(center)
+            if word.bbox[3] > word.bbox[1]:
+                word_heights.append(math.dist(center, _point(forward, x, word.bbox[3])) * 2)
+        mapped.append(points)
     if len(word_heights) < 16:
         return None
     font = median(word_heights)
@@ -237,7 +270,7 @@ def _native_box(inverse, box, size):
 
 def read_lines(engine, image, result):
     """Reread a supported prose block and retain the original on uncertainty."""
-    if len(result.lines) < 5 or engine.psm != 3:
+    if engine.psm != 3 or not 5 <= len(result.lines) <= _MAX_LINES or not all(line.words for line in result.lines):
         return None
     quad = _sheet(image)
     geometry = _rectangles(image, result.lines, quad) if quad is not None else None
