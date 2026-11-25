@@ -135,6 +135,21 @@ class OcrProposedTest(unittest.TestCase):
         self.assertIn("100", doc.tables_csv()[0])
         self.assertEqual(heocr.validate(doc.to_dict()), [])
 
+    def test_fast_mix_v3_enables_table_supplements_and_footer_order(self):
+        payload = scanned_pdf(borderless())
+        with self.assertRaisesRegex(ValueError, "pinned --tables-models"):
+            heocr.extract(payload, profile="fast-mix-v3", ocr_capture_type="scanner", tesseract=FAKE)
+        stub = Stub()
+        with (mock.patch("heocr.tableformer.TableFormerProposer", return_value=stub) as proposer,
+              mock.patch("heocr.pdf.reader.engine_for", return_value=Tesseract.find(FAKE, lang="heb"))):
+            doc = heocr.extract(payload, profile="fast-mix-v3", ocr_capture_type="scanner",
+                                tesseract=FAKE, tables_models="unused")
+        proposer.assert_called_once_with("unused")
+        self.assertEqual(doc.options["ocr"]["profile"]["name"], "fast-mix-v3")
+        self.assertTrue(doc.options["ocr"]["footer_order"])
+        self.assertEqual(len([b for b in doc.blocks if "ocr_table_supplement" in b.flags]), 1)
+        self.assertEqual(heocr.validate(doc.to_dict()), [])
+
     def test_cli_forwards_the_opt_in_and_local_model_directory(self):
         args = ["scan.pdf", "--profile", "fast-mix-v2", "--ocr-capture-type", "scanner",
                 "--tables", "tableformer", "--tables-models", "local-models"]

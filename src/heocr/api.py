@@ -19,7 +19,7 @@ from heocr.contract import MAX_PAGES, Document, Unread
 from heocr.convert import CONVERSIONS, CONVERT_TIMEOUT
 from heocr.handwriting import HandwritingConfig, HandwritingReader
 from heocr.identify import identify
-from heocr.ocr.routes import FAST_MIX_PROFILES, FAST_MIX_V2
+from heocr.ocr.routes import FAST_MIX_PROFILES, FAST_MIX_V2, FAST_MIX_V3
 from heocr.ocr.tesseract import DEFAULT_LANG, DEFAULT_PSM, _temporary_models, check_settings
 
 # The default OCR model: HeOCR's modern-print model, bundled in the package (``heocr.models``).
@@ -177,6 +177,9 @@ def extract(
     when the extraction has no time limit.
     It needs ``ocr_line_v6`` and uses individual reads when a batch fails or a
     document time limit is set.
+    ``profile="fast-mix-v3"`` keeps that phone route. For scanners and issuer renders
+    it enables detached footer order and additive local learned cells, with
+    ``tables_models`` naming the pinned local model directory.
 
     ``crnn_model`` and ``crnn_sha256`` opt OCR page prose into a local CPU ONNX line reader.
     Tesseract supplies the ordered boxes and reads tables, form entries and image regions.
@@ -233,7 +236,7 @@ def extract(
     fast_mix = fast_mix_profile is not None
     if (ocr_phone_latin_edges or ocr_oblique_rivok or ocr_issuer_staggered_lanes or ocr_footer_order) and not fast_mix:
         raise ValueError("the phone and issuer refinements need a fast-mix profile")
-    if fast_mix_profile == FAST_MIX_V2:
+    if fast_mix_profile in (FAST_MIX_V2, FAST_MIX_V3):
         ocr_phone_latin_edges = ocr_oblique_rivok = ocr_issuer_staggered_lanes = True
     if fast_mix and (
         not ocr or ocr_lang != DEFAULT_LANG or ocr_psm != DEFAULT_PSM or ocr_model != DEFAULT_MODEL
@@ -316,6 +319,11 @@ def extract(
             if classified[0] not in PHOTO_CAPTURES:
                 raise ValueError(f"{fast_mix_profile} needs --ocr-capture-type for a scan or issuer render")
             ocr_capture_type = classified[0]
+        if fast_mix_profile == FAST_MIX_V3 and ocr_capture_type not in PHOTO_CAPTURES:
+            if tables_models is None:
+                raise ValueError("fast-mix-v3 office OCR needs the pinned --tables-models directory")
+            ocr_footer_order = True
+            tables = "tableformer"
         if ocr_capture_type in PHOTO_CAPTURES:
             if kind.format not in IMAGE_FORMATS:
                 raise ValueError(f"{fast_mix_profile} phone OCR requires a standalone image")
