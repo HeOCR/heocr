@@ -56,6 +56,7 @@ needs a different route.
 | Angled standalone phone photo | [`--profile phone-specialist`](docs/guide.md#phone-specialist-profile) uses local modern_v1 and guarded perspective correction. |
 | Scanned page with columns, mixed-direction lines or possible tables | [`--ocr-layout v1`](docs/guide.md#geometric-ocr-layout) enables geometric OCR layout. |
 | Borderless table in a text-layer PDF | The [`heocr[tables]` extra](docs/guide.md#learned-tables-extra) enables TableFormer through Python with pinned local weights. |
+| Form fields, checkboxes and groups | [`-f forms`](docs/guide.md#structured-form-output) writes an `hdoc_form.v1` array. |
 | Historical Hebrew scan | [`--ocr-router v2 --ocr-old-print-model PATH`](docs/guide.md#historical-print-with-router-v2) tries the pinned local specialist when the page qualifies. |
 | Experimental hosted OCR | [Haiku hybrid](docs/guide.md#haiku-hybrid-ocr) is parked for launch. `--ocr-hybrid haiku --ocr-hybrid-dry-run` estimates cost locally. |
 
