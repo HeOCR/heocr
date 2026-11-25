@@ -291,6 +291,16 @@ heocr scan.pdf --profile fast-mix-v3 --ocr-capture-type scanner --tables-models 
 Phone captures use the fast-mix-v2 phone path and need no TableFormer
 bundle. The oblique line reader still uses pinned Rivok Full weights.
 
+### Page roles
+
+Use `--document-roles` (Python `document_roles=True`) for paginated PDFs
+and scanner images with reliable line geometry. Supported margin lines
+receive header, footnote or footer roles. JSON and plain text then follow
+header, body, footnotes and footer on each affected page. The body retains
+its previous order and every literal line stays in the output. The rule
+uses isolated page bands and a numbered or marked line for footnotes.
+Declared phone captures stay on their usual route.
+
 ### Geometric OCR layout
 
 ```sh

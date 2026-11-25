@@ -92,6 +92,7 @@ def extract(
     ocr_oblique_rivok: bool = False,
     ocr_issuer_staggered_lanes: bool = False,
     ocr_footer_order: bool = False,
+    document_roles: bool = False,
     phone_model: str | os.PathLike[str] | None = None,
     phone_model_sha256: str | None = None,
     force_ocr: bool = False,
@@ -486,6 +487,12 @@ def extract(
         repair_ocr_ellipses(doc)
     from heocr.ocr import call_failures
 
+    if document_roles and (kind.format == "pdf" or kind.format in IMAGE_FORMATS):
+        from heocr.pdf.document_roles import apply
+
+        apply(doc)
+        if any("document_roles_ordered" in page.flags for page in doc.pages):
+            doc.options["document_roles"] = True
     failed = call_failures(doc)
     if failed:
         # Never silent: a failed or timed-out Tesseract call leaves its reading out wherever it happened.
