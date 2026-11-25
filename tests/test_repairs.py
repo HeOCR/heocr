@@ -77,7 +77,13 @@ class RuleListTest(unittest.TestCase):
         for rule in repairs.RULES.values():
             self.assertTrue(rule.reason and rule.evidence and rule.formats)
             before, after = rule.example
-            self.assertEqual(getattr(repairs, rule.rule_id)(before)[0], after)
+            repair = getattr(repairs, rule.rule_id)
+            if rule == repairs.PDF_BIDI_PUNCTUATION:
+                evidence = {i: right for i, (left, right) in enumerate(zip(before, after, strict=True)) if left != right}
+                self.assertEqual(repair(before), (before, {}))
+                self.assertEqual(repair(before, evidence)[0], after)
+            else:
+                self.assertEqual(repair(before)[0], after)
 
     def test_bullet_rule_needs_its_evidence(self) -> None:
         self.assertEqual(repairs.symbol_font_bullet("ש")[0], "ש")  # not at line start

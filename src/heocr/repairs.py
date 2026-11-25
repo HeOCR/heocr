@@ -82,6 +82,7 @@ PDF_BIDI_PUNCTUATION = Rule(
     evidence="Visible RTL line punctuation uniquely matches one of two glyphs in the same embedded font. "
              "Round and square brackets require a line without Latin or numeric direction runs.",
 )
+PDF_PUNCTUATION_PAIRS = {char: pair for pair in ("()", "[]", "“”") for char in pair}
 
 LATIN_WRAP_BRACKETS = Rule(
     rule_id="latin_wrap_brackets",
@@ -214,6 +215,20 @@ def record(rule: Rule, changes: Counter) -> list[dict]:
         {"rule": rule.rule_id, "from": source, "to": target, "count": count}
         for (source, target), count in sorted(changes.items())
     ]
+
+
+def pdf_bidi_punctuation(text: str, evidence: dict[int, str] | None = None) -> tuple[str, Counter]:
+    """Restore marks at evidenced positions, leaving uninvolved codepoints byte-exact."""
+    changes: Counter = Counter()
+    if not evidence:
+        return text, changes
+    chars = list(text)
+    for index, expected in evidence.items():
+        pair = PDF_PUNCTUATION_PAIRS.get(expected)
+        if pair and 0 <= index < len(chars) and chars[index] != expected and chars[index] in pair:
+            changes[(chars[index], expected)] += 1
+            chars[index] = expected
+    return "".join(chars), changes
 
 
 _LINE_ENDS = "\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029"

@@ -9,8 +9,8 @@ from statistics import mean
 from PIL import Image, ImageChops, ImageStat
 
 from heocr.pdf.frame import frame_of
+from heocr.repairs import PDF_PUNCTUATION_PAIRS
 
-PAIRS = {char: pair for pair in ("()", "[]", "“”") for char in pair}
 SCAN_SCALE = 3
 MAX_SCAN_PIXELS = 12_000_000
 INK_THRESHOLD = 96
@@ -142,7 +142,7 @@ def observe(page, candidates):
             if glyph is None:
                 continue
             font, declared = glyph
-            pair = PAIRS[atom.text]
+            pair = PDF_PUNCTUATION_PAIRS[atom.text]
             if any(char not in pair for char in declared):
                 continue
             key = ctypes.cast(font, ctypes.c_void_p).value, pair

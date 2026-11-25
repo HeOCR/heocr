@@ -1031,19 +1031,13 @@ def _repair_rtl_brackets(doc: Document) -> None:
 
 def _repair_witnessed_punctuation(doc: Document) -> None:
     """Apply exact glyph observations after the legacy text-layer passes."""
-    from heocr.pdf.punctuation import PAIRS
-
     for block in doc.blocks:
         changes: Counter = Counter()
         for line in block.lines or ():
             if not line._pdf_punctuation:
                 continue
-            chars = list(line.text)
-            for index, expected in line._pdf_punctuation.items():
-                if index < len(chars) and chars[index] != expected and PAIRS.get(chars[index]) == PAIRS[expected]:
-                    changes[(chars[index], expected)] += 1
-                    chars[index] = expected
-            line.text = "".join(chars)
+            line.text, changed = repairs.pdf_bidi_punctuation(line.text, line._pdf_punctuation)
+            changes.update(changed)
         if changes:
             block.text = "\n".join(line.text for line in block.lines)
             block.repairs += repairs.record(repairs.PDF_BIDI_PUNCTUATION, changes)
@@ -1252,12 +1246,12 @@ def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = froz
         tables, proposal_flags = _table_proposals(doc, index, tables, width, height, layer.sideways, ink)
         table_flags = table_flags + proposal_flags
     repairs_on = doc.options.get("repairs", True)
-    if repairs_on and text.invisible == 0 and not time_up(doc):
-        from heocr.pdf.punctuation import PAIRS, observe
-
+    if repairs_on and text.invisible == 0:
         candidates = [atom for line in built.lines if line.direction == "rtl"
-                      for atom in line.atoms if atom.text in PAIRS]
-        if candidates:
+                      for atom in line.atoms if atom.text in repairs.PDF_PUNCTUATION_PAIRS]
+        if candidates and not time_up(doc):
+            from heocr.pdf.punctuation import observe
+
             observe(page, candidates)
     # Two pages side by side are read as two, in the document's order (D4c).
     halves = _spread_halves(width, text.atoms, tables, doc._rtl) if "possible_spread" in flags else None
