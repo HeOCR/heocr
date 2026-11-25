@@ -165,3 +165,91 @@ class PhoneGeometryTest(unittest.TestCase):
         parser = _parser()
         self.assertFalse(parser.parse_args(["page.jpg"]).ocr_phone_geometry)
         self.assertTrue(parser.parse_args(["page.jpg", "--ocr-phone-geometry"]).ocr_phone_geometry)
+
+    def test_profile_classifies_camera_jpeg_and_matches_explicit_geometry(self):
+        from PIL import ExifTags
+        from PIL.TiffImagePlugin import IFDRational
+
+        from heocr.models import MODELS
+
+        raster, native = phone_page()
+        exif = Image.Exif()
+        exif[ExifTags.IFD.Exif] = {ExifTags.Base.FocalLength: IFDRational(5, 1)}
+        payload = BytesIO()
+        raster.save(payload, format="JPEG", exif=exif)
+        engine = Mock(psm=3, lang="heb", route=None, version="tesseract 5.5.3")
+        engine.recognize.return_value = native
+        with (
+            patch("heocr.pdf.reader.engine_for", return_value=engine),
+            patch("heocr.ocr.phone_geometry.read_lines", return_value=native) as geometry,
+        ):
+            current = extract(payload.getvalue(), check_numbers=False, profile="phone-specialist").to_dict()
+            existing = extract(payload.getvalue(), check_numbers=False, ocr_router="v2", ocr_layout="v1",
+                               ocr_phone_geometry=True).to_dict()
+            self.assertEqual(geometry.call_count, 2)
+            self.assertEqual(current["options"]["ocr"]["capture_type"], "camera-photo")
+            self.assertEqual(current["options"]["ocr"]["router"]["reason"], "camera_exif")
+            sha = MODELS["heocr_modern_v1"].sha256
+            self.assertEqual(current["options"]["ocr"].pop("profile"), {
+                "name": "phone-specialist", "line_model_sha256": sha,
+            })
+            self.assertEqual(current["pages"][0]["signals"].pop("ocr_phone_geometry_line_sha256"), sha)
+            self.assertEqual(current, existing)
+
+    def test_profile_bypasses_other_captures_and_does_not_open_the_slot(self):
+        from tests.synth.pdf import PdfPage, lines_block, make_pdf
+
+        raster, native = phone_page()
+        payload = BytesIO()
+        raster.save(payload, format="PNG")
+        pdf = make_pdf([PdfPage(lines=lines_block(["בדיקת עמוד"]))])
+        engine = Mock(psm=3, lang="heb", route=None, version="tesseract 5.5.3")
+        engine.recognize.return_value = native
+        with (
+            patch("heocr.pdf.reader.engine_for", return_value=engine),
+            patch("heocr.ocr.phone_geometry.read_lines") as geometry,
+            patch("heocr.ocr.phone_profile.check_model") as check,
+        ):
+            for body, capture in ((payload.getvalue(), "scanner"), (payload.getvalue(), "issuer-render"),
+                                  (payload.getvalue(), None), (pdf, None), (pdf, "pixel")):
+                for router in (None, "v2"):
+                    with self.subTest(capture=capture, router=router, pdf=body == pdf):
+                        options = dict(ocr_capture_type=capture, ocr_router=router, check_numbers=False)
+                        plain = extract(body, **options)
+                        profiled = extract(body, **options, profile="phone-specialist",
+                                           phone_model="missing.traineddata", phone_model_sha256="a" * 64)
+                        self.assertEqual(plain.to_json(), profiled.to_json())
+            geometry.assert_not_called()
+            check.assert_not_called()
+
+    def test_phone_model_pin_validation_and_failed_custom_batches(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+
+        raster, native = phone_page()
+        payload = BytesIO()
+        raster.save(payload, format="PNG")
+        body = payload.getvalue()
+        with TemporaryDirectory() as directory:
+            model = Path(directory) / "candidate.traineddata"
+            model.write_bytes(b"fixture model")
+            with self.assertRaisesRegex(ValueError, "phone model is unavailable or does not match"):
+                extract(body, profile="phone-specialist", ocr_capture_type="phone",
+                        phone_model=model, phone_model_sha256="a" * 64)
+            with self.assertRaisesRegex(ValueError, "supplied together"):
+                extract(body, profile="phone-specialist", phone_model=model)
+            with self.assertRaisesRegex(ValueError, "supplied together"):
+                extract(body, phone_model=model, phone_model_sha256="a" * 64)
+            with self.assertRaisesRegex(ValueError, "64-digit SHA-256"):
+                extract(body, profile="phone-specialist", phone_model=model, phone_model_sha256="bad")
+        custom = SimpleNamespace(recognize_line_batch=Mock(side_effect=OcrUnavailable("local failure")))
+        with self.assertRaisesRegex(ValueError, "phone specialist line OCR failed"):
+            read_lines(SimpleNamespace(psm=3), raster, native, line_engine=lambda: custom)
+
+    def test_profile_cli_arguments(self):
+        args = _parser().parse_args(["page.jpg", "--profile", "phone-specialist",
+                                     "--phone-model", "specialist.traineddata",
+                                     "--phone-model-sha256", "9" * 64])
+        self.assertEqual(args.profile, "phone-specialist")
+        self.assertEqual(args.phone_model.name, "specialist.traineddata")
+        self.assertEqual(args.phone_model_sha256, "9" * 64)

@@ -128,6 +128,33 @@ readings would be discarded by the geometry checks. In Python, pass
 
 For internal capture checks, see the [DEV215 triad runbook](dev215-triads.md).
 
+#### Phone specialist profile
+
+```sh
+heocr photo.jpg --profile phone-specialist
+heocr photo.jpg --profile phone-specialist --ocr-capture-type pixel \
+  --phone-model /local/models/specialist.traineddata --phone-model-sha256 SHA256
+```
+
+The profile activates router v2, layout v1 and phone perspective correction
+for standalone phone images. Router v2 recognizes camera JPEGs by exposure
+or focal-length EXIF. Declare `phone`, `iphone` or `pixel` for a standalone
+image without that evidence. Other inputs follow the same route and yield the
+same record with or without the profile.
+
+The native page pass uses modern v1 (PSM 3). Supported rectified crops use
+modern v1 by default (PSM 7 at 300 DPI). Supply both the local traineddata
+path and its full SHA-256 to swap only the crop recognizer. HeOCR checks the
+file on routed phone inputs and rechecks the staged copy before recognition.
+A bad pin or a failed custom recognition batch is an error. When geometry or
+individual line evidence is inconclusive, the profile keeps the native
+reading. The profile makes no downloads or hosted OCR calls.
+
+In Python, pass `profile="phone-specialist"` and optionally
+`phone_model=` and `phone_model_sha256=`. The phone record binds the profile
+and its configured line SHA-256. Accepted rectified reads also record
+`ocr_phone_geometry_line_sha256` in the page signals.
+
 ### Geometric OCR layout
 
 ```sh

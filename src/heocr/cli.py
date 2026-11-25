@@ -11,6 +11,7 @@ from heocr import __version__
 from heocr.api import extract
 from heocr.contract import MAX_PAGES
 from heocr.handwriting import HandwritingConfig
+from heocr.ocr.phone_profile import PHONE_SPECIALIST
 from heocr.ocr.routes import CAPTURE_MODELS
 
 _FORMATS = ("text", "markdown", "json", "docx")
@@ -93,6 +94,12 @@ def _parser() -> argparse.ArgumentParser:
                         help="cap the Anthropic list-price cost per document (default: 1.00)")
     parser.add_argument("--ocr-hybrid-dry-run", action="store_true",
                         help="estimate the document's cost upper bound locally without sending anything")
+    parser.add_argument("--profile", choices=(PHONE_SPECIALIST,),
+                        help="use capture routing and rectified line OCR on standalone phone images")
+    parser.add_argument("--phone-model", type=Path, metavar="FILE",
+                        help="local .traineddata for the phone-specialist line slot")
+    parser.add_argument("--phone-model-sha256", metavar="HEX",
+                        help="required SHA-256 of the local phone specialist model")
     parser.add_argument("--ocr-phone-geometry", action="store_true",
                         help="reread isolated lines on angled phone images with supported paper edges")
     parser.add_argument("--photo-preprocess", choices=("gray-otsu",),
@@ -111,6 +118,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
     if args.download_model:
+        if args.profile or args.phone_model is not None or args.phone_model_sha256 is not None:
+            parser.error("phone specialist options cannot download a model")
         if args.ocr_hybrid_dry_run:
             parser.error("--ocr-hybrid-dry-run cannot download a model")
         from heocr.models import ModelError, download
@@ -125,6 +134,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.file is None:
         parser.error("a file is required")
     if args.ocr_hybrid_dry_run:
+        if args.profile or args.phone_model is not None or args.phone_model_sha256 is not None:
+            parser.error("phone specialist options are for local OCR")
         if args.ocr_hybrid is None or args.no_ocr:
             parser.error("--ocr-hybrid-dry-run requires --ocr-hybrid haiku and OCR")
         from heocr.ocr.hybrid import estimate_cost, parse_cap, parse_confidence
@@ -187,6 +198,9 @@ def main(argv: list[str] | None = None) -> int:
             ocr_number_batch=args.ocr_number_batch,
             photo_preprocess=args.photo_preprocess,
             ocr_phone_geometry=args.ocr_phone_geometry,
+            profile=args.profile,
+            phone_model=args.phone_model,
+            phone_model_sha256=args.phone_model_sha256,
             force_ocr=args.force_ocr,
             crnn_model=args.crnn_model,
             crnn_sha256=args.crnn_sha256,
