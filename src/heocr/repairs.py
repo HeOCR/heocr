@@ -74,6 +74,15 @@ RTL_BRACKET_ORDER = Rule(
     ),
 )
 
+PDF_BIDI_PUNCTUATION = Rule(
+    rule_id="pdf_bidi_punctuation",
+    reason="A visible glyph in the embedded font resolves punctuation changed by PDF text decoding.",
+    example=('שלישי ”הערה“', 'שלישי “הערה”'),
+    formats=("pdf",),
+    evidence="Visible RTL line punctuation uniquely matches one of two glyphs in the same embedded font. "
+             "Round and square brackets require a line without Latin or numeric direction runs.",
+)
+
 LATIN_WRAP_BRACKETS = Rule(
     rule_id="latin_wrap_brackets",
     reason=(
@@ -193,7 +202,7 @@ def cp1255_letter(code: int) -> str | None:
 
 RULES: dict[str, Rule] = {
     rule.rule_id: rule
-    for rule in (SYMBOL_FONT_BULLET, DIRECTION_MARKS, LATIN1_ETH_NUN, RTL_BRACKET_ORDER, LATIN_WRAP_BRACKETS,
+    for rule in (SYMBOL_FONT_BULLET, DIRECTION_MARKS, LATIN1_ETH_NUN, RTL_BRACKET_ORDER, PDF_BIDI_PUNCTUATION, LATIN_WRAP_BRACKETS,
                  HEBREW_COMMA_SPACING, OCR_DATE_BRACKET_ORDER, OCR_HEBREW_ELLIPSIS, FONT_PRIVATE_USE_BY_OCR,
                  REVERSED_DIGIT_GROUPS, CP1255_SHIFTED_FONT)
 }

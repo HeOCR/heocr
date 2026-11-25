@@ -66,6 +66,7 @@ class Atom:
     repaired: str | None = None  # the repair rule that changed this character, if any
     font: str = ""  # the font's name, recorded for private-use codes (font_private_use_by_ocr)
     reflected_number: tuple[int, int] | None = None  # first stream index and length of this numeric object
+    pdf_punctuation: str | None = None  # logical mark witnessed by the PDF's visible glyph
 
     @property
     def cx(self) -> float:
@@ -500,7 +501,8 @@ def _unreflect_numbers(units: list[tuple[str, Atom | None]], texts: list[str]) -
             texts[first:last + 1] = reversed(texts[first:last + 1])
 
 
-def logical_text(component: list[Atom], page_rtl: bool = True, latin_lead: bool = False) -> tuple[str, str, list[str]]:
+def logical_text(component: list[Atom], page_rtl: bool = True, latin_lead: bool = False,
+                 *, punctuation: dict[int, str] | None = None) -> tuple[str, str, list[str]]:
     """Inverse bidi for one visual line segment: (text, direction, flags). ``latin_lead``: the line
     continues a Latin reference from the line before it in its paragraph or cell."""
     units = _units(component)
@@ -583,7 +585,17 @@ def logical_text(component: list[Atom], page_rtl: bool = True, latin_lead: bool 
                 flags.append("bidi_ambiguous_ltr_run")
         out.extend(run)
         k = m
-    text = "".join(texts[x] for x in out).replace("\t", " ").strip()
+    joined = "".join(texts[x] for x in out).replace("\t", " ")
+    text = joined.strip()
+    if punctuation is not None and rtl:
+        position = len(joined.lstrip()) - len(joined)
+        pure_rtl = not latin_lead and not set(types) & {"L", "EN", "S"}
+        for x in out:
+            atom = units[x][1]
+            if (atom is not None and atom.pdf_punctuation is not None and len(texts[x]) == 1
+                    and (pure_rtl or atom.text in "“”") and 0 <= position < len(text)):
+                punctuation[position] = atom.pdf_punctuation
+            position += len(texts[x])
     if rtl and any(ch in _BRACKETS for ch in text):
         # Whether the layer maps mirrored bracket glyphs to the logical character is producer-specific.
         flags.append("rtl_brackets_unverified")

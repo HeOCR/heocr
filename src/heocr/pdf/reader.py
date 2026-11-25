@@ -44,7 +44,7 @@ from heocr.ocr.regions import (  # noqa: F401  (re-exported for callers of the P
 )
 from heocr.pdf.classify import FIGURE_IMAGE, PAGE_IMAGE, classify, object_stats, stream_signals, text_signals
 from heocr.pdf.frame import frame_of
-from heocr.pdf.lines import Atom, PageLines, build_lines, line_is_rtl, paragraphs
+from heocr.pdf.lines import Atom, PageLines, build_lines, line_is_rtl, logical_text, paragraphs
 from heocr.pdf.columns import UNRESOLVED, Segment, arrange
 from heocr.pdf.ocrlines import recover_photo_lines
 from heocr.pdf.ocrforms import needs_form_probe, preserve_form_cell_lines
@@ -685,7 +685,13 @@ def read_t1(doc: Document, page_index: int, built: PageLines) -> int:
                 if changes:
                     bullets.update(changes)
                     line.flags.append("bullet_symbol_mapped")
-            lines.append(Line(text, line.bbox, line.direction))
+            punctuation: dict[int, str] = {}
+            if text == line.text and line.direction == "rtl" and any(a.pdf_punctuation for a in line.atoms):
+                lead = bool(lines) and repairs.continues_latin(lines[-1].text)
+                rebuilt, _, _ = logical_text(line.atoms, True, lead, punctuation=punctuation)
+                if rebuilt != text:
+                    punctuation.clear()
+            lines.append(Line(text, line.bbox, line.direction, punctuation))
         flags = sorted({flag for line in group for flag in line.flags})
         block_repairs = _logged(bullets, eths, by_ocr, shifted)
         bbox = [
@@ -797,6 +803,7 @@ def read_pdf(body: bytes, doc: Document) -> None:
     if doc.options.get("repairs", True):
         _repair_rtl_brackets(doc)
         _repair_latin_wraps(doc)
+        _repair_witnessed_punctuation(doc)
     from heocr.pdf.furniture import mark_furniture, mark_ocr_running_headers
     from heocr.pdf.webprint import mark_site_footer, mark_site_menu
 
@@ -1022,6 +1029,26 @@ def _repair_rtl_brackets(doc: Document) -> None:
             block.flags = [f for f in block.flags if f != "rtl_brackets_unverified"] + ["brackets_mirrored"]
 
 
+def _repair_witnessed_punctuation(doc: Document) -> None:
+    """Apply exact glyph observations after the legacy text-layer passes."""
+    from heocr.pdf.punctuation import PAIRS
+
+    for block in doc.blocks:
+        changes: Counter = Counter()
+        for line in block.lines or ():
+            if not line._pdf_punctuation:
+                continue
+            chars = list(line.text)
+            for index, expected in line._pdf_punctuation.items():
+                if index < len(chars) and chars[index] != expected and PAIRS.get(chars[index]) == PAIRS[expected]:
+                    changes[(chars[index], expected)] += 1
+                    chars[index] = expected
+            line.text = "".join(chars)
+        if changes:
+            block.text = "\n".join(line.text for line in block.lines)
+            block.repairs += repairs.record(repairs.PDF_BIDI_PUNCTUATION, changes)
+
+
 def _repair_latin_wraps(doc: Document) -> None:
     """``latin_wrap_brackets`` in the RTL text-layer paragraphs and table cells, after the document's
     bracket order is decided."""
@@ -1225,6 +1252,13 @@ def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = froz
         tables, proposal_flags = _table_proposals(doc, index, tables, width, height, layer.sideways, ink)
         table_flags = table_flags + proposal_flags
     repairs_on = doc.options.get("repairs", True)
+    if repairs_on and text.invisible == 0 and not time_up(doc):
+        from heocr.pdf.punctuation import PAIRS, observe
+
+        candidates = [atom for line in built.lines if line.direction == "rtl"
+                      for atom in line.atoms if atom.text in PAIRS]
+        if candidates:
+            observe(page, candidates)
     # Two pages side by side are read as two, in the document's order (D4c).
     halves = _spread_halves(width, text.atoms, tables, doc._rtl) if "possible_spread" in flags else None
     if halves is not None:
