@@ -39,6 +39,9 @@ dependencies = [
 crnn = ["numpy>=1.26", "onnxruntime>=1.20", "python-bidi>=0.6"]
 # Explicit heavyweight runtime for the experimental, off-by-default handwriting route.
 handwriting = ["kraken==7.2", "numpy>=1.26", "scipy>=1.11"]
+# Opt-in learned table structure (D3g): Docling (MIT) with TableFormer and its layout model; weights fetched by the
+# user at pinned revisions and checked by sha256 (heocr.tableformer). Brings PyTorch.
+tables = ["docling==2.152.0"]
 # Tests only: the record is checked against its JSON Schema (tests/__init__.py). Not needed at run time.
 test = ["jsonschema>=4.18"]
 

@@ -94,6 +94,8 @@ def extract(
     convert_timeout: float | None = None,
     max_pages: int = MAX_PAGES,
     time_limit: float | None = None,
+    tables: str | None = None,
+    tables_models: str | os.PathLike[str] | None = None,
 ) -> Document:
     """Read a document and return its ``heocr_document.v1`` record.
 
@@ -174,6 +176,11 @@ def extract(
     default, since every page may cost an OCR run. The rest are recorded as one unread entry
     (``page_limit``) and the document is flagged ``page_limit_reached``.
 
+    ``tables="tableformer"`` (the optional ``tables`` extra) adds learned table proposals on
+    text-layer PDF pages: Docling's TableFormer proposes the structure of tables without rulings,
+    and heocr fills their cells from the page's own text layer; ruled tables keep first claim.
+    ``tables_models`` is the local directory holding the pinned weights (see ``heocr.tableformer``);
+    nothing is downloaded.
     ``time_limit`` is a safety net, in seconds, for the whole document (conversion and OCR
     included); there is none by default, so a record does not depend on the machine's speed.
     It is checked before each page, image frame, embedded image and page of number checks: a
@@ -184,6 +191,8 @@ def extract(
     started = contract._now()
     if isinstance(max_pages, bool) or not isinstance(max_pages, int) or max_pages < 1:
         raise ValueError("max_pages must be a positive integer")
+    if tables is not None and (tables != "tableformer" or tables_models is None):
+        raise ValueError("tables must be 'tableformer', with tables_models set to the pinned model directory")
     if time_limit is not None and (
         isinstance(time_limit, bool) or not isinstance(time_limit, (int, float)) or not math.isfinite(time_limit) or time_limit <= 0
     ):
@@ -284,6 +293,11 @@ def extract(
 
         doc._crnn = CrnnReader(crnn_model, crnn_sha256)
         doc.options["crnn"] = {"engine": "crnn", "model_sha256": doc._crnn.sha256}
+    if tables is not None:
+        from heocr.tableformer import TableFormerProposer
+
+        doc._table_proposer = TableFormerProposer(tables_models)
+        doc.options["tables"] = doc._table_proposer.record
     if handwriting is not None:
         doc._handwriting = HandwritingReader(handwriting)
         doc.options["handwriting"] = handwriting.provenance()
