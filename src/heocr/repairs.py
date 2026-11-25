@@ -74,6 +74,16 @@ RTL_BRACKET_ORDER = Rule(
     ),
 )
 
+PDF_BIDI_PUNCTUATION = Rule(
+    rule_id="pdf_bidi_punctuation",
+    reason="A visible glyph in the embedded font resolves punctuation changed by PDF text decoding.",
+    example=('שלישי ”הערה“', 'שלישי “הערה”'),
+    formats=("pdf",),
+    evidence="Visible RTL line punctuation uniquely matches one of two glyphs in the same embedded font. "
+             "Round and square brackets require a line without Latin or numeric direction runs.",
+)
+PDF_PUNCTUATION_PAIRS = {char: pair for pair in ("()", "[]", "“”") for char in pair}
+
 LATIN_WRAP_BRACKETS = Rule(
     rule_id="latin_wrap_brackets",
     reason=(
@@ -193,7 +203,7 @@ def cp1255_letter(code: int) -> str | None:
 
 RULES: dict[str, Rule] = {
     rule.rule_id: rule
-    for rule in (SYMBOL_FONT_BULLET, DIRECTION_MARKS, LATIN1_ETH_NUN, RTL_BRACKET_ORDER, LATIN_WRAP_BRACKETS,
+    for rule in (SYMBOL_FONT_BULLET, DIRECTION_MARKS, LATIN1_ETH_NUN, RTL_BRACKET_ORDER, PDF_BIDI_PUNCTUATION, LATIN_WRAP_BRACKETS,
                  HEBREW_COMMA_SPACING, OCR_DATE_BRACKET_ORDER, OCR_HEBREW_ELLIPSIS, FONT_PRIVATE_USE_BY_OCR,
                  REVERSED_DIGIT_GROUPS, CP1255_SHIFTED_FONT)
 }
@@ -205,6 +215,20 @@ def record(rule: Rule, changes: Counter) -> list[dict]:
         {"rule": rule.rule_id, "from": source, "to": target, "count": count}
         for (source, target), count in sorted(changes.items())
     ]
+
+
+def pdf_bidi_punctuation(text: str, evidence: dict[int, str] | None = None) -> tuple[str, Counter]:
+    """Restore marks at evidenced positions, leaving uninvolved codepoints byte-exact."""
+    changes: Counter = Counter()
+    if not evidence:
+        return text, changes
+    chars = list(text)
+    for index, expected in evidence.items():
+        pair = PDF_PUNCTUATION_PAIRS.get(expected)
+        if pair and 0 <= index < len(chars) and chars[index] != expected and chars[index] in pair:
+            changes[(chars[index], expected)] += 1
+            chars[index] = expected
+    return "".join(chars), changes
 
 
 _LINE_ENDS = "\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029"
