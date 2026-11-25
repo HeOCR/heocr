@@ -233,3 +233,43 @@ class CellRepairsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OpenSidedTableTest(unittest.TestCase):
+    """F10: a grid drawn without its outer verticals, its rulings running out to the table's edges."""
+
+    @staticmethod
+    def open_rules(left_end=XS[0], right_end=XS[3]):
+        rules = [(left_end, y, right_end, y) for y in YS]
+        for x in XS[1:3]:
+            rules += [(x, YS[0], x, YS[3])]
+        return rules
+
+    def test_open_sides_are_columns(self) -> None:
+        doc = heocr.extract(make_pdf([table_page(VISUAL, rules=self.open_rules())]), ocr=False)
+        (table,) = tables_of(doc)
+        self.assertEqual([[c.text for c in row] for row in table.cells],
+                         [["שם", "תפקיד", "סכום"], ["ספק א", "מנהל", "100 ₪"], ["ספק ב", "עובד", "200 ₪"]])
+        self.assertIn("table_open_sides_closed", table.flags)
+
+    def test_only_a_side_whose_top_and_bottom_rulings_end_together_opens(self) -> None:
+        from heocr.pdf.tables import Rule, _open_sides
+        vs = [Rule(233.0, 100.0, 200.0), Rule(366.0, 100.0, 200.0)]
+        hs = [Rule(100.0, 100.0, 500.0), Rule(150.0, 100.0, 500.0), Rule(200.0, 160.0, 500.0)]  # bottom stops short left
+        self.assertEqual(_open_sides(hs, vs), [Rule(500.0, 100.0, 200.0)])
+        hs[-1] = Rule(200.0, 230.0, 370.0)  # neither side runs past the outer verticals: a closed-off grid
+        self.assertEqual(_open_sides(hs, vs), [])
+
+    def test_a_running_footer_under_a_table_stays_out_of_it(self) -> None:
+        ys = [150.0, 120.0, 90.0, 60.0]  # a ruled table ending in the page's bottom margin band
+        rules = [(XS[0], y, XS[3], y) for y in ys] + [(x, ys[0], x, ys[3]) for x in XS]
+        lines = lines_block(["פסקה לפני הטבלה"], top=760)
+        for r, row in enumerate(VISUAL):
+            for c, text in enumerate(row):
+                lines.append(TextLine(text, XS[c + 1] - 8, ys[r] - 20))
+        lines += [TextLine("קובץ לדוגמה", XS[3] - 8, 45.0), TextLine("17", XS[1] - 8, 45.0)]  # footer, two pieces
+        doc = heocr.extract(make_pdf([PdfPage(lines=lines, rules=rules)]), ocr=False)
+        (table,) = tables_of(doc)
+        self.assertEqual(len(table.cells), 3)
+        self.assertIn("קובץ לדוגמה", " ".join(b.text for b in doc.blocks if b.kind != "table"))
+

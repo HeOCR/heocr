@@ -240,10 +240,31 @@ def find_tables(horizontal: list[Rule], vertical: list[Rule], *, require_closed:
         vs = [lines[i][1] for i in members if lines[i][0] == "v"]
         if len(hs) < 2 or len(vs) < 2:
             continue
-        table = _grid(hs, vs, require_closed=require_closed)
+        opened = [] if require_closed else _open_sides(hs, vs)
+        table = _grid(hs, vs + opened, require_closed=require_closed)
         if table is not None:
+            if opened and table.rows:
+                table.flags.append("table_open_sides_closed")
             tables.append(table)
     return tables
+
+
+OPEN_SIDE = 8.0  # pt: a grid's top and bottom rulings running this far past its outer vertical leave an open column
+
+
+def _open_sides(hs: list[Rule], vs: list[Rule]) -> list[Rule]:
+    """Closing verticals for a grid drawn with open sides (F10): when its top and bottom rulings both run at least
+    OPEN_SIDE past the outermost vertical on a side, and end together (within SNAP), the column they bound holds
+    cells too. A vertical is added at their end, from the top ruling to the bottom one."""
+    top, bottom = min(hs, key=lambda r: r.pos), max(hs, key=lambda r: r.pos)
+    left, right = min(v.pos for v in vs), max(v.pos for v in vs)
+    added = []
+    for end_of, outer, sign in ((lambda r: r.start, left, -1), (lambda r: r.end, right, 1)):
+        ends = [end_of(top), end_of(bottom)]
+        if all(sign * (e - outer) >= OPEN_SIDE for e in ends) and abs(ends[0] - ends[1]) <= SNAP:
+            x = (ends[0] + ends[1]) / 2
+            added.append(Rule(x, top.pos, bottom.pos))
+    return added
 
 
 def _grid(hs: list[Rule], vs: list[Rule], *, require_closed: bool) -> Table | None:
