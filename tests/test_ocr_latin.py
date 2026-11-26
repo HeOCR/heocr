@@ -7,6 +7,8 @@ from unittest import mock
 from PIL import Image, ImageDraw
 
 import heocr
+from heocr.contract import Document
+from heocr.ocr import latin_reviewer_for
 from heocr.pdf.ocrlatin import reread_latin_edges
 from heocr.ocr.tesseract import OcrLine, OcrResult, OcrWord
 
@@ -31,6 +33,23 @@ def invented_image():
 
 
 class LatinRunTest(unittest.TestCase):
+    def test_product_records_the_stock_mixed_reviewer_separately_from_the_primary_model(self):
+        primary_key = "tesseract:heocr_modern_v1.traineddata"
+        doc = Document("0" * 64, 0, "PNG", "invented",
+                       components={primary_key: "sha256:" + "a" * 64},
+                       _ocr_settings={"cmd": "invented-tesseract", "model": "heocr_modern_v1"})
+        reviewer = mock.Mock(models={"heb": "b" * 64, "eng": "c" * 64})
+        with mock.patch("heocr.ocr.Tesseract.find", return_value=reviewer) as find:
+            self.assertIs(latin_reviewer_for(doc), reviewer)
+            self.assertIs(latin_reviewer_for(doc), reviewer)
+        find.assert_called_once_with("invented-tesseract", lang="heb+eng", psm=7)
+        self.assertEqual(doc.components, {
+            primary_key: "sha256:" + "a" * 64,
+            "tesseract:latin_review_lang": "heb+eng",
+            "tesseract:latin_review:heb.traineddata": "sha256:" + "b" * 64,
+            "tesseract:latin_review:eng.traineddata": "sha256:" + "c" * 64,
+        })
+
     def test_latin_edge_read_requires_two_agreeing_identifier_reads(self):
         image = Image.new("L", (400, 250), 255)
         edge = result(("14/24", "א-1-2"), ([30, 20, 75, 32], [80, 20, 155, 32])).lines[0]
