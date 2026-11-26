@@ -61,9 +61,11 @@ class CliTest(unittest.TestCase):
         import heocr.cli
 
         doc = heocr.cli.extract(self.input, ocr=False)
-        with mock.patch.object(heocr.cli, "extract", return_value=doc) as extract, contextlib.redirect_stderr(io.StringIO()):
-            self.assertEqual(main([str(self.input), "--photo-preprocess", "gray-otsu"]), 0)
-        self.assertEqual(extract.call_args.kwargs["photo_preprocess"], "gray-otsu")
+        for mode in ("gray-otsu", "gray-otsu-dpi-retry"):
+            with self.subTest(mode=mode), mock.patch.object(heocr.cli, "extract", return_value=doc) as extract:
+                with contextlib.redirect_stderr(io.StringIO()):
+                    self.assertEqual(main([str(self.input), "--photo-preprocess", mode]), 0)
+                self.assertEqual(extract.call_args.kwargs["photo_preprocess"], mode)
 
     def test_line_batch_cli_forwards_the_switch(self) -> None:
         from unittest import mock

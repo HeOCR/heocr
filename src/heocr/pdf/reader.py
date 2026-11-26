@@ -46,7 +46,7 @@ from heocr.pdf.classify import FIGURE_IMAGE, PAGE_IMAGE, classify, object_stats,
 from heocr.pdf.frame import frame_of
 from heocr.pdf.lines import Atom, PageLines, build_lines, line_is_rtl, logical_text, paragraphs
 from heocr.pdf.columns import UNRESOLVED, Segment, arrange
-from heocr.pdf.ocrlines import recover_photo_lines
+from heocr.pdf.ocrlines import recover_photo_lines, retry_photo_dpi
 from heocr.pdf.ocrforms import needs_form_probe, preserve_form_cell_lines
 from heocr.pdf.ocrmargins import attach_margin_numbers
 from heocr.pdf.ocrorder import order_across_disjoint_gaps
@@ -2534,6 +2534,14 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
     settings = doc._ocr_settings or {}
     layout = settings.get("layout") == "v1"
     phone_fast = settings.get("phone_fast", False)
+    if (settings.get("photo_dpi_retry") and page is None and doc._rtl and engine.psm == 3
+            and signals.get("image_format") == "jpeg" and dpi == signals.get("dpi") == 72
+            and not (grids or rectified or learned_grids or page_failed or time_up(doc))
+            and not (OCR_TABLE_ROWS and table_rows(result.lines, scale, doc._rtl, layout=layout))):
+        retry = retry_photo_dpi(engine, page_image, result)
+        if retry is not result and not (OCR_TABLE_ROWS and table_rows(retry.lines, scale, doc._rtl, layout=layout)):
+            result = retry
+            flags = flags + ["ocr_photo_dpi_retry_accepted"]
     if layout and not (grids or rectified or page_failed or phone_fast or time_up(doc)):
         padded = ocr_layout.clip_guard(engine, page_image, dpi, result)
         if padded is not None:

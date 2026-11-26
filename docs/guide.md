@@ -181,7 +181,25 @@ Pages/min is the median of three serial batches with Tesseract limited to one th
 
 #### Photo grayscale and Otsu
 
-Use `--photo-preprocess gray-otsu` (Python `photo_preprocess="gray-otsu"`) to send grayscale pixels to the main Tesseract reader and explicitly select its built-in Otsu thresholding. It applies to standalone images recognized by the capture classifier or declared as `phone`, `iphone` or `pixel`. For example, use `heocr photo.jpg --ocr-router v2 --ocr-capture-type phone --photo-preprocess gray-otsu`. The OCR options record the setting on eligible input. Page geometry, DPI, model selection and scan routes use their usual settings.
+HeOCR already converts standalone images to grayscale before local OCR. Use
+`--photo-preprocess gray-otsu` (Python `photo_preprocess="gray-otsu"`) to
+explicitly select Tesseract's built-in Otsu thresholding for the main reader.
+The default Tesseract configuration normally uses the same thresholding.
+
+```sh
+heocr photo.jpg --ocr-router v2 --ocr-capture-type phone --photo-preprocess gray-otsu
+```
+
+These modes apply to standalone images detected as phone captures or declared
+as `phone`, `iphone` or `pixel`. The extraction record includes the active mode.
+
+`--photo-preprocess gray-otsu-dpi-retry` also tries a 300 DPI hint on the same
+pixels when the page OCR of a 72 DPI phone JPEG leaves substantial ink unread.
+The reader keeps the retry only if it covers more ink, reads at least as many
+words with at least the same mean confidence, and the page has no detected
+OCR table. An accepted retry is flagged `ocr_photo_dpi_retry_accepted`. The
+file DPI still determines coordinates. For perspective correction on angled
+photos, use the phone geometry option below.
 
 #### Phone perspective correction
 

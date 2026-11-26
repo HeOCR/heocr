@@ -6,13 +6,13 @@ import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from PIL import Image, ImageDraw
 
 import heocr
-from heocr.ocr.tesseract import OcrLine, OcrResult, OcrWord, Tesseract
-from heocr.pdf.ocrlines import recover_photo_lines
+from heocr.ocr.tesseract import OcrLine, OcrResult, OcrUnavailable, OcrWord, Tesseract
+from heocr.pdf.ocrlines import recover_photo_lines, retry_photo_dpi
 from tests.test_ocr import FAKE
 
 
@@ -79,6 +79,62 @@ class Probe:
         return OcrResult(
             [OcrLine(text, [30, y - 5, 165, y + 5], [91] * len(words), words=words)]
         )
+
+
+class PhotoDpiRetryTest(unittest.TestCase):
+    def test_retry_requires_better_ink_coverage_without_losing_words_or_confidence(self):
+        image, native = fixture(slope=0)
+        recovered = OcrLine("שורה נוספת", [215, 173, 670, 195], [90, 90])
+        candidate = OcrResult([*native.lines, recovered])
+        engine = Mock()
+        engine.recognize.return_value = candidate
+        self.assertIs(retry_photo_dpi(engine, image, native), candidate)
+        engine.recognize.assert_called_once_with(image, dpi=300)
+
+        for other in (native, OcrResult([recovered]),
+                      OcrResult([*native.lines, replace(recovered, confidences=[30, 30])])):
+            with self.subTest(candidate=other):
+                engine.recognize.return_value = other
+                self.assertIs(retry_photo_dpi(engine, image, native), native)
+        engine.recognize.side_effect = OcrUnavailable("test failure")
+        self.assertIs(retry_photo_dpi(engine, image, native), native)
+
+    def test_jpeg_entry_point_retries_the_same_pixels_and_preserves_page_size(self):
+        from PIL import ExifTags
+        from PIL.TiffImagePlugin import IFDRational
+
+        image, native = fixture(slope=0)
+        recovered = OcrLine("שורה נוספת", [215, 173, 670, 195], [90, 90], ("4", "1"))
+        candidate = OcrResult([*native.lines, recovered])
+        exif = Image.Exif()
+        exif[ExifTags.IFD.Exif] = {ExifTags.Base.ExposureTime: IFDRational(1, 10)}
+        for declared_dpi, expected in ((72, [72, 300]), (150, [150])):
+            with self.subTest(declared_dpi=declared_dpi), TemporaryDirectory() as tmp:
+                (Path(tmp) / "heb.traineddata").write_bytes(b"invented OCR model")
+                encoded = BytesIO()
+                image.save(encoded, format="JPEG", dpi=(declared_dpi, declared_dpi), exif=exif)
+                calls = []
+
+                def recognize(engine, raster, dpi=300, psm=None):
+                    if psm is None:
+                        calls.append((raster.mode, raster.tobytes(), dpi))
+                        return native if dpi == declared_dpi else candidate
+                    return OcrResult([])
+
+                with (
+                    patch.dict(os.environ, {"FAKE_TESSDATA": tmp}),
+                    patch.object(Tesseract, "recognize", recognize),
+                    patch("heocr.pdf.reader.skew_angle", return_value=0),
+                ):
+                    os.environ.pop("TESSDATA_PREFIX", None)
+                    doc = heocr.extract(encoded.getvalue(), tesseract=FAKE, ocr_model="heb", check_numbers=False,
+                                        photo_preprocess="gray-otsu-dpi-retry")
+                self.assertEqual([dpi for _, _, dpi in calls], expected)
+                self.assertTrue(all(mode == "L" and pixels == calls[0][1] for mode, pixels, _ in calls))
+                self.assertEqual(doc.pages[0].width, image.width * 72 / declared_dpi)
+                self.assertEqual(doc.pages[0].signals["render_dpi"], declared_dpi)
+                self.assertEqual("ocr_photo_dpi_retry_accepted" in doc.pages[0].flags, declared_dpi == 72)
+                self.assertEqual(heocr.validate(doc.to_dict()), [])
 
 
 class PhotoGapTest(unittest.TestCase):

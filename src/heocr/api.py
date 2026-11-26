@@ -30,6 +30,8 @@ MODEL_ALIASES = {"modern": "heocr_modern_v1", "oldprint": "heocr_oldprint_v1"}
 # ``ocr_model`` values that read with stock Tesseract ``ocr_lang`` (the escape hatch from the default).
 STOCK_MODELS = ("heb", "stock")
 
+PHOTO_PREPROCESS_MODES = ("gray-otsu", "gray-otsu-dpi-retry")
+
 IMAGE_FORMATS = ("png", "jpeg", "tiff", "gif", "bmp", "jp2", "webp")
 # Inputs above this size are refused before parsing. Real tender documents are far smaller.
 MAX_FILE_BYTES = 512 * 1024**2
@@ -181,9 +183,9 @@ def extract(
     ``ocr_issuer_staggered_lanes`` with fast-mix-v1 to exercise each refinement alone.
     ``ocr_footer_order=True`` moves an isolated footer after the body on fast-mix
     scanner and issuer OCR pages.
-    ``photo_preprocess="gray-otsu"`` sends grayscale rasters to the main Tesseract reader
-    with internal Otsu thresholding on standalone photos. Use a phone capture declaration
-    when camera metadata is unavailable.
+    ``photo_preprocess="gray-otsu"`` explicitly selects internal Otsu thresholding for the
+    main Tesseract reader on standalone photos. ``"gray-otsu-dpi-retry"`` also tests a 300 DPI
+    hint for 72 DPI JPEGs with unread ink. Declare a phone capture when metadata is unavailable.
     ``force_ocr`` reads every PDF page by OCR, its text layer ignored (flag ``ocr_forced``): a workaround
     for a text layer heocr reads badly. It needs ``ocr``.
     ``ocr_line_v6`` opts Rivok Full page prose into a two-model reread of the existing lines.
@@ -303,8 +305,8 @@ def extract(
         not ocr or type(ocr_phone_max_edge) is not int or ocr_phone_max_edge < 1
     ):
         raise ValueError("ocr_phone_max_edge needs OCR and a positive integer")
-    if photo_preprocess is not None and (photo_preprocess != "gray-otsu" or not ocr):
-        raise ValueError("photo_preprocess must be 'gray-otsu' and needs OCR")
+    if photo_preprocess is not None and (photo_preprocess not in PHOTO_PREPROCESS_MODES or not ocr):
+        raise ValueError(f"photo_preprocess must be one of {', '.join(PHOTO_PREPROCESS_MODES)} and needs OCR")
     if ocr_router is not None or ocr_capture_type is not None:
         from heocr.ocr.routes import capture_model_for
 
@@ -520,6 +522,7 @@ def extract(
             if photo_preprocess is not None:
                 doc.options["ocr"]["photo_preprocess"] = photo_preprocess
                 doc._ocr_settings["photo_gray_otsu"] = True
+                doc._ocr_settings["photo_dpi_retry"] = photo_preprocess == "gray-otsu-dpi-retry"
             if ocr_phone_geometry:
                 doc._ocr_settings["phone_geometry"] = True
             if ocr_phone_tables:
