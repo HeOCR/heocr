@@ -859,6 +859,32 @@ In scanned tables, each number cell keeps every model's reading in `readings`. A
 
 Without the `eng` model, heb reads the numbers alone, and the document is flagged `numbers_read_with_main_model`.
 
+### Latin review on OCR pages
+
+The primary OCR model reads the page. With number checks enabled, the
+English page pass can also propose Latin words in mixed Hebrew body text.
+HeOCR asks a separate Tesseract reader using the installed stock `heb+eng`
+models to confirm the eligible line crop in single-line mode (PSM 7). The
+review requires matching text and word boxes. Confident Hebrew words and
+protected digits and punctuation keep their original reading.
+
+Selecting `heocr_modern_v1` sets the primary model. The mixed reviewer
+continues to use installed stock Hebrew and English. The HeOCR-based mixed
+reviewer produced the same fixture outputs in a paired check, so the product
+keeps the stock reviewer. If either reviewer model is unavailable or the
+review cannot confirm the proposal, the primary reading is retained. Use
+`--check-numbers off` (`check_numbers=False` in Python) to skip this English
+page pass and its mixed review on the ordinary OCR route. This also disables
+number checks.
+
+For a reproducible product run, check the primary route in
+`ocr.model_route` and pin the Tesseract binary plus every model recorded in
+`producer.components`. A mixed review reports
+`tesseract:latin_review_lang`, `tesseract:latin_review:heb.traineddata` and
+`tesseract:latin_review:eng.traineddata` when its engine is loaded. These
+components can appear even if every proposal is rejected. Applied
+replacements are flagged `latin_from_second_reading` on the affected block.
+
 ## When something goes wrong
 
 - **A page you expected text from is empty:** look at `unread` and at the page's `class` and `route`. `ocr_route_unavailable` means Tesseract or its `heb` model was not found.
