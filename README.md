@@ -95,25 +95,9 @@ PDF page classes:
 
 ## Held-out results
 
-These historical figures were measured with heocr 0.2.0 and its then-bundled model. The GitHub install uses stock Tesseract by default. All figures come from real held-out sets: photographs of real printed or handwritten pages that no HeOCR model was trained, tuned or chosen on, scored once under rules fixed before the run. 95% intervals are in brackets.
+Current public comparisons use registered held-out sets of real documents and captures. See the [HeOCR benchmarks](https://heocr.org/en/benchmarks.html) for the measurement scope and results. The GitHub install uses stock Tesseract by default.
 
-**Printed pages photographed by phone (PS-v1).** 12 pages of modern printed Hebrew, typeset by us, printed and photographed with three phones (154 photos).
-
-- heocr's own model adds nothing here: +0.08 points of character error against stock Tesseract's model inside heocr [−0.74, +1.28].
-- Against plain Tesseract (tessdata_best), heocr is slightly worse on flat photos from all phones: +3.6 points [+1.5, +6.3]. On the headline photos (flat, main phone) the difference is +1.0 [−0.3, +2.6], not significant.
-- heocr finds more of the numbers: 76.8% against 69.9% on the headline photos.
-
-Not a sample of real-world documents: one printer, three phones, our typesetting.
-
-**Pointed print (niqqud) photographed by phone (NQ1).** 25 pages of modern pointed Hebrew in open fonts, 101 photos.
-
-- The model bundled with 0.2.0 wrote no niqqud: pointed text came out unpointed.
-- Stock Tesseract (tessdata_best) recovers 24.6% of the vowel marks.
-- On the letters alone, heocr matches stock Tesseract's model inside heocr: +0.6 points [−0.1, +1.3].
-
-Modern pointed print in open fonts, not old pointed books.
-
-**Historical handwriting baseline.** On 225 held-out handwritten lines by 10 writers, from ivrit.ai's [Hebrew handwriting OCR benchmark](https://huggingface.co/datasets/ivrit-ai/hebrew-handwriting-ocr-benchmark) (test split), every reader gets most characters wrong: heocr 83.1% character error [79.3, 88.0], stock Tesseract 75.4% [71.0, 80.4]. No HeOCR model is trained on handwriting.
+**Historical handwriting baseline (heocr 0.2.0).** On 225 held-out handwritten lines by 10 writers, from ivrit.ai's [Hebrew handwriting OCR benchmark](https://huggingface.co/datasets/ivrit-ai/hebrew-handwriting-ocr-benchmark) (test split), every reader gets most characters wrong: heocr 83.1% character error [79.3, 88.0], stock Tesseract 75.4% [71.0, 80.4]. No HeOCR model is trained on handwriting.
 
 ## Pointed text (niqqud)
 
