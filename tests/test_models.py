@@ -395,11 +395,12 @@ class ModelRouteTest(unittest.TestCase):
                     base = heocr.extract(source, **options).to_dict()
                     self.assertNotIn("thresholding_method=0", self.recognition_call())
                     self.log.unlink()
-                    new = heocr.extract(source, photo_preprocess="gray-otsu", **options).to_dict()
-                    self.assertEqual("thresholding_method=0" in self.recognition_call(), active)
-                    self.log.unlink()
-                    self.assertEqual(new["options"]["ocr"].pop("photo_preprocess", None), "gray-otsu" if active else None)
-                    self.assertEqual(base, new)
+                    for mode in ("gray-otsu", "gray-otsu-dpi-retry"):
+                        new = heocr.extract(source, photo_preprocess=mode, **options).to_dict()
+                        self.assertEqual("thresholding_method=0" in self.recognition_call(), active)
+                        self.log.unlink()
+                        self.assertEqual(new["options"]["ocr"].pop("photo_preprocess", None), mode if active else None)
+                        self.assertEqual(base, new)
         with self.assertRaisesRegex(ValueError, "needs OCR"):
             heocr.extract(SCAN, photo_preprocess="gray-otsu", ocr=False)
 

@@ -1,4 +1,4 @@
-"""Reread ink rows in a large gap bounded by existing photo OCR lines."""
+"""Conservative rereads of standalone photo OCR."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from itertools import pairwise
 import math
 from statistics import mean, median
 
-from heocr.ocr.regions import INK_LEVEL, paper_level
+from heocr.ocr.regions import INK_LEVEL, RENDER_DPI, paper_level, short_for_ink
 from heocr.ocr.tesseract import OcrLine, OcrResult, OcrUnavailable
 from heocr.pdf.ocrsparse import _overlap, _overlaps_line
 
@@ -276,3 +276,17 @@ def recover_photo_lines(engine, image, result: OcrResult, dpi) -> OcrResult:
     if not added:
         return result
     return OcrResult([*restored, result.lines[-1]])
+
+
+def retry_photo_dpi(engine, image, result: OcrResult) -> OcrResult:
+    """Try a 300 DPI hint on the same pixels when a 72 DPI reading leaves ink unread."""
+    short, outside = short_for_ink(image, result)
+    if not short:
+        return result
+    try:
+        retry = engine.recognize(image, dpi=RENDER_DPI)
+    except OcrUnavailable:
+        return result
+    if retry.words < result.words or (retry.mean_confidence or 0) < (result.mean_confidence or 0):
+        return result
+    return retry if short_for_ink(image, retry)[1] < outside else result

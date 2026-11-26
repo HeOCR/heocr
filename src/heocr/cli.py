@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from heocr import __version__
-from heocr.api import extract
+from heocr.api import PHOTO_PREPROCESS_MODES, extract
 from heocr.contract import MAX_PAGES
 from heocr.handwriting import HandwritingConfig
 from heocr.ocr.phone_profile import PHONE_PROFILES
@@ -133,8 +133,8 @@ def _parser() -> argparse.ArgumentParser:
                         help="recover ruled table and form grids on angled phone images")
     parser.add_argument("--ocr-phone-max-edge", type=int, metavar="PX",
                         help="limit the OCR raster's long edge for standalone phone images")
-    parser.add_argument("--photo-preprocess", choices=("gray-otsu",),
-                        help="send grayscale to the main OCR reader with internal Otsu thresholding on photos")
+    parser.add_argument("--photo-preprocess", choices=PHOTO_PREPROCESS_MODES,
+                        help="select Otsu thresholding for phone photos, with optional 300 DPI retry for unread ink")
     parser.add_argument("-q", "--quiet", action="store_true", help="do not report unread parts on stderr (a missing OCR model is still reported)")
     parser.add_argument("--version", action="version", version=f"heocr {__version__}")
     return parser

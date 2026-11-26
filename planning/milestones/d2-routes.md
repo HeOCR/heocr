@@ -52,7 +52,7 @@
 | **D2e3** | Prototype a caller-declared capture route for modern unpointed print. Phones use modern_v1. Office scans and issuer renders use the pinned local Rivok Full model. Record the capture and model on OCR blocks. Validate on a fresh carrier-matched development panel before considering adoption. | D2e |
 | **D2e4** | Experimental two-model recognition on existing OCR prose lines, using pinned local Rivok Full and v6. Preserve line order, geometry and the original reading when evidence is insufficient. | D2e3 |
 | **D2e5** | Package the opt-in capture router in the CLI and Python reader. Use caller declarations, PDF rendering and camera metadata to choose the model and reuse D2e4 on Rivok page prose. Retain the usual route when capture evidence is absent. | D2e4 |
-| **D2e6** | Offer explicit grayscale and internal Otsu thresholding for standalone photos. Evaluate the combined route against D2e5 on DEV and calibration. | D2e5 |
+| **D2e6** | Offer explicit grayscale and internal Otsu thresholding for standalone photos. Evaluate the combined route against D2e5 on DEV and calibration. An opt-in 300 DPI retry can recover unread ink on 72 DPI phone JPEGs without changing output coordinates. | D2e5 |
 | **D2e7** | Prepare the capture intake and paired comparative run for the DEV215 phone and scanner branch check. | D2e5 |
 | **D2e8** | Offer opt-in ordered OCR of independent images with two workers. Verify complete document records against serial extraction. | D2e5 |
 | **D2e9** | Offer opt-in batching of Rivok and v6 prose crops within each page. Verify whole-record parity and retry failed groups with individual reads. | D2e4 |
