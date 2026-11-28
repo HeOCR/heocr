@@ -9,6 +9,7 @@ from io import BytesIO
 from heocr.contract import time_up
 
 DEFAULT_DOMAIN = "modern-documents"
+SCAN_DOMAINS = (DEFAULT_DOMAIN, "modern-literature", "old-print")
 ROUTES: dict[str, str | None] = {
     DEFAULT_DOMAIN: "heocr_modern_measured",
     "old-print": "heocr_phist_measured",
@@ -84,7 +85,15 @@ def candidates() -> dict[str, str | None]:
 PROBE_LINES = 4
 PROBE_PAGES = 3
 PROBE_MIN_WORDS = 3
-PROBE_MARGIN = 0.05
+# Probe scores use the same fixed-point scale as the fit. Each center is
+# the DEV median of (documents - literature, old print - literature, max score).
+_PROBE_SCORE_SCALE = 100_000
+_PROBE_MARGIN = 4_000
+_PROBE_CENTERS = {
+    DEFAULT_DOMAIN: (540, -430, 93_510),
+    "modern-literature": (-110, -600, 92_570),
+    "old-print": (-640, -690, 93_375),
+}
 POINTED_MIN_LETTERS = 30
 POINTED_MIN_DENSITY = 0.20  # selected on pointed and unpointed DEV probes
 
@@ -217,6 +226,22 @@ def _reread(doc, model, crops):
     return texts, confidences
 
 
+def _choose_scan_domain(scores: dict[str, float]) -> tuple[str, str]:
+    points = {domain: round(scores[domain] * _PROBE_SCORE_SCALE) for domain in SCAN_DOMAINS if domain in scores}
+    ranked = sorted(points, key=points.get, reverse=True)
+    if len(ranked) < len(SCAN_DOMAINS) or points[ranked[0]] - points[ranked[1]] >= _PROBE_MARGIN:
+        return ranked[0], "probe"
+
+    documents, literature, old_print = (points[domain] for domain in SCAN_DOMAINS)
+    vector = (documents - literature, old_print - literature, points[ranked[0]])
+
+    def distance(domain: str) -> tuple[int, int]:
+        return (sum(abs(value - center) for value, center in zip(vector, _PROBE_CENTERS[domain])),
+                -points[domain])
+
+    return min(SCAN_DOMAINS, key=distance), "probe_nearest"
+
+
 def _decide(doc) -> None:
     crops = doc._route["crops"]
     if not crops:
@@ -235,7 +260,7 @@ def _decide(doc) -> None:
             return
 
     scores = {DEFAULT_DOMAIN: _score([text for _, _, text, _ in crops], [c for _, _, _, cs in crops for c in cs])}
-    for domain in ("old-print", "modern-literature"):
+    for domain in SCAN_DOMAINS[1:]:
         model = model_for(domain)
         if model == model_for(DEFAULT_DOMAIN):
             continue
@@ -246,8 +271,5 @@ def _decide(doc) -> None:
             scores[domain] = _score(*sample)
     if unavailable:
         evidence["probe_unavailable"] = unavailable
-    best = max(scores, key=scores.get)
-    if best != DEFAULT_DOMAIN and round(scores[best] - scores[DEFAULT_DOMAIN], 4) >= PROBE_MARGIN:
-        doc._route = _decision(best, "probe", scores=scores, **evidence)
-    else:
-        doc._route = _decision(DEFAULT_DOMAIN, "probe_unsure", scores=scores, **evidence)
+    domain, reason = _choose_scan_domain(scores)
+    doc._route = _decision(domain, reason, scores=scores, **evidence)
