@@ -9,7 +9,7 @@
 
 Every decision is recorded in the output. Text that could not be read is reported in `unread`, never dropped silently.
 
-> HeOCR has no current public package or model release. We will publish a release only after heocr beats existing readers on at least one document type.
+The [measured OCR models](#automatic-ocr-routing) are available on Hugging Face and Zenodo. Install the package from source using the command below.
 
 ## Quickstart
 
@@ -17,7 +17,7 @@ Every decision is recorded in the output. Text that could not be read is reporte
 pip install git+https://github.com/HeOCR/heocr
 ```
 
-The default OCR model is `heocr_modern_v1`. Use a model-enabled wheel or place the pinned weights in the local model cache. The plain GitHub build falls back to installed stock `heb` when the model is unavailable. The CLI warns and records `bundled_model_unavailable`. See the [user guide](docs/guide.md#install) for the verified wheel build and Tesseract setup.
+The CLI defaults to [Modern MEASURED](#automatic-ocr-routing) for Hebrew OCR. Install the pinned weights with `heocr --download-model heocr_modern_measured`. An empty model cache triggers a warning and a fallback to installed stock Tesseract. See the [user guide](docs/guide.md#install) for setup.
 
 ```python
 import heocr
@@ -45,6 +45,37 @@ heocr report.pdf --force-ocr          # read every page by OCR, ignoring its tex
 Image-only pages can also use the [experimental opt-in Kraken handwriting route](docs/guide.md#experimental-handwriting-ocr) with local pinned weights.
 
 The CLI prints each `unread` entry on stderr (`-q` silences them). It exits with 1 only when the file cannot be opened or an option is invalid. A document read only in part, or not at all, exits with 0, and its `unread` entries say why.
+
+## Automatic OCR routing
+
+Automatic routing is experimental. Opt in with `--ocr-model auto`. Install the
+four measured models once, then use Automatic or a manual selector:
+
+```sh
+heocr --download-model auto
+heocr scan.pdf --ocr-model auto
+heocr book.pdf --ocr-model old-print
+```
+
+In Python, pass the same selector to `heocr.extract("scan.pdf", ocr_model="auto")`.
+The model setup downloads about 23 MB into the local model cache, checking the
+pinned release sizes and SHA-256 digests. Extraction runs offline.
+
+| Manual selector | Hugging Face release | Zenodo DOI |
+| --- | --- | --- |
+| `modern-documents` | [Modern MEASURED v1.0](https://huggingface.co/HeOCR/heocr-modern-measured/tree/v1.0) | [10.5281/zenodo.24615080](https://doi.org/10.5281/zenodo.24615080) |
+| `old-print` | [P-hist MEASURED v1.1](https://huggingface.co/HeOCR/heocr-p-hist-measured/tree/v1.1) | [10.5281/zenodo.24581274](https://doi.org/10.5281/zenodo.24581274) |
+| `modern-literature` | [Literature MEASURED v1.0](https://huggingface.co/HeOCR/heocr-literature-measured/tree/v1.0) | [10.5281/zenodo.24620176](https://doi.org/10.5281/zenodo.24620176) |
+| `pointed` | [Pointed MEASURED v1.0](https://huggingface.co/HeOCR/heocr-pointed-measured/tree/v1.0) | [10.5281/zenodo.24620184](https://doi.org/10.5281/zenodo.24620184) |
+
+The model cards describe the held-out measurements for the individual weights.
+Automatic uses modern documents for born-digital inputs. For scans, it checks
+for sustained niqqud, then compares the documents, literature and old-print
+probe scores. A clear winner routes directly. A close three-way probe matches
+the nearest calibrated domain profile. The final decision is in
+`options.ocr.model_route` and each OCR block records its effective route in
+`ocr.model_route`.
+See the [Automatic routing guide](docs/guide.md#automatic-routing-for-the-app).
 
 ## Opt-in routes and profiles
 

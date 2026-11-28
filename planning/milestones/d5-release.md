@@ -45,6 +45,21 @@ Each slice is its own PR from main.
 | **D5e** | **Docs.** The README is done (#50). Still to come: a CHANGELOG from D1 to D4; a short reference for the record (fields, roles, sources, flags, unread reasons) next to the schema; and CONTRIBUTING (licences, synthetic fixtures only, tuning on dev only). |
 | **D5f** | **The release**, after eval's pre-registered gate and its report: a tag, GitHub release notes, TestPyPI first, then PyPI.<br>**Before the tag:** the full suite runs on the candidate on a machine with Tesseract (`heb`, `eng`) and LibreOffice installed and every opt-in set (`HEOCR_TEST_TESSERACT=1`, `HEOCR_TEST_SOFFICE=1`). Then the tests CI skips, such as the grainy-paper regression for #95, are run before every release. Run the [local regression harness](../../docs/release-regress.md) on the release candidate with its frozen manifest. **The publishing accounts (TestPyPI, PyPI) and the publish itself are Shay's go-ahead.** The accounts come through the Codex helper. |
 
+## Local package preparation
+
+Build the wheel and source distribution with `python -m build`. Record SHA-256
+hashes for both files in `dist/SHA256SUMS` and retain its digest for review.
+Use the same two files for the dry run and the approved upload.
+
+```sh
+bash -e -o pipefail scripts/release_upload.sh check dist <manifest-sha256>
+```
+
+This checks each local artifact against the reviewed manifest and runs
+`twine check --strict`. After the publication gate and approval, use the
+`publish` subcommand with the same directory and manifest digest. It checks
+the two artifacts again before invoking Twine against production PyPI.
+
 ## Exit criteria
 
 - Eval's D-bench report passes the gate the lead sets with eval.

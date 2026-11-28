@@ -8,12 +8,15 @@ import sys
 from pathlib import Path
 
 from heocr import __version__
-from heocr.api import PHOTO_PREPROCESS_MODES, extract
+from heocr.api import DEFAULT_MODEL, PHOTO_PREPROCESS_MODES, extract
 from heocr.contract import MAX_PAGES
 from heocr.handwriting import HandwritingConfig
 from heocr.ocr.phone_profile import PHONE_PROFILES
-from heocr.ocr.routes import CAPTURE_MODELS, DOMAINS, FAST_MIX_PROFILES, FAST_MIX_TABLE_PROFILES, candidates
+from heocr.ocr.routes import (
+    CAPTURE_MODELS, DEFAULT_DOMAIN, DOMAINS, FAST_MIX_PROFILES, FAST_MIX_TABLE_PROFILES, candidates,
+)
 from heocr.ocr.specialists import CATEGORIES
+from heocr.ocr.tesseract import DEFAULT_LANG
 
 _FORMATS = ("text", "markdown", "json", "docx", "xlsx", "csv", "forms")
 _BY_SUFFIX = {".md": "markdown", ".markdown": "markdown", ".json": "json", ".txt": "text", ".docx": "docx", ".xlsx": "xlsx", ".csv": "csv"}
@@ -77,15 +80,16 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--tesseract", help="the tesseract program, when it is not on the PATH")
     parser.add_argument(
         "--ocr-model",
-        default="heocr_modern_v1",
-        help="the OCR model (the default falls back to stock Tesseract with the GitHub install); "
-        f"auto to route among the measured models; {', '.join(DOMAINS)} to select a measured model; "
-        "heb or stock for Tesseract's installed language data; or a local .traineddata path",
+        metavar="MODEL",
+        help="OCR model. Use auto for experimental Automatic routing across the four measured models. "
+        f"Select one explicitly with {', '.join(DOMAINS)}. "
+        "Use stock for Tesseract's installed language data or pass a local .traineddata path. "
+        f"The default for Hebrew OCR is {DEFAULT_DOMAIN} (Modern MEASURED), with stock fallback when unavailable.",
     )
     parser.add_argument(
         "--download-model",
         metavar="NAME",
-        help="download a pinned model explicitly; use auto to prepare all four measured models",
+        help="install a SHA-256-verified model in the local cache. Use auto to install all four measured models once.",
     )
     parser.add_argument("--ocr-capture-type", choices=CAPTURE_MODELS,
                         help="opt into experimental OCR routing for a declared capture")
@@ -210,6 +214,13 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 content = "Page images and local OCR drafts" if args.ocr_hybrid_old_print else "Page images"
             print(f"heocr: {content} may be sent to Anthropic when ANTHROPIC_API_KEY is set.", file=sys.stderr)
+        implicit_measured_model = (
+            args.ocr_model is None and args.ocr_lang == DEFAULT_LANG
+            and not (args.profile or args.ocr_router or args.ocr_capture_type)
+        )
+        ocr_model = DEFAULT_DOMAIN if implicit_measured_model else (
+            DEFAULT_MODEL if args.ocr_model is None else args.ocr_model
+        )
         doc = extract(
             args.file,
             repairs=not args.no_repairs,
@@ -217,7 +228,7 @@ def main(argv: list[str] | None = None) -> int:
             ocr_lang=args.ocr_lang,
             ocr_psm=args.psm,
             tesseract=args.tesseract,
-            ocr_model=args.ocr_model,
+            ocr_model=ocr_model,
             ocr_router=args.ocr_router,
             ocr_category=args.ocr_category,
             ocr_specialist_config=args.ocr_specialist_config,
@@ -259,6 +270,7 @@ def main(argv: list[str] | None = None) -> int:
             tables=args.tables,
             tables_models=args.tables_models,
             join_tables=args.join_tables,
+            _ocr_fallback_to_stock=implicit_measured_model,
         )
     except ImportError as exc:
         if args.tables is None and args.profile not in FAST_MIX_TABLE_PROFILES:

@@ -40,6 +40,32 @@ class CliTest(unittest.TestCase):
         self.assertIn("page_limit_reached", payload["flags"])
         self.assertIn("unread: page_limit", err.getvalue())
 
+    def test_cli_uses_modern_measured_unless_a_reader_is_selected(self) -> None:
+        out = Path(self.tmp.name) / "out.json"
+        cases = (
+            ([], "heocr_modern_measured"),
+            (["--ocr-model", "auto"], "auto"),
+            (["--ocr-model", "old-print"], "heocr_phist_measured"),
+            (["--ocr-lang", "heb+eng"], None),
+        )
+        for options, expected in cases:
+            with self.subTest(options=options), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(main([str(self.input), *options, "-o", str(out)]), 0)
+                ocr = json.loads(out.read_text(encoding="utf-8"))["options"]["ocr"]
+                self.assertEqual(ocr.get("model"), expected)
+                if expected is None:
+                    self.assertEqual(ocr["lang"], "heb+eng")
+
+    def test_cli_profile_uses_its_required_page_model(self) -> None:
+        from unittest import mock
+
+        import heocr.cli
+
+        doc = heocr.cli.extract(self.input, ocr=False)
+        with mock.patch.object(heocr.cli, "extract", return_value=doc) as extract:
+            self.assertEqual(main([str(self.input), "--profile", "phone-specialist", "-q"]), 0)
+        self.assertEqual(extract.call_args.kwargs["ocr_model"], "heocr_modern_v1")
+
     def test_declared_capture_reaches_extract(self) -> None:
         out = Path(self.tmp.name) / "out.json"
         with contextlib.redirect_stderr(io.StringIO()):
