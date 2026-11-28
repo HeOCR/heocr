@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
@@ -677,14 +678,17 @@ class BundledAndRoutesTest(unittest.TestCase):
         with self.assertRaises(models.ModelError):
             models.resolve("heocr_test")
 
-    def test_the_route_table_names_bundled_models_of_its_domains(self) -> None:
+    def test_the_route_table_names_revision_pinned_models_of_its_domains(self) -> None:
         from heocr.ocr import routes
 
         self.assertEqual(set(routes.ROUTES), set(routes.DOMAINS))
         self.assertIn(routes.DEFAULT_DOMAIN, routes.DOMAINS)
         for domain in routes.DOMAINS:
             model = models.MODELS[routes.model_for(domain)]
-            self.assertEqual((model.domain, model.bundled, model.licence), (domain, True, "Apache-2.0"))
+            self.assertEqual((model.domain, model.bundled, model.licence), (domain, False, "Apache-2.0"))
+            self.assertRegex(model.sha256, r"^[0-9a-f]{64}$")
+            self.assertRegex(model.hf_revision, r"^[0-9a-f]{40}$")
+            self.assertIn(f"/resolve/{model.hf_revision}/", model.url)
         with self.assertRaises(ValueError):
             routes.model_for("handwriting")
 
@@ -704,54 +708,128 @@ class AutoRouteTest(unittest.TestCase):
         path.write_text("\n".join(rows) + "\n", encoding="utf-8")
         return {"FAKE_TSV": str(path)}
 
-    def with_old_model(self):
-        body = b"an invented old-print model"
-        released = models.ReleasedModel("heocr_oldt", hashlib.sha256(body).hexdigest(), len(body), "https://example.invalid/o", "10.0/none", "Apache-2.0", domain="old")
+    def measured_models(self):
         self.cache.mkdir(exist_ok=True)
-        (self.cache / "heocr_oldt.traineddata").write_bytes(body)
-        return mock.patch.dict(models.MODELS, {"heocr_oldt": released}), mock.patch.dict("heocr.ocr.routes.ROUTES", {"modern": None, "old": "heocr_oldt"})
+        pins = {}
+        for name in routes.candidates().values():
+            body = ("an invented model " + name).encode()
+            (self.cache / f"{name}.traineddata").write_bytes(body)
+            pins[name] = replace(models.MODELS[name], sha256=hashlib.sha256(body).hexdigest(), size=len(body))
+        return pins
+
+    def line_reads(self, *, confidence="80", old="20", literature="20", pointed="שורה של דפוס חדש"):
+        return {**self.page_tsv(confidence),
+                "FAKE_LINE_HEOCR_PHIST_MEASURED": "שורה של דפוס ישן",
+                "FAKE_CONF_HEOCR_PHIST_MEASURED": old,
+                "FAKE_LINE_HEOCR_LITERATURE": "קטע מתוך סיפור קצר",
+                "FAKE_CONF_HEOCR_LITERATURE": literature,
+                "FAKE_LINE_HEOCR_POINTED": pointed}
+
+    def route(self, doc):
+        record = doc.to_dict()["options"]["ocr"]["model_route"]
+        self.assertTrue(doc.blocks)
+        self.assertEqual(doc.blocks[0].ocr["model_route"], record)
+        self.assertEqual(heocr.validate(doc.to_dict()), [])
+        return record
 
     def recognition_langs(self) -> list[tuple[str, str]]:
         calls = [json.loads(line) for line in self.log.read_text(encoding="utf-8").splitlines()]
         return [(c[c.index("-l") + 1], c[c.index("--psm") + 1]) for c in calls if c and "-l" in c and "--psm" in c]
 
     def test_one_candidate_needs_no_probe(self) -> None:
-        with mock.patch.dict(os.environ, self.page_tsv("80")), mock.patch.dict("heocr.ocr.routes.ROUTES", {"modern": None, "old": None}):
+        stock_routes = dict.fromkeys(routes.DOMAINS)
+        with mock.patch.dict(os.environ, self.page_tsv("80")), mock.patch.dict(routes.ROUTES, stock_routes):
             doc = heocr.extract(SCAN, tesseract=FAKE, ocr_model="auto")
-        self.assertEqual(doc.options["ocr"]["model"], "auto")
-        self.assertTrue(doc.blocks)
-        self.assertEqual({tuple(sorted(b.ocr["model_route"].items())) for b in doc.blocks}, {(("domain", "modern"), ("mode", "auto"), ("reason", "single_candidate"))})
+        self.assertEqual(self.route(doc), {"domain": routes.DEFAULT_DOMAIN, "model": "heb",
+                                         "mode": "auto", "reason": "single_candidate"})
         self.assertEqual({lang for lang, _ in self.recognition_langs()}, {"heb"})
-        self.assertEqual(heocr.validate(doc.to_dict()), [])
 
-    def test_the_probe_switches_to_a_clearly_better_model(self) -> None:
-        a, b = self.with_old_model()
-        env = {**self.page_tsv("60"), "FAKE_LINE_HEOCR_OLDT": "שורה ישנה של דף", "FAKE_CONF_HEOCR_OLDT": "95"}
-        with a, b, mock.patch.dict(os.environ, env):
-            doc = heocr.extract(SCAN, tesseract=FAKE, ocr_model="auto")
-        route = doc.blocks[0].ocr["model_route"]
-        self.assertEqual((route["domain"], route["reason"]), ("old", "probe"))
-        self.assertGreater(route["scores"]["old"], route["scores"]["modern"])
-        self.assertIn(("heocr_oldt", "3"), self.recognition_langs())  # the deciding page is read again by the chosen model
-        self.assertEqual(doc.blocks[0].ocr["lang"], "heocr_oldt")
-        self.assertEqual(heocr.validate(doc.to_dict()), [])
+    def test_confidence_routes_to_old_print_or_literature(self) -> None:
+        pins = self.measured_models()
+        for domain, env in (("old-print", self.line_reads(old="95")),
+                            ("modern-literature", self.line_reads(literature="95"))):
+            with self.subTest(domain=domain), mock.patch.dict(models.MODELS, pins), mock.patch.dict(os.environ, env):
+                self.log.unlink(missing_ok=True)
+                doc = heocr.extract(SCAN, tesseract=FAKE, ocr_model="auto", check_numbers=False)
+                route = self.route(doc)
+                self.assertEqual((route["domain"], route["reason"]), (domain, "probe"))
+                self.assertGreater(route["scores"][domain], route["scores"][routes.DEFAULT_DOMAIN])
+                name = routes.model_for(domain)
+                self.assertEqual(route["model"], name)
+                self.assertIn((name, "3"), self.recognition_langs())
+                self.assertEqual(doc.components[f"tesseract:{name}.hf_revision"], pins[name].hf_revision)
+
+    def test_pointing_wins_before_the_other_line_probes(self) -> None:
+        pins = self.measured_models()
+        env = self.line_reads(pointed="דָּג קָטָן שָׂחָה בַּנָּהָר")
+        with mock.patch.dict(models.MODELS, pins), mock.patch.dict(os.environ, env):
+            doc = heocr.extract(SCAN, tesseract=FAKE, ocr_model="auto", check_numbers=False)
+        route = self.route(doc)
+        self.assertEqual((route["domain"], route["reason"], route["model"]),
+                         ("pointed", "probe_niqqud", "heocr_pointed"))
+        self.assertGreaterEqual(route["niqqud_density"], routes.POINTED_MIN_DENSITY)
+        self.assertIn(("heocr_pointed", "3"), self.recognition_langs())
+        self.assertNotIn(("heocr_phist_measured", "7"), self.recognition_langs())
+        self.assertNotIn(("heocr_literature", "7"), self.recognition_langs())
+
+    def test_density_counts_attached_vowels_and_meteg_once(self) -> None:
+        self.assertEqual(routes.point_density("־ ְ א בּ שׁ גָֽ"), (4, 0.25))
+        self.assertEqual(routes.point_density("123 ־"), (0, 0.0))
+        self.assertEqual(routes.point_density("בּשׁ"), (2, 0.0))
 
     def test_a_routed_model_that_is_not_here_falls_back_to_stock_and_says_so(self) -> None:
-        # The table names the released models; with neither bundled nor downloaded, auto reads with stock heb.
         with mock.patch.dict(os.environ, self.page_tsv("80")), mock.patch("heocr.models.bundled_dir", return_value=self.cache / "none"):
-            doc = heocr.extract(SCAN, tesseract=FAKE, ocr_model="auto")
+            doc = heocr.extract(SCAN, tesseract=FAKE, ocr_model="auto", check_numbers=False)
+        route = self.route(doc)
         self.assertIn("routed_model_unavailable", doc.flags)
-        self.assertTrue(doc.blocks)
-        self.assertEqual(doc.blocks[0].ocr["lang"], "heb")
-        self.assertEqual(doc.blocks[0].ocr["model_route"]["unavailable"], "heocr_modern_v1")
-        self.assertEqual(heocr.validate(doc.to_dict()), [])
+        self.assertEqual(route["model"], "heb")
+        self.assertEqual(route["unavailable"], "heocr_modern_measured")
 
-    def test_a_close_call_keeps_the_fallback(self) -> None:
-        a, b = self.with_old_model()
-        env = {**self.page_tsv("60"), "FAKE_LINE_HEOCR_OLDT": "שורה ישנה של דף", "FAKE_CONF_HEOCR_OLDT": "62"}
-        with a, b, mock.patch.dict(os.environ, env):
-            doc = heocr.extract(SCAN, tesseract=FAKE, ocr_model="auto")
-        route = doc.blocks[0].ocr["model_route"]
-        self.assertEqual((route["domain"], route["reason"]), ("modern", "probe_unsure"))
-        self.assertNotIn(("heocr_oldt", "3"), self.recognition_langs())
-        self.assertEqual(doc.blocks[0].ocr["lang"], "heb")
+    def test_a_close_call_keeps_the_modern_documents_model_and_records_the_decision(self) -> None:
+        pins = self.measured_models()
+        with mock.patch.dict(models.MODELS, pins), mock.patch.dict(os.environ, self.line_reads(old="82")):
+            doc = heocr.extract(SCAN, tesseract=FAKE, ocr_model="auto", check_numbers=False)
+        route = self.route(doc)
+        self.assertEqual((route["domain"], route["reason"], route["model"]),
+                         (routes.DEFAULT_DOMAIN, "probe_unsure", "heocr_modern_measured"))
+        self.assertNotIn(("heocr_phist_measured", "3"), self.recognition_langs())
+        self.assertEqual(self.recognition_langs().count(("heocr_modern_measured", "3")), 1)
+
+    def test_an_empty_probe_cannot_beat_a_low_confidence_reading(self) -> None:
+        from tests.synth.fake_tesseract import NOTHING
+
+        pins = self.measured_models()
+        env = {**self.line_reads(confidence="0"),
+               "FAKE_LINE_HEOCR_LITERATURE": NOTHING, "FAKE_LINE_HEOCR_PHIST_MEASURED": NOTHING}
+        with mock.patch.dict(models.MODELS, pins), mock.patch.dict(os.environ, env):
+            doc = heocr.extract(SCAN, tesseract=FAKE, ocr_model="auto", check_numbers=False)
+        route = self.route(doc)
+        self.assertEqual((route["domain"], set(route["scores"])), (routes.DEFAULT_DOMAIN, {routes.DEFAULT_DOMAIN}))
+
+    def test_born_digital_pdf_is_modern_even_on_forced_ocr(self) -> None:
+        pins = self.measured_models()
+        body = make_pdf([PdfPage(lines=lines_block(["מסמך מקורי קצר"]))])
+        with mock.patch.dict(models.MODELS, pins), mock.patch.dict(os.environ, self.line_reads(old="99")):
+            native = heocr.extract(body, tesseract=FAKE, ocr_model="auto", check_numbers=False)
+            self.assertFalse(self.log.exists())
+            forced = heocr.extract(body, tesseract=FAKE, ocr_model="auto", force_ocr=True, check_numbers=False)
+        expected = {"mode": "auto", "domain": routes.DEFAULT_DOMAIN, "model": "heocr_modern_measured",
+                    "reason": "born_digital"}
+        self.assertEqual(native.options["ocr"]["model_route"], expected)
+        self.assertEqual(native.blocks[0].source, "text_layer")
+        self.assertEqual(self.route(forced), expected)
+        self.assertTrue(all(lang == "heocr_modern_measured" for lang, _ in self.recognition_langs()))
+
+    def test_an_explicit_domain_bypasses_the_probe(self) -> None:
+        pins = self.measured_models()
+        with mock.patch.dict(models.MODELS, pins), mock.patch.dict(os.environ, self.line_reads(old="99")):
+            doc = heocr.extract(SCAN, tesseract=FAKE, ocr_model="modern-literature", check_numbers=False)
+        self.assertEqual(self.route(doc), {"mode": "fixed", "domain": "modern-literature",
+                                          "model": "heocr_literature", "reason": "manual_override"})
+        self.assertEqual(self.recognition_langs(), [("heocr_literature", "3")])
+
+    def test_cli_can_install_all_measured_models_explicitly(self) -> None:
+        with mock.patch("heocr.models.download", side_effect=lambda name: Path(f"{name}.traineddata")) as download:
+            with contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(main(["--download-model", "auto"]), 0)
+        self.assertEqual(download.call_args_list, [mock.call(name) for name in routes.candidates().values()])

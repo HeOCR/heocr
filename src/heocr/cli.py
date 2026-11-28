@@ -12,7 +12,7 @@ from heocr.api import PHOTO_PREPROCESS_MODES, extract
 from heocr.contract import MAX_PAGES
 from heocr.handwriting import HandwritingConfig
 from heocr.ocr.phone_profile import PHONE_PROFILES
-from heocr.ocr.routes import CAPTURE_MODELS, FAST_MIX_PROFILES, FAST_MIX_TABLE_PROFILES
+from heocr.ocr.routes import CAPTURE_MODELS, DOMAINS, FAST_MIX_PROFILES, FAST_MIX_TABLE_PROFILES, candidates
 from heocr.ocr.specialists import CATEGORIES
 
 _FORMATS = ("text", "markdown", "json", "docx", "xlsx", "csv", "forms")
@@ -79,13 +79,13 @@ def _parser() -> argparse.ArgumentParser:
         "--ocr-model",
         default="heocr_modern_v1",
         help="the OCR model (the default falls back to stock Tesseract with the GitHub install); "
-        "heb or stock to use Tesseract's installed language data explicitly; "
-        "or pass a local .traineddata file",
+        f"auto to route among the measured models; {', '.join(DOMAINS)} to select a measured model; "
+        "heb or stock for Tesseract's installed language data; or a local .traineddata path",
     )
     parser.add_argument(
         "--download-model",
         metavar="NAME",
-        help=argparse.SUPPRESS,
+        help="download a pinned model explicitly; use auto to prepare all four measured models",
     )
     parser.add_argument("--ocr-capture-type", choices=CAPTURE_MODELS,
                         help="opt into experimental OCR routing for a declared capture")
@@ -155,12 +155,14 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("--ocr-hybrid-dry-run cannot download a model")
         from heocr.models import ModelError, download
 
+        names = tuple(candidates().values()) if args.download_model == "auto" else (args.download_model,)
         try:
-            path = download(args.download_model)
+            for name in names:
+                path = download(name)
+                print(f"heocr: {name} is ready ({path.name}, sha256 checked)", file=sys.stderr)
         except (ModelError, OSError) as exc:
             print(f"heocr: {exc}", file=sys.stderr)
             return 1
-        print(f"heocr: {args.download_model} is ready ({path.name}, sha256 checked)", file=sys.stderr)
         return 0
     if args.file is None:
         parser.error("a file is required")

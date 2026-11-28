@@ -19,6 +19,7 @@ from heocr.contract import MAX_PAGES, Document, Unread
 from heocr.convert import CONVERSIONS, CONVERT_TIMEOUT
 from heocr.handwriting import HandwritingConfig, HandwritingReader
 from heocr.identify import identify
+from heocr.ocr import routes
 from heocr.ocr.routes import FAST_MIX_DOC_V1, FAST_MIX_PROFILES, FAST_MIX_TABLE_PROFILES, FAST_MIX_V2
 from heocr.ocr.tesseract import DEFAULT_LANG, DEFAULT_PSM, _temporary_models, check_settings
 from heocr.tableformer import TableFormerSession
@@ -132,8 +133,9 @@ def extract(
     ``ocr_model`` requests HeOCR's modern-print model, ``heocr_modern_v1``, by default. The GitHub
     install has no bundled models. If you have local model files, ``"oldprint"`` requests
     ``heocr_oldprint_v1``, and
-    ``"auto"`` picks one of the two per document from the route table (``heocr.ocr.routes``), with a probe
-    of a few lines, recorded in each OCR block's ``ocr.model_route``. The default and ``auto`` apply when
+    ``"auto"`` picks one of four measured models using a short probe, recorded in ``options.ocr.model_route``
+    and in OCR blocks. A domain name such as ``"pointed"`` sets the model explicitly. The default and
+    ``auto`` apply when
     ``ocr_lang`` is ``heb``; with another ``ocr_lang``, stock Tesseract reads with it. When a bundled model's
     file is missing (an install from the repository), stock Tesseract reads instead and the document is
     flagged ``bundled_model_unavailable``. ``ocr_model="heb"`` (or ``"stock"``, or ``None``) reads with stock
@@ -252,7 +254,8 @@ def extract(
         raise ValueError("check_numbers must be 'suspect', 'tables', 'all' or False")
     if ocr:
         check_settings(ocr_lang, ocr_psm)
-    ocr_model = MODEL_ALIASES.get(ocr_model, ocr_model) if isinstance(ocr_model, str) else ocr_model
+    if isinstance(ocr_model, str):
+        ocr_model = routes.ROUTES.get(ocr_model, MODEL_ALIASES.get(ocr_model, ocr_model))
     fast_mix_profile = profile if profile in FAST_MIX_PROFILES else None
     fast_mix = fast_mix_profile is not None
     if (ocr_phone_latin_edges or ocr_oblique_rivok or ocr_issuer_staggered_lanes or ocr_footer_order) and not fast_mix:
@@ -542,9 +545,13 @@ def extract(
         doc.flags.append("not_read")
         return doc
     doc._hybrid = hybrid
+    if kind.format in ("docx", "xlsx", "pptx", "html", *CONVERSIONS):
+        routes.born_digital(doc)
+    measured_route = ocr_model == "auto" or ocr_model in routes.ROUTES.values()
     try:
-        with _temporary_models() if phone_profile is not None or fast_mix or specialist_config is not None else nullcontext():
+        with _temporary_models() if measured_route or phone_profile is not None or fast_mix or specialist_config is not None else nullcontext():
             reader(body, doc)
+        routes.finish(doc)
     finally:
         doc._hybrid = None
         if table_detector is not None:
