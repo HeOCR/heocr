@@ -41,6 +41,7 @@ def engine_for(doc: "Document") -> Tesseract | None:
     if doc._ocr_engine is None and doc._ocr_error is None:
         requested_model = model = settings.get("model")
         capture = settings.get("capture_type")
+        fallback = settings.get("fallback_to_stock", False)
         specialist = settings.get("specialist")
         selection, route = specialist if specialist is not None else (None, None)
         engine = None
@@ -56,10 +57,11 @@ def engine_for(doc: "Document") -> Tesseract | None:
                 doc.flags.append("ocr_specialist_unavailable")
         try:
             if engine is None:
-                if (capture is None or specialist is not None) and model is not None and _bundled_missing(model):
-                    # Source-built wheels can lack the bundled model. Retain the normal stock fallback.
-                    if "bundled_model_unavailable" not in doc.flags:
-                        doc.flags.append("bundled_model_unavailable")
+                if ((capture is None or specialist is not None) and model is not None
+                        and _released_model_missing(model, include_downloads=fallback)):
+                    flag = "routed_model_unavailable" if fallback else "bundled_model_unavailable"
+                    if flag not in doc.flags:
+                        doc.flags.append(flag)
                     model = None
                 engine = Tesseract.find(settings["cmd"], lang=settings["lang"], psm=settings["psm"], model=model)
             if route is not None:
@@ -70,9 +72,10 @@ def engine_for(doc: "Document") -> Tesseract | None:
                 engine.route = {"mode": "capture", "capture_type": capture, "model": settings["model"],
                                 "reason": settings["capture_reason"]}
             elif requested_model is not None:
-                engine.route = routes.manual_record(engine.lang)
+                domain_model = requested_model if model is None and fallback else engine.lang
+                engine.route = routes.manual_record(domain_model)
                 if model is None:
-                    engine.route["unavailable"] = requested_model
+                    engine.route.update(model=engine.lang, unavailable=requested_model)
             engine.photo_gray_otsu = settings.get("photo_gray_otsu", False)
             doc._ocr_engine = engine
             doc.components.update(engine.provenance())
@@ -81,12 +84,12 @@ def engine_for(doc: "Document") -> Tesseract | None:
     return doc._ocr_engine
 
 
-def _bundled_missing(model: str) -> bool:
-    """A released model meant to ship in the package (``ReleasedModel.bundled``) that resolves nowhere."""
+def _released_model_missing(model: str, *, include_downloads: bool) -> bool:
+    """Whether a model eligible for stock fallback resolves nowhere."""
     from heocr.models import MODELS, ModelError, resolve
 
     released = MODELS.get(model)
-    if released is None or not released.bundled:
+    if released is None or not (released.bundled or include_downloads):
         return False
     try:
         resolve(model)

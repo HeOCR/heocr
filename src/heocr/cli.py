@@ -214,12 +214,13 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 content = "Page images and local OCR drafts" if args.ocr_hybrid_old_print else "Page images"
             print(f"heocr: {content} may be sent to Anthropic when ANTHROPIC_API_KEY is set.", file=sys.stderr)
-        ocr_model = args.ocr_model
-        if ocr_model is None:
-            # Profiles and capture routes define their own reader. A custom language
-            # list selects stock data through the API's existing default.
-            uses_api_default = args.profile or args.ocr_router or args.ocr_capture_type or args.ocr_lang != DEFAULT_LANG
-            ocr_model = DEFAULT_MODEL if uses_api_default else DEFAULT_DOMAIN
+        implicit_measured_model = (
+            args.ocr_model is None and args.ocr_lang == DEFAULT_LANG
+            and not (args.profile or args.ocr_router or args.ocr_capture_type)
+        )
+        ocr_model = DEFAULT_DOMAIN if implicit_measured_model else (
+            DEFAULT_MODEL if args.ocr_model is None else args.ocr_model
+        )
         doc = extract(
             args.file,
             repairs=not args.no_repairs,
@@ -269,6 +270,7 @@ def main(argv: list[str] | None = None) -> int:
             tables=args.tables,
             tables_models=args.tables_models,
             join_tables=args.join_tables,
+            _ocr_fallback_to_stock=implicit_measured_model,
         )
     except ImportError as exc:
         if args.tables is None and args.profile not in FAST_MIX_TABLE_PROFILES:

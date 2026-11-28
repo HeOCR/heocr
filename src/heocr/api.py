@@ -118,6 +118,7 @@ def extract(
     tables: str | None = None,
     tables_models: str | os.PathLike[str] | TableFormerSession | None = None,
     join_tables: bool = False,
+    _ocr_fallback_to_stock: bool = False,
 ) -> Document:
     """Read a document and return its ``heocr_document.v1`` record.
 
@@ -465,6 +466,8 @@ def extract(
         doc.options["time_limit"] = time_limit
         doc._time_limit, doc._deadline = float(time_limit), started + time_limit
     doc._ocr_settings = {"cmd": tesseract, "lang": ocr_lang, "psm": ocr_psm, "model": ocr_model} if ocr else None
+    if ocr and _ocr_fallback_to_stock:
+        doc._ocr_settings["fallback_to_stock"] = True
     if ocr_layout is not None:
         doc._ocr_settings["layout"] = ocr_layout
         doc.options["ocr"]["layout"] = ocr_layout

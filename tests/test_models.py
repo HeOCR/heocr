@@ -72,6 +72,26 @@ class ModelRouteTest(unittest.TestCase):
         self.assertEqual(doc.unread[0].reason, "ocr_route_unavailable")
         self.assertIn("run: heocr --download-model heocr_r8b", doc.unread[0].detail)
 
+    def test_cli_missing_default_model_falls_back_to_stock(self) -> None:
+        import contextlib
+        from io import StringIO
+
+        from heocr.cli import main
+
+        source = Path(self.tmp.name) / "scan.pdf"
+        source.write_bytes(SCAN)
+        output = source.with_suffix(".json")
+        err = StringIO()
+        with mock.patch("heocr.cli.extract", side_effect=lambda src, **opts: heocr.extract(src, **(opts | {"tesseract": FAKE}))), contextlib.redirect_stderr(err):
+            self.assertEqual(main([str(source), "-o", str(output), "--quiet"]), 0)
+        result = json.loads(output.read_text(encoding="utf-8"))
+        expected = {"mode": "fixed", "domain": "modern-documents", "model": "heb",
+                    "reason": "manual_override", "unavailable": "heocr_modern_measured"}
+        self.assertEqual(result["options"]["ocr"]["model_route"], expected)
+        self.assertEqual(result["blocks"][0]["ocr"]["model_route"], expected)
+        self.assertIn("routed_model_unavailable", result["flags"])
+        self.assertIn("heocr_modern_measured is not installed", err.getvalue())
+
     def test_released_file_must_match_its_pin(self) -> None:
         self.cache.mkdir()
         (self.cache / "heocr_r8b.traineddata").write_bytes(b"not the released bytes")

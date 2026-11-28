@@ -177,7 +177,10 @@ def finish(doc) -> None:
         doc.options["ocr"]["model_route"] = route
     elif model in ROUTES.values() and model is not None:
         route = manual_record(model)
-        if doc._ocr_error and doc._ocr_engine is None:
+        if "routed_model_unavailable" in doc.flags:
+            engine = doc._ocr_engine
+            route.update(model=engine.lang if engine is not None else None, unavailable=model)
+        elif doc._ocr_error and doc._ocr_engine is None:
             route.update(model=None, unavailable=model)
         doc.options["ocr"]["model_route"] = route
 
