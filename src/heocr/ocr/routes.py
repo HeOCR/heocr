@@ -9,6 +9,8 @@ from io import BytesIO
 from heocr.contract import time_up
 
 DEFAULT_DOMAIN = "modern-documents"
+SCAN_FALLBACK_DOMAIN = "modern-literature"
+SCAN_DOMAINS = (SCAN_FALLBACK_DOMAIN, "old-print")
 ROUTES: dict[str, str | None] = {
     DEFAULT_DOMAIN: "heocr_modern_measured",
     "old-print": "heocr_phist_measured",
@@ -160,7 +162,7 @@ def finish(doc) -> None:
     if model == "auto":
         if pending(doc):
             reason = "probe_incomplete" if doc._route["crops"] else "probe_no_lines"
-            doc._route = _decision(DEFAULT_DOMAIN, reason)
+            doc._route = _decision(SCAN_FALLBACK_DOMAIN, reason)
         _, route = current(doc)
         previous = doc.options["ocr"].get("model_route", {})
         if previous.get("domain") == route["domain"]:
@@ -220,7 +222,7 @@ def _reread(doc, model, crops):
 def _decide(doc) -> None:
     crops = doc._route["crops"]
     if not crops:
-        doc._route = _decision(DEFAULT_DOMAIN, "probe_no_lines")
+        doc._route = _decision(SCAN_FALLBACK_DOMAIN, "probe_no_lines")
         return
     evidence = {}
     unavailable = []
@@ -235,7 +237,7 @@ def _decide(doc) -> None:
             return
 
     scores = {DEFAULT_DOMAIN: _score([text for _, _, text, _ in crops], [c for _, _, _, cs in crops for c in cs])}
-    for domain in ("old-print", "modern-literature"):
+    for domain in SCAN_DOMAINS:
         model = model_for(domain)
         if model == model_for(DEFAULT_DOMAIN):
             continue
@@ -246,8 +248,14 @@ def _decide(doc) -> None:
             scores[domain] = _score(*sample)
     if unavailable:
         evidence["probe_unavailable"] = unavailable
-    best = max(scores, key=scores.get)
-    if best != DEFAULT_DOMAIN and round(scores[best] - scores[DEFAULT_DOMAIN], 4) >= PROBE_MARGIN:
-        doc._route = _decision(best, "probe", scores=scores, **evidence)
+    ranked = [domain for domain in SCAN_DOMAINS if domain in scores]
+    if not ranked:
+        doc._route = _decision(SCAN_FALLBACK_DOMAIN, "probe_no_comparable_lines", scores=scores, **evidence)
+        return
+    best_scan = max(ranked, key=scores.get)
+    margin = round(scores[DEFAULT_DOMAIN] - scores[best_scan], 4)
+    if len(ranked) == len(SCAN_DOMAINS) and margin >= PROBE_MARGIN:
+        doc._route = _decision(DEFAULT_DOMAIN, "probe", scores=scores, **evidence)
     else:
-        doc._route = _decision(DEFAULT_DOMAIN, "probe_unsure", scores=scores, **evidence)
+        reason = "probe" if margin <= -PROBE_MARGIN else "scan_fallback"
+        doc._route = _decision(best_scan, reason, scores=scores, **evidence)

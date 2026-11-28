@@ -783,19 +783,31 @@ class AutoRouteTest(unittest.TestCase):
         route = self.route(doc)
         self.assertIn("routed_model_unavailable", doc.flags)
         self.assertEqual(route["model"], "heb")
-        self.assertEqual(route["unavailable"], "heocr_modern_measured")
+        self.assertEqual(route["unavailable"], "heocr_literature")
 
-    def test_a_close_call_keeps_the_modern_documents_model_and_records_the_decision(self) -> None:
+    def test_close_scan_routes_to_the_better_print_model(self) -> None:
         pins = self.measured_models()
-        with mock.patch.dict(models.MODELS, pins), mock.patch.dict(os.environ, self.line_reads(old="82")):
+        cases = (("82", "79", "old-print"), ("78", "79", "modern-literature"),
+                 ("79", "79", "modern-literature"))
+        for old, literature, domain in cases:
+            with self.subTest(domain=domain, old=old, literature=literature):
+                env = self.line_reads(old=old, literature=literature)
+                with mock.patch.dict(models.MODELS, pins), mock.patch.dict(os.environ, env):
+                    self.log.unlink(missing_ok=True)
+                    doc = heocr.extract(SCAN, tesseract=FAKE, ocr_model="auto", check_numbers=False)
+                route = self.route(doc)
+                self.assertEqual((route["domain"], route["reason"]), (domain, "scan_fallback"))
+                self.assertIn((routes.model_for(domain), "3"), self.recognition_langs())
+
+    def test_scan_with_clear_modern_evidence_keeps_the_document_model(self) -> None:
+        pins = self.measured_models()
+        with mock.patch.dict(models.MODELS, pins), mock.patch.dict(os.environ, self.line_reads(old="60", literature="70")):
             doc = heocr.extract(SCAN, tesseract=FAKE, ocr_model="auto", check_numbers=False)
         route = self.route(doc)
-        self.assertEqual((route["domain"], route["reason"], route["model"]),
-                         (routes.DEFAULT_DOMAIN, "probe_unsure", "heocr_modern_measured"))
-        self.assertNotIn(("heocr_phist_measured", "3"), self.recognition_langs())
+        self.assertEqual((route["domain"], route["reason"]), (routes.DEFAULT_DOMAIN, "probe"))
         self.assertEqual(self.recognition_langs().count(("heocr_modern_measured", "3")), 1)
 
-    def test_an_empty_probe_cannot_beat_a_low_confidence_reading(self) -> None:
+    def test_empty_print_probes_use_the_scan_default_without_scores(self) -> None:
         from tests.synth.fake_tesseract import NOTHING
 
         pins = self.measured_models()
@@ -804,7 +816,8 @@ class AutoRouteTest(unittest.TestCase):
         with mock.patch.dict(models.MODELS, pins), mock.patch.dict(os.environ, env):
             doc = heocr.extract(SCAN, tesseract=FAKE, ocr_model="auto", check_numbers=False)
         route = self.route(doc)
-        self.assertEqual((route["domain"], set(route["scores"])), (routes.DEFAULT_DOMAIN, {routes.DEFAULT_DOMAIN}))
+        self.assertEqual((route["domain"], route["reason"]), ("modern-literature", "probe_no_comparable_lines"))
+        self.assertEqual(set(route["scores"]), {routes.DEFAULT_DOMAIN})
 
     def test_born_digital_pdf_is_modern_even_on_forced_ocr(self) -> None:
         pins = self.measured_models()

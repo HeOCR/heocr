@@ -117,12 +117,13 @@ Each pinned release includes its own licence and attribution notices.
 | `modern-literature` | [HeOCR Literature MEASURED v1.0](https://huggingface.co/HeOCR/heocr-literature-measured/tree/v1.0) |
 | `pointed` | [HeOCR Pointed MEASURED v1.0](https://huggingface.co/HeOCR/heocr-pointed-measured/tree/v1.0) |
 
-The modern documents model handles born-digital context and inconclusive probes.
-Native text layers still supply their own text. For a raster document, Automatic
-samples up to four Hebrew lines from at most three OCR pages. The pointed model
-reads those lines first to check for sustained niqqud. Otherwise old print and
-modern literature have to improve on the modern documents model by the probe's
-confidence and spelling margin. The deciding page is reread if the choice changes.
+The modern documents model handles born-digital inputs. Native text layers still
+supply their own text. For a raster document, Automatic samples up to four Hebrew
+lines from at most three OCR pages. Sustained niqqud selects the pointed model.
+Otherwise the modern documents model needs a clear confidence and spelling lead
+over both print models. When it lacks that lead, the better-scoring print model
+wins. Ties and scans without enough comparable text use modern literature. The
+deciding page is reread if the choice changes.
 Any earlier reads keep their own model and reason in the block record.
 
 The final decision appears in `options.ocr.model_route`, with the effective model on
