@@ -34,11 +34,30 @@ class ReleasedModel:
     licence: str
     domain: str = "unassigned"  # the print it is meant for (heocr.ocr.routes); set from evaluation's default-model study
     bundled: bool = False  # shipped inside the wheel (heocr/models_data/), so it needs no download
+    hf_revision: str | None = None  # immutable Hugging Face release revision, when pinned
+
+
+def _measured(name: str, domain: str, repo: str, revision: str, filename: str, sha256: str, doi: str) -> ReleasedModel:
+    return ReleasedModel(name=name, sha256=sha256, size=5_678_607,
+                         url=f"https://huggingface.co/HeOCR/{repo}/resolve/{revision}/{filename}.traineddata",
+                         doi=f"10.5281/zenodo.{doi}", licence="Apache-2.0", domain=domain, hf_revision=revision)
 
 
 MODELS: dict[str, ReleasedModel] = {
     model.name: model
     for model in (
+        _measured("heocr_modern_measured", "modern-documents", "heocr-modern-measured",
+                  "4641f621ca4a212c5acf1d007f72b716bc2ca10f", "modern_measured",
+                  "17b957f3998d334efda3208bdd49e334e7c4d4da760291e73fec7b013d5ca680", "24615080"),
+        _measured("heocr_phist_measured", "old-print", "heocr-p-hist-measured",
+                  "43999beffe4e4cd88ee80317f237194ce782123b", "phist_v2",
+                  "d30f49a830390e90177240b55515c3ba4cd2646250dc34799bc2b4963f3fddd8", "24581274"),
+        _measured("heocr_literature", "modern-literature", "heocr-literature-measured",
+                  "93cf3723b25ba9ca91a67d90d25add7dcc3b3954", "heocr_literature",
+                  "98e460d2b7de924371d94dccd16e6b6803537b31892e3830979c97ddb7d58c50", "24620176"),
+        _measured("heocr_pointed", "pointed", "heocr-pointed-measured",
+                  "b95796498e6049fdda45af1faf6afba455524019", "heocr_pointed",
+                  "55440680250a183c875211ae18d5b502cccfe761ef3fbd9121a1fda236418bdb", "24620184"),
         ReleasedModel(
             name="heocr_r8b",
             sha256="8cb22dbeb195c3c0ffbe9c66cf956d8c2052d3b1c4a872234a85c975c4526117",

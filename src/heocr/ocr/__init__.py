@@ -33,6 +33,8 @@ def engine_for(doc: "Document") -> Tesseract | None:
                 doc.flags.append("routed_model_unavailable")
             route = {**route, "unavailable": model}
             engine = engine_for_model(doc, None)
+        route["model"] = engine.lang if engine is not None else None
+        doc.options["ocr"]["model_route"] = route
         if engine is not None:
             engine.route = route
         return engine
@@ -68,7 +70,7 @@ def engine_for(doc: "Document") -> Tesseract | None:
                 engine.route = {"mode": "capture", "capture_type": capture, "model": settings["model"],
                                 "reason": settings["capture_reason"]}
             elif requested_model is not None:
-                engine.route = {"mode": "fixed", "model": engine.lang}
+                engine.route = routes.manual_record(engine.lang)
                 if model is None:
                     engine.route["unavailable"] = requested_model
             engine.photo_gray_otsu = settings.get("photo_gray_otsu", False)

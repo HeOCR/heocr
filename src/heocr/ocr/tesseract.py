@@ -264,6 +264,8 @@ class Tesseract:
             if self.released.doi is not None:
                 out[f"tesseract:{self.released.name}.doi"] = self.released.doi
             out[f"tesseract:{self.released.name}.licence"] = self.released.licence
+            if self.released.hf_revision is not None:
+                out[f"tesseract:{self.released.name}.hf_revision"] = self.released.hf_revision
         return out
 
     def recognize(self, image, dpi: int = RENDER_DPI, psm: int | None = None) -> OcrResult:

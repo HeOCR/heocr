@@ -43,7 +43,7 @@ PATHS = [
     ("_take_half_reading", "reader.py", "tests.test_ocr_tables.OcrTableTest.test_a_number_cell_takes_its_half_resolution_reading_on_its_own_evidence", True),
     ("_second_number_reading", "reader.py", "tests.test_ocr_tables.OcrTableTest.test_a_cell_whose_two_readings_differ_and_neither_is_confident_is_unconfirmed", True),
     ("read_region", "reader.py", "tests.test_ocr.OcrRouteTest.test_a_letterhead_on_every_page_is_read_once_and_kept_on_every_page", True),
-    ("_decide", "routes.py", "tests.test_models.AutoRouteTest.test_the_probe_switches_to_a_clearly_better_model", True),
+    ("_decide", "routes.py", "tests.test_models.AutoRouteTest.test_confidence_routes_to_old_print_or_literature", True),
     ("image_blocks", "reader.py", "tests.test_docx_images.DocxImageTest.test_embedded_image_is_read_by_ocr_in_place", False),
     ("_digit_agreement", "reader.py", "tests.test_ocr.NumbersAndCodesLayerTest.test_a_layer_whose_digits_agree_is_kept", True),
     ("_layer_digits", "reader.py", "tests.test_ocr.NumbersAndCodesLayerTest.test_a_layer_of_bare_numbers_is_checked_by_its_digits_alone", True),

@@ -1155,6 +1155,8 @@ def _read_page(doc: Document, index: int, page, eth_fonts: frozenset[str] = froz
     if shifted_chars:
         signals["cp1255_shifted_chars"] = shifted_chars
     page_class, flags = classify(signals)
+    if page_class in ("T1", "T2", "T3", "T6") and stats.text_objects and not text.invisible and stats.image_coverage < PAGE_IMAGE:
+        routes.born_digital(doc)
     if shifted_chars:
         # The layer was a cp1255-shifted font (a T3 layer by its state), fully restored: read as T1.
         flags.append("font_cp1255_shifted")
@@ -2455,9 +2457,11 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
             # The current engine can still read isolated cells after a full-page failure.
             pass
     try:
-        if probe is not None and routes.observe(doc, image, probe, dpi, last_page=last_page):
+        if probe is not None:
+            switched = routes.observe(doc, image, probe, dpi, last_page=last_page)
             engine = engine_for(doc)
-            probe = None
+            if switched:
+                probe = None
         if rectified:
             numbers = number_engine_for(doc) if doc.options.get("check_numbers", "suspect") else None
             accepted, blocks, chars = [], [], 0
@@ -2517,9 +2521,11 @@ def _ocr_page(doc: Document, index: int, page, width, height, page_class, signal
                     break
             if result is None:
                 result = engine.recognize(page_image, dpi=dpi)
-        if not probed and routes.pending(doc) and routes.observe(doc, page_image, result, dpi, last_page=last_page):
+        if not probed and routes.pending(doc):
+            switched = routes.observe(doc, page_image, result, dpi, last_page=last_page)
             engine = engine_for(doc)
-            result = engine.recognize(page_image, dpi=dpi)
+            if switched:
+                result = engine.recognize(page_image, dpi=dpi)
     except OcrUnavailable as exc:
         doc.unread.append(Unread(scope="page", reason="ocr_failed", page=index, detail=str(exc)))
         flags = flags + ["ocr_failed"]

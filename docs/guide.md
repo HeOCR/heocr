@@ -87,6 +87,7 @@ where it needs to read pixels. Add a route when the input calls for one.
 | Document or goal | Flag or setup | What to expect |
 | --- | --- | --- |
 | Readable PDF, office file or routine scan | No route flags | The default chooses the text layer, format reader or installed local OCR. |
+| Unknown printed Hebrew domain | `--ocr-model auto` | Selects from the four measured readers using a short local probe. [Automatic routing](#automatic-routing-for-the-app) |
 | Angled standalone phone photo of printed Hebrew | `--profile phone-specialist` | Adds layout and guarded perspective correction. Declare `--ocr-capture-type phone` if automatic detection misses the photo. Requires local modern_v1. [Phone specialist profile](#phone-specialist-profile) |
 | Oblique phone photo of a ruled form or table | `--ocr-phone-tables --ocr-capture-type phone` | Recovers closed grids on the photographed paper plane. [Phone form and table grids](#phone-form-and-table-grids) |
 | Known scanner or issuer-render capture | `--ocr-router v2 --ocr-capture-type scanner` or `--ocr-router v2 --ocr-capture-type issuer-render` | Uses pinned Rivok Full where OCR is needed. [Capture router v2](#capture-router-v2) |
@@ -95,6 +96,46 @@ where it needs to read pixels. Add a route when the input calls for one.
 | Scanned book in historical Hebrew | `--ocr-router v2 --ocr-old-print-model PATH` | Tries the pinned local P-hist v2 on OCR pages with corroborating historical evidence. [Historical print](#historical-print-with-router-v2) |
 | Page or line with known print category | `--ocr-router specialist --ocr-category pointed` | Selects a local reader for the category and capture. [Specialist routing](#specialist-routing) |
 | Experimental hosted OCR for an approved document | Start with `--ocr-hybrid haiku --ocr-hybrid-dry-run` | Local cost estimate. The hybrid route is parked for launch. [Haiku hybrid OCR](#haiku-hybrid-ocr) |
+
+### Automatic routing for the app
+
+Use `heocr file.pdf --ocr-model auto` or `heocr.extract("file.pdf", ocr_model="auto")`
+for the app's **Automatic** selection. Install the four local models once:
+
+```sh
+heocr --download-model auto
+```
+
+The download is about 23 MB and checks each model's SHA-256 and size before saving
+it to the model cache. Extraction runs offline. The models use Apache-2.0.
+Each pinned release includes its own licence and attribution notices.
+
+| Manual `--ocr-model` value | Release |
+| --- | --- |
+| `modern-documents` | [HeOCR Modern MEASURED v1.0](https://huggingface.co/HeOCR/heocr-modern-measured/tree/v1.0) |
+| `old-print` | [HeOCR P-hist MEASURED v1.1](https://huggingface.co/HeOCR/heocr-p-hist-measured/tree/v1.1) |
+| `modern-literature` | [HeOCR Literature MEASURED v1.0](https://huggingface.co/HeOCR/heocr-literature-measured/tree/v1.0) |
+| `pointed` | [HeOCR Pointed MEASURED v1.0](https://huggingface.co/HeOCR/heocr-pointed-measured/tree/v1.0) |
+
+The modern documents model handles born-digital context and inconclusive probes.
+Native text layers still supply their own text. For a raster document, Automatic
+samples up to four Hebrew lines from at most three OCR pages. The pointed model
+reads those lines first to check for sustained niqqud. Otherwise old print and
+modern literature have to improve on the modern documents model by the probe's
+confidence and spelling margin. The deciding page is reread if the choice changes.
+Any earlier reads keep their own model and reason in the block record.
+
+The final decision appears in `options.ocr.model_route`, with the effective model on
+OCR blocks in `ocr.model_route`. The producer records each loaded model's revision
+and SHA-256. If the fallback model is missing, Automatic can use installed
+Tesseract Hebrew and records `routed_model_unavailable`. Missing probe models also
+appear in the decision. Manual choices use the selected pinned model directly.
+
+Evaluation can run `python scripts/route_accuracy.py DEV.json --output DEV-results.json`
+from the repository with a local manifest of the form
+`{"split":"dev","rows":[{"id":"page-1","path":"pages/1.png","sha256":"<file sha256>","domain":"pointed"}]}`.
+The script verifies the assets and installed models, and reports a confusion
+matrix and routing decisions without saving recognized text. Keep the results local.
 
 ### Capture router v2
 
