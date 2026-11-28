@@ -93,6 +93,7 @@ def extract(
     photo_preprocess: str | None = None,
     ocr_phone_geometry: bool = False,
     ocr_phone_tables: bool = False,
+    ocr_phone_table_proposals: bool = False,
     ocr_phone_max_edge: int | None = None,
     profile: str | None = None,
     ocr_phone_latin_edges: bool = False,
@@ -167,6 +168,8 @@ def extract(
     The configured local OCR route handles pages where hosted reading is unavailable.
     ``ocr_phone_tables=True`` uses the photographed paper plane to recover closed ruled grids
     in standalone phone images before cell OCR. It is independent of the line reread.
+    ``ocr_phone_table_proposals=True`` lets learned table proposals (``tables="tableformer"``) run on
+    standalone phone images too; by default they are skipped there.
     ``ocr_phone_geometry=True`` enables perspective-corrected line OCR on phone images with
     supported page edges. Use a capture declaration or camera JPEG metadata.
     ``ocr_phone_max_edge`` optionally bounds the working raster's long edge in pixels for
@@ -301,7 +304,8 @@ def extract(
         hybrid = HybridReader(cap=parse_cap(ocr_hybrid_max_usd), old_print=ocr_hybrid_old_print, confidence=confidence)
     elif ocr_hybrid_old_print or ocr_hybrid_max_usd is not None or ocr_hybrid_confidence is not None:
         raise ValueError("hybrid options require ocr_hybrid='haiku'")
-    for name, enabled in (("ocr_phone_geometry", ocr_phone_geometry), ("ocr_phone_tables", ocr_phone_tables)):
+    for name, enabled in (("ocr_phone_geometry", ocr_phone_geometry), ("ocr_phone_tables", ocr_phone_tables),
+                          ("ocr_phone_table_proposals", ocr_phone_table_proposals)):
         if enabled and (not ocr or ocr_psm != 3 or ocr_lang != DEFAULT_LANG or crnn_model is not None):
             raise ValueError(f"{name} needs Hebrew Tesseract OCR with page mode 3")
     if ocr_phone_max_edge is not None and (
@@ -514,7 +518,8 @@ def extract(
         doc._ocr_settings["form_scan_marks"] = True
     doc._form_grid_recovery = ocr and form_grid_recovery
     doc._join_form_pages = whole_document
-    photo_options = photo_preprocess is not None or ocr_phone_geometry or ocr_phone_tables or ocr_phone_max_edge is not None
+    photo_options = (photo_preprocess is not None or ocr_phone_geometry or ocr_phone_tables or ocr_phone_table_proposals
+                     or ocr_phone_max_edge is not None)
     if photo_options and kind.format in IMAGE_FORMATS:
         from heocr.ocr.routes import PHOTO_CAPTURES, classify_capture
 
@@ -531,6 +536,9 @@ def extract(
             if ocr_phone_tables:
                 doc._ocr_settings["phone_tables"] = True
                 doc.options["ocr"]["phone_tables"] = True
+            if ocr_phone_table_proposals:
+                doc._ocr_settings["phone_table_proposals"] = True
+                doc.options["ocr"]["phone_table_proposals"] = True
             if ocr_phone_max_edge is not None:
                 doc._ocr_settings["phone_max_edge"] = ocr_phone_max_edge
                 doc.options["ocr"]["phone_max_edge"] = ocr_phone_max_edge

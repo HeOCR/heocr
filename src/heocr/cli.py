@@ -131,6 +131,8 @@ def _parser() -> argparse.ArgumentParser:
                         help="reread isolated lines on angled phone images with supported paper edges")
     parser.add_argument("--ocr-phone-tables", action="store_true",
                         help="recover ruled table and form grids on angled phone images")
+    parser.add_argument("--ocr-phone-table-proposals", action="store_true",
+                        help="run learned table proposals (--tables tableformer) on phone images too")
     parser.add_argument("--ocr-phone-max-edge", type=int, metavar="PX",
                         help="limit the OCR raster's long edge for standalone phone images")
     parser.add_argument("--photo-preprocess", choices=PHOTO_PREPROCESS_MODES,
@@ -234,6 +236,7 @@ def main(argv: list[str] | None = None) -> int:
             photo_preprocess=args.photo_preprocess,
             ocr_phone_geometry=args.ocr_phone_geometry,
             ocr_phone_tables=args.ocr_phone_tables,
+            ocr_phone_table_proposals=args.ocr_phone_table_proposals,
             ocr_phone_max_edge=args.ocr_phone_max_edge,
             profile=args.profile,
             ocr_phone_latin_edges=args.ocr_phone_latin_edges,
