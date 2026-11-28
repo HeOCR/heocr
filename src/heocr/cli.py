@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from heocr import __version__
-from heocr.api import PHOTO_PREPROCESS_MODES, extract
+from heocr.api import DEFAULT_MODEL, PHOTO_PREPROCESS_MODES, extract
 from heocr.contract import MAX_PAGES
 from heocr.handwriting import HandwritingConfig
 from heocr.ocr.phone_profile import PHONE_PROFILES
@@ -77,15 +77,17 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--tesseract", help="the tesseract program, when it is not on the PATH")
     parser.add_argument(
         "--ocr-model",
-        default="heocr_modern_v1",
-        help="the OCR model (the default falls back to stock Tesseract with the GitHub install); "
-        f"auto to route among the measured models; {', '.join(DOMAINS)} to select a measured model; "
-        "heb or stock for Tesseract's installed language data; or a local .traineddata path",
+        default=DEFAULT_MODEL,
+        metavar="MODEL",
+        help="OCR model. Use auto for the app's Automatic route across the four measured models. "
+        f"Select one explicitly with {', '.join(DOMAINS)}. "
+        "Use stock for Tesseract's installed language data or pass a local .traineddata path. "
+        f"With this option omitted the CLI uses {DEFAULT_MODEL}, with stock fallback if unavailable.",
     )
     parser.add_argument(
         "--download-model",
         metavar="NAME",
-        help="download a pinned model explicitly; use auto to prepare all four measured models",
+        help="install a SHA-256-verified model in the local cache. Use auto to install all four measured models once.",
     )
     parser.add_argument("--ocr-capture-type", choices=CAPTURE_MODELS,
                         help="opt into experimental OCR routing for a declared capture")

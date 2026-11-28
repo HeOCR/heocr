@@ -1,6 +1,6 @@
 """heocr: Hebrew text out of any document, through the best open pipeline for it."""
 
-__version__ = "0.3.0a2"
+__version__ = "0.3.0"
 
 from heocr.api import extract, extract_images  # noqa: E402
 from heocr.contract import SCHEMA_ID, ContractError, Document, validate  # noqa: E402

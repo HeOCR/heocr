@@ -4,20 +4,23 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 [HeOCR/heocr](https://github.com/HeOCR/heocr). The milestones (D1–D5) are planned in
 [`planning/milestones/`](planning/milestones/).
 
-## Unreleased → 0.3.0
+## 0.3.0
 
 ### Changed
 
-- **Public releases are paused.** Install the development version from GitHub. HeOCR will publish a package or model release only after it beats existing readers on at least one document type. The GitHub install has no bundled weights and falls back to stock Tesseract `heb`, flagged `bundled_model_unavailable`. Tag-triggered package publishing has been removed.
+- Source and wheel installs use local OCR weights. When the legacy default `heocr_modern_v1` is unavailable, the reader falls back to installed stock Tesseract `heb` and flags `bundled_model_unavailable`. Package publication is a separate, manually approved step.
 - **Model provenance records the final deposits** for the previously distributed bundled models. The weights and their SHA-256 hashes did not change. `heocr_modern_v1`'s notice is from the v4 deposit.
 
 ### Added
 
+- **Automatic OCR for the app.** The app's default calls `ocr_model="auto"`. It selects from four pinned measured routes for modern documents, old print, modern literature and pointed Hebrew. The same model setting accepts a manual domain selector. The document and OCR block records include the route decision.
+- **One-time model setup.** `heocr --download-model auto` installs all four measured weights in the local cache, checking the pinned release revisions, sizes and SHA-256 digests. Document extraction runs offline.
 - An optional local CPU CRNN model can read printed Hebrew lines on OCR pages using Tesseract’s line boxes.
 - `heocr regress` runs the frozen local engineering checks for a release candidate and writes a private report.
 
 ### Fixed
 
+- **Balance automatic OCR on scans.** Unpointed probes choose a clear score winner or the nearest calibrated domain profile. Born-digital inputs keep the modern documents route.
 - **Retry empty rectified table cells at native scale.** When a reduced crop reads blank, a confident native-scale reading can keep its text and let the existing grid validation accept the table.
 - **Bridge thin stroke dropouts in closed table cells.** Scanned PDF cells can use a repaired OCR crop when repeated gaps cut across printed strokes. The table grid and page geometry are preserved.
 - **Bridge thin dropouts in scanned PDF text.** Repeated gaps across printed strokes can be repaired in the OCR working raster when the reading corroborates a prose column. A shallow turn is applied when it exposes those gaps and the repaired reading confirms the column. Page geometry is preserved.
