@@ -783,21 +783,28 @@ class AutoRouteTest(unittest.TestCase):
         route = self.route(doc)
         self.assertIn("routed_model_unavailable", doc.flags)
         self.assertEqual(route["model"], "heb")
-        self.assertEqual(route["unavailable"], "heocr_literature")
+        self.assertEqual(route["unavailable"], "heocr_modern_measured")
 
-    def test_close_scan_routes_to_the_better_print_model(self) -> None:
+    def test_close_scan_can_select_any_of_the_three_score_profiles(self) -> None:
         pins = self.measured_models()
-        cases = (("82", "79", "old-print"), ("78", "79", "modern-literature"),
-                 ("79", "79", "modern-literature"))
-        for old, literature, domain in cases:
-            with self.subTest(domain=domain, old=old, literature=literature):
-                env = self.line_reads(old=old, literature=literature)
+        cases = (
+            ("93.51", "92.54", "92.97", "modern-documents"),
+            ("92.46", "91.97", "92.57", "modern-literature"),
+            ("92.74", "92.69", "93.38", "old-print"),
+        )
+        for confidence, old, literature, domain in cases:
+            with self.subTest(domain=domain):
+                env = self.line_reads(confidence=confidence, old=old, literature=literature)
                 with mock.patch.dict(models.MODELS, pins), mock.patch.dict(os.environ, env):
                     self.log.unlink(missing_ok=True)
                     doc = heocr.extract(SCAN, tesseract=FAKE, ocr_model="auto", check_numbers=False)
                 route = self.route(doc)
-                self.assertEqual((route["domain"], route["reason"]), (domain, "scan_fallback"))
+                self.assertEqual((route["domain"], route["reason"]), (domain, "probe_nearest"))
                 self.assertIn((routes.model_for(domain), "3"), self.recognition_langs())
+
+    def test_partial_probe_uses_the_best_available_score(self) -> None:
+        self.assertEqual(routes._choose_scan_domain({routes.DEFAULT_DOMAIN: 0.8, "old-print": 0.81}),
+                         ("old-print", "probe"))
 
     def test_scan_with_clear_modern_evidence_keeps_the_document_model(self) -> None:
         pins = self.measured_models()
@@ -807,7 +814,7 @@ class AutoRouteTest(unittest.TestCase):
         self.assertEqual((route["domain"], route["reason"]), (routes.DEFAULT_DOMAIN, "probe"))
         self.assertEqual(self.recognition_langs().count(("heocr_modern_measured", "3")), 1)
 
-    def test_empty_print_probes_use_the_scan_default_without_scores(self) -> None:
+    def test_empty_print_probes_leave_only_the_documents_score(self) -> None:
         from tests.synth.fake_tesseract import NOTHING
 
         pins = self.measured_models()
@@ -816,7 +823,7 @@ class AutoRouteTest(unittest.TestCase):
         with mock.patch.dict(models.MODELS, pins), mock.patch.dict(os.environ, env):
             doc = heocr.extract(SCAN, tesseract=FAKE, ocr_model="auto", check_numbers=False)
         route = self.route(doc)
-        self.assertEqual((route["domain"], route["reason"]), ("modern-literature", "probe_no_comparable_lines"))
+        self.assertEqual((route["domain"], route["reason"]), (routes.DEFAULT_DOMAIN, "probe"))
         self.assertEqual(set(route["scores"]), {routes.DEFAULT_DOMAIN})
 
     def test_born_digital_pdf_is_modern_even_on_forced_ocr(self) -> None:

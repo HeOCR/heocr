@@ -120,10 +120,10 @@ Each pinned release includes its own licence and attribution notices.
 The modern documents model handles born-digital inputs. Native text layers still
 supply their own text. For a raster document, Automatic samples up to four Hebrew
 lines from at most three OCR pages. Sustained niqqud selects the pointed model.
-Otherwise the modern documents model needs a clear confidence and spelling lead
-over both print models. When it lacks that lead, the better-scoring print model
-wins. Ties and scans without enough comparable text use modern literature. The
-deciding page is reread if the choice changes.
+Otherwise the highest confidence and spelling score wins if it leads clearly
+or some models have no comparable reading. For a close three-way probe, the
+router matches the score gaps and highest score to the nearest domain's
+calibrated profile. The deciding page is reread if the choice changes.
 Any earlier reads keep their own model and reason in the block record.
 
 The final decision appears in `options.ocr.model_route`, with the effective model on
