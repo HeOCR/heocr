@@ -10,9 +10,16 @@ heocr needs Python 3.11 or later and Git. Install the development version from G
 pip install git+https://github.com/HeOCR/heocr
 ```
 
-HeOCR has no current public package or model release. We will publish a release only after heocr beats existing readers on at least one document type.
+The CLI defaults to Modern MEASURED for Hebrew OCR. Install its pinned weights
+with `heocr --download-model heocr_modern_measured`. When the weights are
+unavailable, the CLI warns, uses installed stock Tesseract when available, and
+records `routed_model_unavailable`.
 
-The default OCR model is `heocr_modern_v1`. A plain GitHub build loads it from `HEOCR_MODELS` (or the user model cache) when the pinned file is present. Model-enabled wheels carry the default model in the package. If the model is unavailable, OCR falls back to installed stock `heb` and records `bundled_model_unavailable`. The CLI warns even with `-q`. Use `--ocr-model heb` or `ocr_model="heb"` to select stock explicitly.
+The Python API defaults to `heocr_modern_v1`. It loads the pinned file from
+`HEOCR_MODELS`, the user model cache, or a model-enabled wheel. If that model is
+unavailable, it falls back to installed stock `heb` and records
+`bundled_model_unavailable`. Use `--ocr-model heb` or `ocr_model="heb"` for
+explicit stock OCR.
 
 To build a candidate wheel from a clean checkout and local pinned model files:
 
@@ -87,7 +94,7 @@ where it needs to read pixels. Add a route when the input calls for one.
 | Document or goal | Flag or setup | What to expect |
 | --- | --- | --- |
 | Readable PDF, office file or routine scan | No route flags | The default chooses the text layer, format reader or installed local OCR. |
-| Unknown printed Hebrew domain | `--ocr-model auto` | Selects from the four measured readers using a short local probe. [Automatic routing](#automatic-routing-for-the-app) |
+| Unknown printed Hebrew domain | `--ocr-model auto` | Experimental opt-in. Selects from four measured readers using a short local probe. [Automatic routing](#automatic-routing-for-the-app) |
 | Angled standalone phone photo of printed Hebrew | `--profile phone-specialist` | Adds layout and guarded perspective correction. Declare `--ocr-capture-type phone` if automatic detection misses the photo. Requires local modern_v1. [Phone specialist profile](#phone-specialist-profile) |
 | Oblique phone photo of a ruled form or table | `--ocr-phone-tables --ocr-capture-type phone` | Recovers closed grids on the photographed paper plane. [Phone form and table grids](#phone-form-and-table-grids) |
 | Known scanner or issuer-render capture | `--ocr-router v2 --ocr-capture-type scanner` or `--ocr-router v2 --ocr-capture-type issuer-render` | Uses pinned Rivok Full where OCR is needed. [Capture router v2](#capture-router-v2) |
@@ -99,8 +106,8 @@ where it needs to read pixels. Add a route when the input calls for one.
 
 ### Automatic routing for the app
 
-Use `heocr file.pdf --ocr-model auto` or `heocr.extract("file.pdf", ocr_model="auto")`
-for the app's **Automatic** selection. Install the four local models once:
+Automatic routing is experimental and opt-in. Use `heocr file.pdf --ocr-model auto`
+or `heocr.extract("file.pdf", ocr_model="auto")`. Install the four local models once:
 
 ```sh
 heocr --download-model auto

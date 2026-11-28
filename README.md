@@ -17,7 +17,7 @@ The [measured OCR models](#automatic-ocr-routing) are available on Hugging Face 
 pip install git+https://github.com/HeOCR/heocr
 ```
 
-The default OCR model is `heocr_modern_v1`. Use a model-enabled wheel or place the pinned weights in the local model cache. The plain GitHub build falls back to installed stock `heb` when the model is unavailable. The CLI warns and records `bundled_model_unavailable`. See the [user guide](docs/guide.md#install) for the verified wheel build and Tesseract setup.
+The CLI defaults to [Modern MEASURED](#automatic-ocr-routing) for Hebrew OCR. Install the pinned weights with `heocr --download-model heocr_modern_measured`. An empty model cache triggers a warning and a fallback to installed stock Tesseract. See the [user guide](docs/guide.md#install) for setup.
 
 ```python
 import heocr
@@ -48,7 +48,7 @@ The CLI prints each `unread` entry on stderr (`-q` silences them). It exits with
 
 ## Automatic OCR routing
 
-The app uses `ocr_model="auto"` for its default **Automatic** choice. Install the
+Automatic routing is experimental. Opt in with `--ocr-model auto`. Install the
 four measured models once, then use Automatic or a manual selector:
 
 ```sh

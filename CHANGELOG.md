@@ -8,12 +8,13 @@ All notable changes to `heocr`. Numbers in brackets are pull requests in
 
 ### Changed
 
+- The CLI defaults to the fixed Modern MEASURED model for Hebrew OCR. Set it up with `heocr --download-model heocr_modern_measured`.
 - Source and wheel installs use local OCR weights. When the legacy default `heocr_modern_v1` is unavailable, the reader falls back to installed stock Tesseract `heb` and flags `bundled_model_unavailable`. Package publication is a separate, manually approved step.
 - **Model provenance records the final deposits** for the previously distributed bundled models. The weights and their SHA-256 hashes did not change. `heocr_modern_v1`'s notice is from the v4 deposit.
 
 ### Added
 
-- **Automatic OCR for the app.** The app's default calls `ocr_model="auto"`. It selects from four pinned measured routes for modern documents, old print, modern literature and pointed Hebrew. The same model setting accepts a manual domain selector. The document and OCR block records include the route decision.
+- **Experimental Automatic OCR.** Opt in with `--ocr-model auto` or `ocr_model="auto"`. It selects from four pinned measured routes for modern documents, old print, modern literature and pointed Hebrew. The same model setting accepts a manual domain selector. The document and OCR block records include the route decision.
 - **One-time model setup.** `heocr --download-model auto` installs all four measured weights in the local cache, checking the pinned release revisions, sizes and SHA-256 digests. Document extraction runs offline.
 - An optional local CPU CRNN model can read printed Hebrew lines on OCR pages using Tesseract’s line boxes.
 - `heocr regress` runs the frozen local engineering checks for a release candidate and writes a private report.

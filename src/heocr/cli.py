@@ -12,8 +12,11 @@ from heocr.api import DEFAULT_MODEL, PHOTO_PREPROCESS_MODES, extract
 from heocr.contract import MAX_PAGES
 from heocr.handwriting import HandwritingConfig
 from heocr.ocr.phone_profile import PHONE_PROFILES
-from heocr.ocr.routes import CAPTURE_MODELS, DOMAINS, FAST_MIX_PROFILES, FAST_MIX_TABLE_PROFILES, candidates
+from heocr.ocr.routes import (
+    CAPTURE_MODELS, DEFAULT_DOMAIN, DOMAINS, FAST_MIX_PROFILES, FAST_MIX_TABLE_PROFILES, candidates,
+)
 from heocr.ocr.specialists import CATEGORIES
+from heocr.ocr.tesseract import DEFAULT_LANG
 
 _FORMATS = ("text", "markdown", "json", "docx", "xlsx", "csv", "forms")
 _BY_SUFFIX = {".md": "markdown", ".markdown": "markdown", ".json": "json", ".txt": "text", ".docx": "docx", ".xlsx": "xlsx", ".csv": "csv"}
@@ -77,12 +80,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--tesseract", help="the tesseract program, when it is not on the PATH")
     parser.add_argument(
         "--ocr-model",
-        default=DEFAULT_MODEL,
         metavar="MODEL",
-        help="OCR model. Use auto for the app's Automatic route across the four measured models. "
+        help="OCR model. Use auto for experimental Automatic routing across the four measured models. "
         f"Select one explicitly with {', '.join(DOMAINS)}. "
         "Use stock for Tesseract's installed language data or pass a local .traineddata path. "
-        f"With this option omitted the CLI uses {DEFAULT_MODEL}, with stock fallback if unavailable.",
+        f"The default for Hebrew OCR is {DEFAULT_DOMAIN} (Modern MEASURED), with stock fallback when unavailable.",
     )
     parser.add_argument(
         "--download-model",
@@ -212,6 +214,12 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 content = "Page images and local OCR drafts" if args.ocr_hybrid_old_print else "Page images"
             print(f"heocr: {content} may be sent to Anthropic when ANTHROPIC_API_KEY is set.", file=sys.stderr)
+        ocr_model = args.ocr_model
+        if ocr_model is None:
+            # Profiles and capture routes define their own reader. A custom language
+            # list selects stock data through the API's existing default.
+            uses_api_default = args.profile or args.ocr_router or args.ocr_capture_type or args.ocr_lang != DEFAULT_LANG
+            ocr_model = DEFAULT_MODEL if uses_api_default else DEFAULT_DOMAIN
         doc = extract(
             args.file,
             repairs=not args.no_repairs,
@@ -219,7 +227,7 @@ def main(argv: list[str] | None = None) -> int:
             ocr_lang=args.ocr_lang,
             ocr_psm=args.psm,
             tesseract=args.tesseract,
-            ocr_model=args.ocr_model,
+            ocr_model=ocr_model,
             ocr_router=args.ocr_router,
             ocr_category=args.ocr_category,
             ocr_specialist_config=args.ocr_specialist_config,
